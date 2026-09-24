@@ -10,6 +10,8 @@ from app.events.bus import events
 from app.persistence.database import get_session
 from app.persistence.models import AgentRecord, ProjectRecord
 from app.sandbox.filesystem import ProjectFilesystem
+from app.sandbox.managed_processes import processes
+from app.sandbox.ports import ports
 
 router = APIRouter()
 
@@ -103,6 +105,38 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
         return AgentRunReply(agent_id=agent.id, **result)
     except Exception as exc:
         raise HTTPException(502, f"Agent execution error: {exc}") from exc
+
+
+@router.get("/api/runtime/processes")
+def list_managed_processes():
+    return processes.list()
+
+
+@router.get("/api/runtime/processes/{process_id}/output")
+def read_managed_process_output(process_id: str):
+    try:
+        return {"output": processes.read_output(process_id)}
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/api/runtime/ports/{port}")
+def check_runtime_port(port: int):
+    return {"port": port, "available": ports.is_available(port)}
+
+
+@router.post("/api/runtime/ports/allocate")
+def allocate_runtime_port(start: int = 8000, end: int = 9000):
+    try:
+        return {"port": ports.allocate(start, end)}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/api/runtime/ports/{port}")
+def release_runtime_port(port: int):
+    ports.release(port)
+    return {"port": port, "released": True}
 
 
 @router.get("/api/events")
