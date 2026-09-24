@@ -23,6 +23,8 @@ jobs:
     defaults:
       run:
         working-directory: runtime
+    env:
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,4 +32,4 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: pytest -q
+      - run: python -m pytest -q
