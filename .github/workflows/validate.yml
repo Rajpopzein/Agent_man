@@ -5,26 +5,24 @@ on:
   pull_request:
 
 jobs:
-  frontend:
+  web:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - run: npm install
       - run: npm run build
 
-  backend:
+  runtime:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: runtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
