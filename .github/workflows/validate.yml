@@ -1,7 +1,7 @@
 name: validate
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
@@ -30,4 +30,4 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: python -c "from app.main import app; assert app.title == 'Agent Man Runtime'"
+      - run: pytest -q
