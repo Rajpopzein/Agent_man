@@ -1,12 +1,29 @@
 import { FormEvent, useEffect, useState } from "react";
-import { BrainCircuit, Home, Plus, TerminalSquare } from "lucide-react";
+import {
+  BrainCircuit,
+  Home,
+  Plug,
+  Plus,
+  TerminalSquare,
+} from "lucide-react";
 
-import { api, Agent, AgentRun, Project } from "../../services/api";
+import AIConnections from "../settings/AIConnections";
+import {
+  api,
+  Agent,
+  AgentRun,
+  AIConnection,
+  Project,
+} from "../../services/api";
+
+type View = "dashboard" | "connections";
 
 export default function Dashboard() {
+  const [view, setView] = useState<View>("dashboard");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [connections, setConnections] = useState<AIConnection[]>([]);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
   const [run, setRun] = useState<AgentRun | null>(null);
@@ -18,8 +35,15 @@ export default function Dashboard() {
     try {
       await api.health();
       setOnline(true);
-      const loadedProjects = await api.projects();
+      const loaded = await Promise.all([
+        api.projects(),
+        api.aiConnections(),
+      ]);
+      const loadedProjects = loaded[0];
+      const loadedConnections = loaded[1];
       setProjects(loadedProjects);
+      setConnections(loadedConnections);
+
       const currentProject = loadedProjects[0] || null;
       setProject(currentProject);
 
@@ -36,6 +60,10 @@ export default function Dashboard() {
     }
   }
 
+  async function reloadConnections() {
+    setConnections(await api.aiConnections());
+  }
+
   useEffect(() => {
     void load();
   }, []);
@@ -44,10 +72,16 @@ export default function Dashboard() {
     const name = window.prompt("Project name", "Agent Man Dev");
     const workspace =
       name &&
-      window.prompt("Windows workspace path", "D:\\AgentMan\\projects\\demo");
+      window.prompt(
+        "Windows workspace path",
+        "D:\\AgentMan\\projects\\demo",
+      );
 
     if (name && workspace) {
-      await api.createProject({ name, workspace_path: workspace });
+      await api.createProject({
+        name,
+        workspace_path: workspace,
+      });
       await load();
     }
   }
@@ -55,23 +89,55 @@ export default function Dashboard() {
   async function addAgent() {
     if (!project) return;
 
+    if (connections.length === 0) {
+      setView("connections");
+      window.alert("Create an AI connection before creating an agent.");
+      return;
+    }
+
+    const menu = connections
+      .map(
+        (connection, index) =>
+          String(index + 1) +
+          ". " +
+          connection.name +
+          " (" +
+          connection.provider_id +
+          ")",
+      )
+      .join("\n");
+
+    const selected = window.prompt(
+      "Choose AI connection by number:\n" + menu,
+      "1",
+    );
+    if (!selected) return;
+
+    const connection = connections[Number(selected) - 1];
+    if (!connection) {
+      window.alert("Invalid connection selection.");
+      return;
+    }
+
     const name = window.prompt("Agent name", "Developer");
     const role = name && window.prompt("Role", "Developer");
-    const model = role && window.prompt("Model", "qwen2.5-coder");
-    const endpoint =
-      model &&
-      window.prompt("LM Studio endpoint", "http://localhost:1234/v1");
+    const model =
+      role &&
+      window.prompt(
+        "Model",
+        connection.default_model || "",
+      );
 
-    if (name && role && model && endpoint) {
+    if (name && role && model) {
       await api.createAgent({
         project_id: project.id,
         name,
         role,
         llm: {
-          provider_id: "lmstudio",
-          connection_id: "local",
+          provider_id: connection.provider_id,
+          connection_id: connection.id,
           model,
-          endpoint,
+          endpoint: connection.endpoint,
           temperature: 0.2,
           cloud_fallback_allowed: false,
         },
@@ -91,7 +157,6 @@ export default function Dashboard() {
         agent.id,
         prompt,
         allowTerminal,
-        agent.llm.endpoint,
       );
       setRun(result);
     } catch (error) {
@@ -118,8 +183,17 @@ export default function Dashboard() {
         </div>
 
         <nav>
-          <button className="active">
+          <button
+            className={view === "dashboard" ? "active" : ""}
+            onClick={() => setView("dashboard")}
+          >
             <Home /> Dashboard
+          </button>
+          <button
+            className={view === "connections" ? "active" : ""}
+            onClick={() => setView("connections")}
+          >
+            <Plug /> AI Connections
           </button>
         </nav>
 
@@ -136,98 +210,139 @@ export default function Dashboard() {
       <main>
         <header>
           <div>
-            <h2>{project?.name || "Agent Man V1+"}</h2>
-            <small>{project?.workspace_path || "Create a project to begin"}</small>
+            <h2>
+              {view === "dashboard"
+                ? project?.name || "Agent Man"
+                : "Provider Configuration"}
+            </h2>
+            <small>
+              {view === "dashboard"
+                ? project?.workspace_path || "Create a project to begin"
+                : "Connections are reusable across agents."}
+            </small>
           </div>
           <div className={online ? "healthy" : "offline"}>
             ● {online ? "Runtime Online" : "Runtime Offline"}
           </div>
         </header>
 
-        <section className="metrics">
-          <Card label="Projects" value={projects.length} />
-          <Card label="Agents" value={agents.length} />
-          <Card label="Selected" value={agent?.name || "—"} />
-        </section>
+        {view === "connections" ? (
+          <AIConnections
+            connections={connections}
+            onChanged={reloadConnections}
+          />
+        ) : (
+          <>
+            <section className="metrics">
+              <Card label="Projects" value={projects.length} />
+              <Card label="Agents" value={agents.length} />
+              <Card label="AI Connections" value={connections.length} />
+              <Card label="Selected" value={agent?.name || "—"} />
+            </section>
 
-        <section className="v1grid">
-          <div className="panel">
-            <h3>Agents</h3>
-            {agents.length === 0 && (
-              <p className="muted">Create an agent to start working.</p>
-            )}
-            {agents.map((item) => (
-              <button
-                key={item.id}
-                className={
-                  "agentRow " + (agent?.id === item.id ? "selected" : "")
-                }
-                onClick={() => setAgent(item)}
-              >
-                <BrainCircuit />
-                <span>
-                  <b>{item.name}</b>
-                  <small>
-                    {item.role} · {item.llm.model}
-                  </small>
-                </span>
-                <em>{item.state}</em>
-              </button>
-            ))}
-          </div>
-
-          <div className="panel">
-            <h3>{agent ? "Run " + agent.name : "Agent Runner"}</h3>
-            <p className="muted">
-              File reads/writes are restricted to the project workspace.
-              Terminal execution requires explicit approval for each run.
-            </p>
-
-            <form onSubmit={execute}>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Example: inspect this project and create a README describing it"
-              />
-              <button disabled={!agent || !prompt.trim() || busy}>
-                {busy ? "Running..." : "Run"}
-              </button>
-            </form>
-
-            <label className="approval">
-              <input
-                type="checkbox"
-                checked={allowTerminal}
-                onChange={(event) => setAllowTerminal(event.target.checked)}
-              />
-              <TerminalSquare size={16} />
-              Allow terminal commands for this run
-            </label>
-
-            <div className="conversation">
-              {run?.text ||
-                "The agent can now inspect and modify files inside this project's sandbox."}
-            </div>
-
-            {run && (
-              <div className="trace">
-                <h4>Execution trace · {run.status}</h4>
-                {run.steps.length === 0 && (
-                  <p className="muted">No tool calls were made.</p>
+            <section className="v1grid">
+              <div className="panel">
+                <h3>Agents</h3>
+                {agents.length === 0 && (
+                  <p className="muted">
+                    Create an AI connection, then create an agent.
+                  </p>
                 )}
-                {run.steps.map((step, index) => (
-                  <div className="traceRow" key={index}>
-                    <b>{String(step.tool || "tool")}</b>
-                    <span>{String(step.status || "")}</span>
-                    <code>
-                      {JSON.stringify(step.arguments || {}, null, 2)}
-                    </code>
-                  </div>
-                ))}
+                {agents.map((item) => {
+                  const linked = connections.find(
+                    (connection) =>
+                      connection.id === item.llm.connection_id,
+                  );
+                  return (
+                    <button
+                      key={item.id}
+                      className={
+                        "agentRow " +
+                        (agent?.id === item.id ? "selected" : "")
+                      }
+                      onClick={() => setAgent(item)}
+                    >
+                      <BrainCircuit />
+                      <span>
+                        <b>{item.name}</b>
+                        <small>
+                          {item.role} ·{" "}
+                          {linked?.name || item.llm.provider_id} ·{" "}
+                          {item.llm.model}
+                        </small>
+                      </span>
+                      <em>{item.state}</em>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        </section>
+
+              <div className="panel">
+                <h3>{agent ? "Run " + agent.name : "Agent Runner"}</h3>
+                <p className="muted">
+                  The selected agent uses its linked AI connection.
+                  Credentials never enter the task prompt.
+                </p>
+
+                <form onSubmit={execute}>
+                  <textarea
+                    value={prompt}
+                    onChange={(event) =>
+                      setPrompt(event.target.value)
+                    }
+                    placeholder="Example: inspect this project and create a README describing it"
+                  />
+                  <button
+                    disabled={!agent || !prompt.trim() || busy}
+                  >
+                    {busy ? "Running..." : "Run"}
+                  </button>
+                </form>
+
+                <label className="approval">
+                  <input
+                    type="checkbox"
+                    checked={allowTerminal}
+                    onChange={(event) =>
+                      setAllowTerminal(event.target.checked)
+                    }
+                  />
+                  <TerminalSquare size={16} />
+                  Allow terminal commands for this run
+                </label>
+
+                <div className="conversation">
+                  {run?.text ||
+                    "The agent can inspect and modify files inside this project's sandbox."}
+                </div>
+
+                {run && (
+                  <div className="trace">
+                    <h4>Execution trace · {run.status}</h4>
+                    {run.steps.length === 0 && (
+                      <p className="muted">
+                        No tool calls were made.
+                      </p>
+                    )}
+                    {run.steps.map((step, index) => (
+                      <div className="traceRow" key={index}>
+                        <b>{String(step.tool || "tool")}</b>
+                        <span>{String(step.status || "")}</span>
+                        <code>
+                          {JSON.stringify(
+                            step.arguments || {},
+                            null,
+                            2,
+                          )}
+                        </code>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

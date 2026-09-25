@@ -27,6 +27,30 @@ export type AgentRun = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type AIProvider = {
+  id: string;
+  label: string;
+  default_endpoint: string | null;
+  requires_api_key: boolean;
+  local: boolean;
+};
+
+export type AIConnection = {
+  id: string;
+  name: string;
+  provider_id: string;
+  endpoint: string | null;
+  default_model: string | null;
+  has_secret: boolean;
+};
+
+export type AIConnectionTest = {
+  ok: boolean;
+  provider_id: string;
+  endpoint: string | null;
+  models: string[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -72,4 +96,41 @@ export const api = {
         endpoint: endpoint || undefined,
       }),
     }),
+  aiProviders: () => request<AIProvider[]>("/api/ai/providers"),
+  aiConnections: () => request<AIConnection[]>("/api/ai/connections"),
+  createAIConnection: (payload: {
+    name: string;
+    provider_id: string;
+    endpoint?: string | null;
+    default_model?: string | null;
+    api_key?: string | null;
+  }) =>
+    request<AIConnection>("/api/ai/connections", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAIConnection: (
+    connectionId: string,
+    payload: {
+      name?: string;
+      endpoint?: string | null;
+      default_model?: string | null;
+      api_key?: string | null;
+      clear_secret?: boolean;
+    },
+  ) =>
+    request<AIConnection>("/api/ai/connections/" + connectionId, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteAIConnection: (connectionId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/ai/connections/" + connectionId,
+      { method: "DELETE" },
+    ),
+  testAIConnection: (connectionId: string) =>
+    request<AIConnectionTest>(
+      "/api/ai/connections/" + connectionId + "/test",
+      { method: "POST" },
+    ),
 };

@@ -3,6 +3,46 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AIProviderView(BaseModel):
+    id: str
+    label: str
+    default_endpoint: str | None
+    requires_api_key: bool
+    local: bool
+
+
+class AIConnectionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider_id: str = Field(min_length=1, max_length=80)
+    endpoint: str | None = Field(default=None, max_length=512)
+    default_model: str | None = Field(default=None, max_length=160)
+    api_key: str | None = Field(default=None, max_length=4096)
+
+
+class AIConnectionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    endpoint: str | None = Field(default=None, max_length=512)
+    default_model: str | None = Field(default=None, max_length=160)
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_secret: bool = False
+
+
+class AIConnectionView(BaseModel):
+    id: str
+    name: str
+    provider_id: str
+    endpoint: str | None
+    default_model: str | None
+    has_secret: bool
+
+
+class AIConnectionTestView(BaseModel):
+    ok: bool
+    provider_id: str
+    endpoint: str | None
+    models: list[str]
+
+
 class LLMConfigInput(BaseModel):
     provider_id: str = Field(min_length=1, max_length=80)
     connection_id: str = Field(min_length=1, max_length=120)

@@ -25,6 +25,19 @@ class ProjectRecord(Base):
     agents: Mapped[list["AgentRecord"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
+class AIConnectionRecord(Base):
+    __tablename__ = "ai_connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    endpoint: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    default_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    has_secret: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class AgentRecord(Base):
     __tablename__ = "agents"
 

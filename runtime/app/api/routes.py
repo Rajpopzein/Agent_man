@@ -8,7 +8,8 @@ from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply,
 from app.core.config import settings
 from app.events.bus import events
 from app.persistence.database import get_session
-from app.persistence.models import AgentRecord, ProjectRecord
+from app.persistence.models import AIConnectionRecord, AgentRecord, ProjectRecord
+from app.providers.connections import bind_agent_connection
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.managed_processes import processes
 from app.sandbox.ports import ports
@@ -40,14 +41,17 @@ def create_agent(body: AgentCreate, db: Session = Depends(get_session)):
     if db.get(ProjectRecord, body.project_id) is None:
         raise HTTPException(404, "Project not found")
     llm = body.llm
+    connection = db.get(AIConnectionRecord, llm.connection_id)
+    provider_id = connection.provider_id if connection is not None else llm.provider_id
+    endpoint = connection.endpoint if connection is not None else llm.endpoint
     row = AgentRecord(
         project_id=body.project_id,
         name=body.name,
         role=body.role,
-        provider_id=llm.provider_id,
+        provider_id=provider_id,
         connection_id=llm.connection_id,
         model=llm.model,
-        endpoint=llm.endpoint,
+        endpoint=endpoint,
         context_limit=llm.context_limit,
         temperature_milli=round(llm.temperature * 1000),
         cloud_fallback_allowed=llm.cloud_fallback_allowed,
@@ -80,6 +84,7 @@ def chat(agent_id: str, body: AgentPrompt, db: Session = Depends(get_session)):
     agent = db.get(AgentRecord, agent_id)
     if agent is None:
         raise HTTPException(404, "Agent not found")
+    bind_agent_connection(agent, db)
     try:
         return AgentReply(agent_id=agent.id, text=run_agent(agent, body.prompt, body.endpoint))
     except Exception as exc:
@@ -94,6 +99,7 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
     project = db.get(ProjectRecord, agent.project_id)
     if project is None:
         raise HTTPException(404, "Project not found")
+    bind_agent_connection(agent, db)
     try:
         result = execute_agent(
             agent=agent,
