@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   BrainCircuit,
   Home,
+  Network,
   Plug,
   Plus,
   TerminalSquare,
 } from "lucide-react";
 
+import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import AIConnections from "../settings/AIConnections";
 import {
   api,
@@ -16,7 +18,7 @@ import {
   Project,
 } from "../../services/api";
 
-type View = "dashboard" | "connections";
+type View = "dashboard" | "multi-agent" | "connections";
 
 export default function Dashboard() {
   const [view, setView] = useState<View>("dashboard");
@@ -190,6 +192,12 @@ export default function Dashboard() {
             <Home /> Dashboard
           </button>
           <button
+            className={view === "multi-agent" ? "active" : ""}
+            onClick={() => setView("multi-agent")}
+          >
+            <Network /> Multi-Agent
+          </button>
+          <button
             className={view === "connections" ? "active" : ""}
             onClick={() => setView("connections")}
           >
@@ -213,12 +221,16 @@ export default function Dashboard() {
             <h2>
               {view === "dashboard"
                 ? project?.name || "Agent Man"
-                : "Provider Configuration"}
+                : view === "multi-agent"
+                  ? "Peer Agent Collaboration"
+                  : "Provider Configuration"}
             </h2>
             <small>
               {view === "dashboard"
                 ? project?.workspace_path || "Create a project to begin"
-                : "Connections are reusable across agents."}
+                : view === "multi-agent"
+                  ? "Shared project context with no permanent coordinator."
+                  : "Connections are reusable across agents."}
             </small>
           </div>
           <div className={online ? "healthy" : "offline"}>
@@ -231,6 +243,8 @@ export default function Dashboard() {
             connections={connections}
             onChanged={reloadConnections}
           />
+        ) : view === "multi-agent" ? (
+          <MultiAgentWorkspace project={project} agents={agents} />
         ) : (
           <>
             <section className="metrics">

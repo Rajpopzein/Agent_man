@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -100,3 +101,48 @@ class AgentRunReply(BaseModel):
     status: str
     text: str
     steps: list[dict[str, Any]]
+
+
+class MultiAgentTaskCreate(BaseModel):
+    project_id: str
+    title: str = Field(min_length=1, max_length=160)
+    prompt: str = Field(min_length=1, max_length=30_000)
+    agent_ids: list[str] = Field(min_length=2, max_length=8)
+    max_rounds: int = Field(default=3, ge=1, le=8)
+
+
+class MultiAgentRunRequest(BaseModel):
+    allow_terminal: bool = False
+
+
+class MultiAgentParticipantView(BaseModel):
+    agent_id: str
+    agent_name: str
+    role: str
+    position: int
+    status: str
+    last_round: int
+
+
+class MultiAgentMessageView(BaseModel):
+    id: str
+    agent_id: str | None
+    agent_name: str
+    kind: str
+    round_number: int
+    content: str
+    created_at: datetime
+
+
+class MultiAgentTaskView(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    prompt: str
+    status: str
+    max_rounds: int
+    current_round: int
+    created_at: datetime
+    completed_at: datetime | None
+    participants: list[MultiAgentParticipantView]
+    messages: list[MultiAgentMessageView]

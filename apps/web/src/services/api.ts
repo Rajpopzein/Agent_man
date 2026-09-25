@@ -51,6 +51,39 @@ export type AIConnectionTest = {
   models: string[];
 };
 
+export type MultiAgentParticipant = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  position: number;
+  status: string;
+  last_round: number;
+};
+
+export type MultiAgentMessage = {
+  id: string;
+  agent_id: string | null;
+  agent_name: string;
+  kind: string;
+  round_number: number;
+  content: string;
+  created_at: string;
+};
+
+export type MultiAgentTask = {
+  id: string;
+  project_id: string;
+  title: string;
+  prompt: string;
+  status: string;
+  max_rounds: number;
+  current_round: number;
+  created_at: string;
+  completed_at: string | null;
+  participants: MultiAgentParticipant[];
+  messages: MultiAgentMessage[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -133,4 +166,29 @@ export const api = {
       "/api/ai/connections/" + connectionId + "/test",
       { method: "POST" },
     ),
+  multiAgentTasks: (projectId: string) =>
+    request<MultiAgentTask[]>(
+      "/api/multi-agent/projects/" + projectId + "/tasks",
+    ),
+  createMultiAgentTask: (payload: {
+    project_id: string;
+    title: string;
+    prompt: string;
+    agent_ids: string[];
+    max_rounds: number;
+  }) =>
+    request<MultiAgentTask>("/api/multi-agent/tasks", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  runMultiAgentTask: (taskId: string, allowTerminal: boolean) =>
+    request<MultiAgentTask>(
+      "/api/multi-agent/tasks/" + taskId + "/run",
+      {
+        method: "POST",
+        body: JSON.stringify({ allow_terminal: allowTerminal }),
+      },
+    ),
+  multiAgentTask: (taskId: string) =>
+    request<MultiAgentTask>("/api/multi-agent/tasks/" + taskId),
 };
