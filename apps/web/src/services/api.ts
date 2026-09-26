@@ -317,6 +317,10 @@ export const api = {
       "/api/ai/connections/" + connectionId + "/test",
       { method: "POST" },
     ),
+  connectionModels: (connectionId: string) =>
+    request<{ models: string[] }>(
+      "/api/ai/connections/" + connectionId + "/models",
+    ),
   multiAgentTasks: (projectId: string) =>
     request<MultiAgentTask[]>(
       "/api/multi-agent/projects/" + projectId + "/tasks",

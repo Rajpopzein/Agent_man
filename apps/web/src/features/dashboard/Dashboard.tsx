@@ -18,6 +18,7 @@ import {
   Plus,
   Radio,
   Search,
+  Settings2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -36,6 +37,7 @@ import VoiceControl from "../audio/VoiceControl";
 import { useAgentVoice } from "../audio/useAgentVoice";
 import { useWakeWord } from "../audio/useWakeWord";
 import AIConnections from "../settings/AIConnections";
+import SettingsPage from "../settings/SettingsPage";
 import ToolsPage from "../tools/ToolsPage";
 import {
   api,
@@ -52,7 +54,8 @@ type View =
   | "orchestration"
   | "multi-agent"
   | "tools"
-  | "connections";
+  | "connections"
+  | "settings";
 
 type Notice = {
   title: string;
@@ -89,6 +92,11 @@ const VIEW_META: Record<
     eyebrow: "SYSTEM / PROVIDERS",
     description: "Configure local and cloud model connections.",
   },
+  settings: {
+    label: "Settings",
+    eyebrow: "SYSTEM / CONFIGURATION",
+    description: "Configure Agent Man executive behavior and runtime preferences.",
+  },
 };
 
 export default function Dashboard() {
@@ -119,13 +127,12 @@ export default function Dashboard() {
   const [agentRole, setAgentRole] = useState("Developer");
   const [agentConnectionId, setAgentConnectionId] = useState("");
   const [agentModel, setAgentModel] = useState("");
+  const [agentDetectedModels, setAgentDetectedModels] = useState<string[]>([]);
+  const [detectingAgentModels, setDetectingAgentModels] = useState(false);
 
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [mainAgentDialog, setMainAgentDialog] = useState(false);
-  const [mainConnectionId, setMainConnectionId] = useState("");
-  const [mainModel, setMainModel] = useState("");
 
   const voice = useAgentVoice();
   const wake = useWakeWord({
@@ -245,14 +252,50 @@ export default function Dashboard() {
     setAgentRole("Developer");
     setAgentConnectionId(connection.id);
     setAgentModel(connection.default_model || "");
+    setAgentDetectedModels([]);
     setAgentDialog(true);
   }
 
   function chooseAgentConnection(connectionId: string) {
     const connection = connections.find((item) => item.id === connectionId);
     setAgentConnectionId(connectionId);
-    if (connection?.default_model) {
-      setAgentModel(connection.default_model);
+    setAgentDetectedModels([]);
+    setAgentModel(connection?.default_model || "");
+  }
+
+  async function detectAgentModels() {
+    if (!agentConnectionId) return;
+    setDetectingAgentModels(true);
+    try {
+      const result = await api.connectionModels(agentConnectionId);
+      setAgentDetectedModels(result.models);
+      if (result.models.length > 0 && !result.models.includes(agentModel)) {
+        const connection = connections.find(
+          (item) => item.id === agentConnectionId,
+        );
+        const preferred =
+          connection?.default_model &&
+          result.models.includes(connection.default_model)
+            ? connection.default_model
+            : result.models[0];
+        setAgentModel(preferred);
+      }
+      if (result.models.length === 0) {
+        setNotice({
+          title: "No models detected",
+          message:
+            "The selected AI connection responded but did not return any discoverable models. You can still enter the model identifier manually.",
+        });
+      }
+    } catch (error) {
+      setAgentDetectedModels([]);
+      setNotice({
+        title: "Model detection failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setDetectingAgentModels(false);
     }
   }
 
@@ -313,16 +356,15 @@ export default function Dashboard() {
     if (!command || !project) return;
 
     if (!mainConfig) {
-      setView("dashboard");
+      setView("settings");
       setPrompt(command);
-      const connection = connections[0];
-      if (connection) {
-        setMainConnectionId(connection.id);
-        setMainModel(connection.default_model || "");
-      }
-      setMainAgentDialog(true);
+      setNotice({
+        title: "Executive model required",
+        message:
+          "Configure Agent Man under Settings. Model discovery is available there for the selected AI connection.",
+      });
       await voice.speakAsync(
-        "Configure my executive model first, then I can manage the worker agents for you.",
+        "Configure my executive model in Settings first.",
         true,
       );
       return;
@@ -365,53 +407,6 @@ export default function Dashboard() {
   async function execute(event: FormEvent) {
     event.preventDefault();
     await runDirective(prompt);
-  }
-
-  function openMainAgentDialog() {
-    const connection =
-      connections.find(
-        (item) => item.id === mainConfig?.connection_id,
-      ) || connections[0];
-
-    setMainConnectionId(connection?.id || "");
-    setMainModel(
-      mainConfig?.model ||
-        connection?.default_model ||
-        "",
-    );
-    setMainAgentDialog(true);
-  }
-
-  async function saveMainAgent(event: FormEvent) {
-    event.preventDefault();
-    if (!project || !mainConnectionId || !mainModel.trim()) return;
-    setBusy(true);
-    try {
-      const configured = await api.configureMainAgent(project.id, {
-        connection_id: mainConnectionId,
-        model: mainModel.trim(),
-        temperature: 0.2,
-      });
-      setMainConfig(configured);
-      setMainAgentDialog(false);
-      setNotice({
-        title: "Agent Man executive online",
-        message:
-          "Voice and text directives now go to Agent Man first. It can delegate to your worker agents and workflows.",
-      });
-      await voice.speakAsync(
-        "Executive core configured. I am now your primary agent.",
-        true,
-      );
-    } catch (error) {
-      setNotice({
-        title: "Executive configuration failed",
-        message: error instanceof Error ? error.message : String(error),
-        tone: "danger",
-      });
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function confirmDeleteAgent() {
@@ -498,6 +493,12 @@ export default function Dashboard() {
             label="Uplink"
             icon={<Plug />}
             onClick={() => setView("connections")}
+          />
+          <RailButton
+            active={view === "settings"}
+            label="Settings"
+            icon={<Settings2 />}
+            onClick={() => setView("settings")}
           />
         </nav>
 
@@ -608,6 +609,13 @@ export default function Dashboard() {
             connections={connections}
             onChanged={reloadConnections}
           />
+        ) : view === "settings" ? (
+          <SettingsPage
+            project={project}
+            connections={connections}
+            mainConfig={mainConfig}
+            onConfigured={setMainConfig}
+          />
         ) : view === "orchestration" ? (
           <OrchestrationPage project={project} agents={agents} />
         ) : view === "multi-agent" ? (
@@ -683,16 +691,10 @@ export default function Dashboard() {
                     </span>
                   </div>
 
-                  <button
-                    className="executiveConfigureButton"
-                    onClick={openMainAgentDialog}
-                    disabled={!project || connections.length === 0}
-                  >
-                    <Sparkles size={14} />
-                    {mainConfig
-                      ? "Configure Executive"
-                      : "Set Executive Model"}
-                  </button>
+                  <div className="executiveManagedNote">
+                    <Settings2 size={13} />
+                    Executive configuration is managed in Settings
+                  </div>
                 </div>
 
                 <div className="workerDivider">
@@ -1056,85 +1058,47 @@ export default function Dashboard() {
               ))}
             </select>
           </label>
-          <label>
-            Model
-            <input
-              value={agentModel}
-              onChange={(event) => setAgentModel(event.target.value)}
-              placeholder="Model identifier"
-            />
-          </label>
+          <div className="dialogModelDetect">
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={() => void detectAgentModels()}
+              disabled={!agentConnectionId || detectingAgentModels}
+            >
+              <Search size={14} />
+              {detectingAgentModels ? "Detecting..." : "Detect Models"}
+            </button>
+            <span>Query the selected connection for its available models.</span>
+          </div>
+
+          {agentDetectedModels.length > 0 ? (
+            <label>
+              Model
+              <select
+                value={agentModel}
+                onChange={(event) => setAgentModel(event.target.value)}
+              >
+                {agentDetectedModels.map((model) => (
+                  <option value={model} key={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label>
+              Model
+              <input
+                value={agentModel}
+                onChange={(event) => setAgentModel(event.target.value)}
+                placeholder="Detect models or enter a model identifier"
+              />
+            </label>
+          )}
           <p className="dialogHint">
             Tools and risk permissions can be changed later in Capability
             Matrix.
           </p>
-        </form>
-      </HudModal>
-
-      <HudModal
-        open={mainAgentDialog}
-        onClose={() => setMainAgentDialog(false)}
-        title="Configure Agent Man"
-        eyebrow="EXECUTIVE / PRIMARY AGENT"
-        footer={
-          <>
-            <button
-              className="secondaryButton"
-              onClick={() => setMainAgentDialog(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="primaryButton"
-              form="main-agent-config-form"
-              type="submit"
-              disabled={busy || !mainConnectionId || !mainModel.trim()}
-            >
-              <Sparkles size={14} />
-              Activate executive
-            </button>
-          </>
-        }
-      >
-        <form
-          id="main-agent-config-form"
-          className="hudDialogForm"
-          onSubmit={saveMainAgent}
-        >
-          <p className="dialogHint">
-            Agent Man is the primary conversational executive. It sees the
-            available workers and workflows, delegates the objective, reviews
-            their results, and returns one unified answer.
-          </p>
-          <label>
-            Executive AI connection
-            <select
-              value={mainConnectionId}
-              onChange={(event) => {
-                const id = event.target.value;
-                const connection = connections.find((item) => item.id === id);
-                setMainConnectionId(id);
-                if (connection?.default_model) {
-                  setMainModel(connection.default_model);
-                }
-              }}
-            >
-              <option value="">Select connection</option>
-              {connections.map((connection) => (
-                <option value={connection.id} key={connection.id}>
-                  {connection.name} · {connection.provider_id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Executive model
-            <input
-              value={mainModel}
-              onChange={(event) => setMainModel(event.target.value)}
-              placeholder="Model identifier"
-            />
-          </label>
         </form>
       </HudModal>
 
