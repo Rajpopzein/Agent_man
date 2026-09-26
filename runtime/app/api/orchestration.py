@@ -197,6 +197,7 @@ def resume_run(
         allow_terminal=body.allow_terminal,
         allow_delete=body.allow_delete,
         allow_network=body.allow_network,
+        allow_hardware=body.allow_hardware,
     )
     db.refresh(run)
     return run_view(run, db)

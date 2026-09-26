@@ -5,6 +5,30 @@ from app.tools.service import allowed_tool_names
 CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "internet": ("http_get",),
     "web": ("http_get",),
+    "serial": (
+        "list_serial_ports",
+        "serial_open",
+        "serial_list_sessions",
+        "serial_read",
+        "serial_write",
+        "serial_close",
+    ),
+    "hardware": (
+        "list_serial_ports",
+        "serial_open",
+        "serial_list_sessions",
+        "serial_read",
+        "serial_write",
+        "serial_close",
+    ),
+    "com": (
+        "list_serial_ports",
+        "serial_open",
+        "serial_list_sessions",
+        "serial_read",
+        "serial_write",
+        "serial_close",
+    ),
 }
 
 
@@ -33,6 +57,19 @@ def detect_missing_capability(text: str) -> str | None:
         and any(term in lowered for term in missing_terms)
     ):
         return "internet"
+
+    hardware_terms = (
+        "serial port",
+        "com port",
+        "hardware access",
+        "serial access",
+        "usb serial",
+    )
+    if (
+        any(term in lowered for term in hardware_terms)
+        and any(term in lowered for term in missing_terms)
+    ):
+        return "serial"
     return None
 
 

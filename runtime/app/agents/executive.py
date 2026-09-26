@@ -181,6 +181,7 @@ def run_main_agent(
     allow_terminal: bool,
     allow_delete: bool,
     allow_network: bool,
+    allow_hardware: bool,
 ):
     db.add(
         MainAgentMessageRecord(
@@ -220,6 +221,8 @@ def run_main_agent(
         approvals.add(Permission.PROJECT_DELETE.value)
     if allow_network:
         approvals.add(Permission.NETWORK_ACCESS.value)
+    if allow_hardware:
+        approvals.add(Permission.SERIAL_ACCESS.value)
 
     messages = [
         {
@@ -406,6 +409,7 @@ def run_main_agent(
                     allow_terminal=allow_terminal,
                     allow_delete=allow_delete,
                     allow_network=allow_network,
+                    allow_hardware=allow_hardware,
                 )
 
             step = {
@@ -460,6 +464,7 @@ def run_main_agent(
                     allow_terminal=allow_terminal,
                     allow_delete=allow_delete,
                     allow_network=allow_network,
+                    allow_hardware=allow_hardware,
                 )
 
                 finals = db.scalars(
@@ -514,6 +519,7 @@ def run_main_agent(
                     allow_terminal=allow_terminal,
                     allow_delete=allow_delete,
                     allow_network=allow_network,
+                    allow_hardware=allow_hardware,
                 )
                 result = {
                     "status": run.status,

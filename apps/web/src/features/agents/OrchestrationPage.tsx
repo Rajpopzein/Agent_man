@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   ArrowDown,
   BrainCircuit,
+  Cpu,
   GitBranch,
   Globe2,
   Play,
@@ -50,6 +51,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
   const [allowNetwork, setAllowNetwork] = useState(false);
+  const [allowHardware, setAllowHardware] = useState(false);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -175,6 +177,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
         allowTerminal,
         allowDelete,
         allowNetwork,
+        allowHardware,
       );
       setActiveRun(run);
       setStatus("Run finished with status: " + run.status);
@@ -202,6 +205,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
         allowTerminal,
         allowDelete,
         allowNetwork,
+        allowHardware,
       );
       setActiveRun(run);
       setStatus("Run status: " + run.status);
@@ -479,6 +483,17 @@ export default function OrchestrationPage({ project, agents }: Props) {
                     />
                     <Globe2 size={14} />
                     Allow public internet
+                  </label>
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={allowHardware}
+                      onChange={(event) =>
+                        setAllowHardware(event.target.checked)
+                      }
+                    />
+                    <Cpu size={14} />
+                    Allow serial / COM hardware
                   </label>
                   <label className="approval">
                     <input

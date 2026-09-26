@@ -96,6 +96,7 @@ class AgentRunRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
     allow_network: bool = False
+    allow_hardware: bool = False
 
 
 class AgentRunReply(BaseModel):
@@ -117,6 +118,7 @@ class MultiAgentRunRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
     allow_network: bool = False
+    allow_hardware: bool = False
     extend_rounds: int = Field(default=0, ge=0, le=20)
 
 
@@ -223,6 +225,7 @@ class WorkflowRunRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
     allow_network: bool = False
+    allow_hardware: bool = False
 
 
 class WorkflowRunStepView(BaseModel):
@@ -274,6 +277,7 @@ class MainAgentChatRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
     allow_network: bool = False
+    allow_hardware: bool = False
 
 
 class MainAgentMessageView(BaseModel):

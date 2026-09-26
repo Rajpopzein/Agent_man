@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Globe2, Play, RefreshCw, TerminalSquare, Users } from "lucide-react";
+import { BrainCircuit, Cpu, Globe2, Play, RefreshCw, TerminalSquare, Users } from "lucide-react";
 
 import { api, Agent, MultiAgentTask, Project } from "../../services/api";
 import { requestAgentSpeech } from "../audio/useAgentVoice";
@@ -17,6 +17,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
   const [allowNetwork, setAllowNetwork] = useState(false);
+  const [allowHardware, setAllowHardware] = useState(false);
   const [tasks, setTasks] = useState<MultiAgentTask[]>([]);
   const [activeTask, setActiveTask] = useState<MultiAgentTask | null>(null);
   const [busy, setBusy] = useState(false);
@@ -94,6 +95,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
         allowDelete,
         0,
         allowNetwork,
+        allowHardware,
       );
       setActiveTask(result);
       setStatus("Task finished with status: " + result.status);
@@ -130,6 +132,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
         allowDelete,
         extendRounds,
         allowNetwork,
+        allowHardware,
       );
       setActiveTask(result);
       setStatus("Task status: " + result.status);
@@ -238,6 +241,15 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
                 />
                 <Globe2 size={16} />
                 Allow public internet access
+              </label>
+              <label className="approval">
+                <input
+                  type="checkbox"
+                  checked={allowHardware}
+                  onChange={(event) => setAllowHardware(event.target.checked)}
+                />
+                <Cpu size={16} />
+                Allow serial / COM hardware access
               </label>
               <label className="approval">
                 <input

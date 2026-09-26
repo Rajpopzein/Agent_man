@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Code2,
+  Cpu,
   FolderSearch,
   GitBranch,
   Globe2,
@@ -30,6 +31,7 @@ function iconFor(category: string) {
   if (category === "development") return <Code2 size={17} />;
   if (category === "terminal") return <TerminalSquare size={17} />;
   if (category === "network") return <Globe2 size={17} />;
+  if (category === "hardware") return <Cpu size={17} />;
   return <Wrench size={17} />;
 }
 
@@ -313,6 +315,9 @@ export default function ToolsPage({
           </span>
           <span>
             <i className="riskDot network" /> NETWORK approval
+          </span>
+          <span>
+            <i className="riskDot hardware" /> HARDWARE approval
           </span>
           <span>
             <i className="riskDot destructive" /> DESTRUCTIVE approval

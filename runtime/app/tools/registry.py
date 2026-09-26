@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.permissions import Permission, PermissionDenied, require
+from app.devices.serial import serial_devices
 from app.sandbox.development import DevelopmentTools
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.git_tools import ProjectGit
@@ -42,6 +43,12 @@ TOOL_DEFINITIONS = [
     ToolDefinition("read_process_output", "Read recent output from a managed process.", "runtime", "read", "1.0.0", {"process_id": "managed process id"}),
     ToolDefinition("stop_process", "Stop a managed background process.", "runtime", "execute", "1.0.0", {"process_id": "managed process id"}),
     ToolDefinition("http_get", "Fetch textual content from a public internet URL. Local/private network destinations are blocked.", "network", "network", "1.0.0", {"url": "public http/https URL"}),
+    ToolDefinition("list_serial_ports", "List serial/COM ports detected by the local operating system, including USB metadata when available.", "hardware", "read", "1.0.0", {}),
+    ToolDefinition("serial_open", "Open an enumerated serial/COM port and create a managed hardware session.", "hardware", "hardware", "1.0.0", {"device": "enumerated device such as COM3", "baudrate": "optional baudrate, default 115200", "timeout_ms": "optional read timeout up to 2000 ms", "write_timeout_ms": "optional write timeout up to 2000 ms"}),
+    ToolDefinition("serial_list_sessions", "List serial sessions opened by Agent Man.", "hardware", "read", "1.0.0", {}),
+    ToolDefinition("serial_read", "Read bytes from an Agent Man serial session.", "hardware", "hardware", "1.0.0", {"session_id": "serial session id", "max_bytes": "optional maximum bytes, default 4096", "timeout_ms": "optional read timeout up to 2000 ms"}),
+    ToolDefinition("serial_write", "Write UTF-8 text or hexadecimal bytes to an Agent Man serial session.", "hardware", "hardware", "1.0.0", {"session_id": "serial session id", "text": "UTF-8 text payload; mutually exclusive with hex_data", "hex_data": "hex bytes such as 01 ff 0a; mutually exclusive with text", "newline": "optional boolean; append newline to text"}),
+    ToolDefinition("serial_close", "Close an Agent Man serial session and release the COM port.", "hardware", "write", "1.0.0", {"session_id": "serial session id"}),
 ]
 
 
@@ -184,6 +191,52 @@ class ToolRegistry:
             return internet.get(
                 str(arguments["url"]),
                 approvals,
+            )
+        if name == "list_serial_ports":
+            return serial_devices.list_ports()
+        if name == "serial_open":
+            require(Permission.SERIAL_ACCESS, approvals)
+            return serial_devices.open(
+                device=str(arguments["device"]),
+                baudrate=int(arguments.get("baudrate", 115200)),
+                timeout_ms=int(arguments.get("timeout_ms", 250)),
+                write_timeout_ms=int(
+                    arguments.get("write_timeout_ms", 1000)
+                ),
+            )
+        if name == "serial_list_sessions":
+            return serial_devices.list_sessions()
+        if name == "serial_read":
+            require(Permission.SERIAL_ACCESS, approvals)
+            timeout_value = arguments.get("timeout_ms")
+            return serial_devices.read(
+                str(arguments["session_id"]),
+                max_bytes=int(arguments.get("max_bytes", 4096)),
+                timeout_ms=(
+                    int(timeout_value)
+                    if timeout_value is not None
+                    else None
+                ),
+            )
+        if name == "serial_write":
+            require(Permission.SERIAL_ACCESS, approvals)
+            return serial_devices.write(
+                str(arguments["session_id"]),
+                text=(
+                    str(arguments["text"])
+                    if arguments.get("text") is not None
+                    else None
+                ),
+                hex_data=(
+                    str(arguments["hex_data"])
+                    if arguments.get("hex_data") is not None
+                    else None
+                ),
+                newline=bool(arguments.get("newline", False)),
+            )
+        if name == "serial_close":
+            return serial_devices.close(
+                str(arguments["session_id"])
             )
         raise ValueError(f"Unknown tool: {name}")
 

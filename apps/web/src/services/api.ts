@@ -238,6 +238,7 @@ export const api = {
     endpoint?: string | null,
     allowDelete = false,
     allowNetwork = false,
+    allowHardware = false,
   ) =>
     request<AgentRun>("/api/agents/" + agentId + "/execute", {
       method: "POST",
@@ -246,6 +247,7 @@ export const api = {
         allow_terminal: allowTerminal,
         allow_delete: allowDelete,
         allow_network: allowNetwork,
+        allow_hardware: allowHardware,
         endpoint: endpoint || undefined,
       }),
     }),
@@ -284,6 +286,7 @@ export const api = {
     allowTerminal: boolean,
     allowDelete: boolean,
     allowNetwork: boolean,
+    allowHardware: boolean,
   ) =>
     request<MainAgentReply>(
       "/api/main-agent/projects/" + projectId + "/chat",
@@ -294,6 +297,7 @@ export const api = {
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
           allow_network: allowNetwork,
+          allow_hardware: allowHardware,
         }),
       },
     ),
@@ -368,6 +372,7 @@ export const api = {
     allowDelete = false,
     extendRounds = 0,
     allowNetwork = false,
+    allowHardware = false,
   ) =>
     request<MultiAgentTask>(
       "/api/multi-agent/tasks/" + taskId + "/run",
@@ -377,6 +382,7 @@ export const api = {
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
           allow_network: allowNetwork,
+          allow_hardware: allowHardware,
           extend_rounds: extendRounds,
         }),
       },
@@ -461,6 +467,7 @@ export const api = {
     allowTerminal: boolean,
     allowDelete: boolean,
     allowNetwork: boolean,
+    allowHardware: boolean,
   ) =>
     request<WorkflowRun>(
       "/api/orchestration/workflows/" + workflowId + "/runs",
@@ -471,6 +478,7 @@ export const api = {
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
           allow_network: allowNetwork,
+          allow_hardware: allowHardware,
         }),
       },
     ),
@@ -480,6 +488,7 @@ export const api = {
     allowTerminal: boolean,
     allowDelete: boolean,
     allowNetwork: boolean,
+    allowHardware: boolean,
   ) =>
     request<WorkflowRun>(
       "/api/orchestration/runs/" + runId + "/resume",
@@ -490,6 +499,7 @@ export const api = {
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
           allow_network: allowNetwork,
+          allow_hardware: allowHardware,
         }),
       },
     ),

@@ -177,6 +177,7 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
             allow_terminal=body.allow_terminal,
             allow_delete=body.allow_delete,
             allow_network=body.allow_network,
+            allow_hardware=body.allow_hardware,
         )
         return AgentRunReply(agent_id=agent.id, **result)
     except Exception as exc:

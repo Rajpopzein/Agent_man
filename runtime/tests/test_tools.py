@@ -73,6 +73,12 @@ def test_planned_builtin_tools_are_registered():
         "read_process_output",
         "stop_process",
         "http_get",
+        "list_serial_ports",
+        "serial_open",
+        "serial_list_sessions",
+        "serial_read",
+        "serial_write",
+        "serial_close",
     } <= names
 
 
@@ -128,3 +134,16 @@ def test_internet_requires_explicit_approval(tmp_path: Path):
             allowed_names={"http_get"},
         )
     assert exc.value.permission.value == "network.internet"
+
+
+
+def test_serial_open_requires_hardware_approval(tmp_path: Path):
+    with pytest.raises(ApprovalRequired) as exc:
+        tools.execute(
+            name="serial_open",
+            arguments={"device": "COM3", "baudrate": 115200},
+            workspace_path=str(tmp_path),
+            approvals=set(),
+            allowed_names={"serial_open"},
+        )
+    assert exc.value.permission.value == "hardware.serial"

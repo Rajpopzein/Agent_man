@@ -285,6 +285,7 @@ def execute_workflow_run(
     allow_terminal: bool = False,
     allow_delete: bool = False,
     allow_network: bool = False,
+    allow_hardware: bool = False,
 ) -> WorkflowRunRecord:
     workflow = db.get(WorkflowRecord, run.workflow_id)
     project = db.get(ProjectRecord, run.project_id)
@@ -298,6 +299,8 @@ def execute_workflow_run(
         approvals.add(Permission.PROJECT_DELETE.value)
     if allow_network:
         approvals.add(Permission.NETWORK_ACCESS.value)
+    if allow_hardware:
+        approvals.add(Permission.SERIAL_ACCESS.value)
 
     run.status = "executing"
     db.commit()

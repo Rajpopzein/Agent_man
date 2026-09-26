@@ -1136,3 +1136,6 @@ label{color:#6f98a8}
     justify-content:flex-start
   }
 }
+
+.riskDot.hardware{background:#b38cff;box-shadow:0 0 8px rgba(179,140,255,.45)}
+.riskBadge.hardware{color:#c9afff;border-color:rgba(179,140,255,.26)}

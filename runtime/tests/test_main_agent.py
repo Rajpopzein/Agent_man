@@ -407,3 +407,36 @@ def test_main_agent_bulk_tool_access_controls():
     ]
     assert enabled
     assert all(item["assigned"] for item in enabled)
+
+
+
+def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: json.dumps({
+            "type": "tool",
+            "tool": "serial_open",
+            "args": {
+                "device": "COM3",
+                "baudrate": 115200,
+            },
+        }),
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Open the ESP32 serial port.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_approval"
+    assert body["steps"][0]["tool"] == "serial_open"
+    assert body["steps"][0]["permission"] == "hardware.serial"

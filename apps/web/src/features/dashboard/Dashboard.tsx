@@ -10,6 +10,7 @@ import {
   Bot,
   Boxes,
   CircleDot,
+  Cpu,
   GitBranch,
   Globe2,
   Home,
@@ -123,6 +124,7 @@ export default function Dashboard() {
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
   const [allowNetwork, setAllowNetwork] = useState(false);
+  const [allowHardware, setAllowHardware] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processingStartedAt, setProcessingStartedAt] =
     useState<number | null>(null);
@@ -446,6 +448,7 @@ export default function Dashboard() {
         allowTerminal,
         allowDelete,
         allowNetwork,
+        allowHardware,
       );
       setRun(result);
     } catch (error) {
@@ -953,6 +956,20 @@ export default function Dashboard() {
                   >
                     <Globe2 size={13} />
                     NET
+                  </button>
+                  <button
+                    className={
+                      allowHardware
+                        ? "permissionChip active"
+                        : "permissionChip"
+                    }
+                    onClick={() =>
+                      setAllowHardware((value) => !value)
+                    }
+                    title="Allow serial/COM hardware access for this run"
+                  >
+                    <Cpu size={13} />
+                    HW
                   </button>
                   <button
                     className={

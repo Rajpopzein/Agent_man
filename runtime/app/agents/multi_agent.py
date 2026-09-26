@@ -370,6 +370,7 @@ def run_peer_task(
     allow_terminal: bool = False,
     allow_delete: bool = False,
     allow_network: bool = False,
+    allow_hardware: bool = False,
 ) -> MultiAgentTaskRecord:
     project = db.get(
         ProjectRecord,
@@ -415,6 +416,10 @@ def run_peer_task(
     if allow_network:
         approvals.add(
             Permission.NETWORK_ACCESS.value
+        )
+    if allow_hardware:
+        approvals.add(
+            Permission.SERIAL_ACCESS.value
         )
 
     if task.status in {

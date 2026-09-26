@@ -127,6 +127,7 @@ def execute_agent(
     allow_terminal: bool = False,
     allow_delete: bool = False,
     allow_network: bool = False,
+    allow_hardware: bool = False,
 ) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
@@ -135,6 +136,8 @@ def execute_agent(
         approvals.add(Permission.PROJECT_DELETE.value)
     if allow_network:
         approvals.add(Permission.NETWORK_ACCESS.value)
+    if allow_hardware:
+        approvals.add(Permission.SERIAL_ACCESS.value)
 
     allowed_names = allowed_tool_names(db, agent.id)
     messages = [

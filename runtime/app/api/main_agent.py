@@ -82,6 +82,7 @@ def chat(project_id: str, body: MainAgentChatRequest, db: Session = Depends(get_
             allow_terminal=body.allow_terminal,
             allow_delete=body.allow_delete,
             allow_network=body.allow_network,
+            allow_hardware=body.allow_hardware,
         )
     except Exception as exc:
         raise HTTPException(502, f"Main agent execution error: {exc}") from exc
