@@ -374,7 +374,13 @@ export function useAgentVoice() {
             "error",
             onError,
           );
-          sourceBuffer.appendBuffer(chunk);
+          const safeChunk = new Uint8Array(
+            chunk.byteLength,
+          );
+          safeChunk.set(chunk);
+          sourceBuffer.appendBuffer(
+            safeChunk.buffer,
+          );
         });
 
       try {
