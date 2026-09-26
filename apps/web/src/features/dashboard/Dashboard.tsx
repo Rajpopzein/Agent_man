@@ -1,4 +1,10 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Activity,
   Bot,
@@ -12,16 +18,22 @@ import {
   Plus,
   Radio,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
   Trash2,
+  Volume2,
+  VolumeX,
   Wrench,
   Zap,
 } from "lucide-react";
 
+import HudModal from "../../components/HudModal";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import OrchestrationPage from "../agents/OrchestrationPage";
+import VoiceControl from "../audio/VoiceControl";
+import { useAgentVoice } from "../audio/useAgentVoice";
 import AIConnections from "../settings/AIConnections";
 import ToolsPage from "../tools/ToolsPage";
 import {
@@ -39,6 +51,12 @@ type View =
   | "multi-agent"
   | "tools"
   | "connections";
+
+type Notice = {
+  title: string;
+  message: string;
+  tone?: "default" | "danger";
+};
 
 const VIEW_META: Record<
   View,
@@ -87,6 +105,24 @@ export default function Dashboard() {
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const [projectDialog, setProjectDialog] = useState(false);
+  const [projectName, setProjectName] = useState("Agent Man Dev");
+  const [workspacePath, setWorkspacePath] = useState(
+    "D:\\AgentMan\\projects\\demo",
+  );
+
+  const [agentDialog, setAgentDialog] = useState(false);
+  const [agentName, setAgentName] = useState("Developer");
+  const [agentRole, setAgentRole] = useState("Developer");
+  const [agentConnectionId, setAgentConnectionId] = useState("");
+  const [agentModel, setAgentModel] = useState("");
+
+  const [deleteDialog, setDeleteDialog] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+
+  const voice = useAgentVoice();
+
   async function load() {
     try {
       await api.health();
@@ -129,76 +165,124 @@ export default function Dashboard() {
     void load();
   }, []);
 
-  async function addProject() {
-    const name = window.prompt("Project name", "Agent Man Dev");
-    const workspace =
-      name &&
-      window.prompt(
-        "Windows workspace path",
-        "D:\\AgentMan\\projects\\demo",
-      );
+  useEffect(() => {
+    if (
+      run?.status === "completed" &&
+      run.text &&
+      voice.settings.enabled &&
+      voice.settings.autoSpeak
+    ) {
+      voice.speak(run.text);
+    }
+  }, [run?.status, run?.text]);
 
-    if (name && workspace) {
+  function openProjectDialog() {
+    setProjectName("Agent Man Dev");
+    setWorkspacePath("D:\\AgentMan\\projects\\demo");
+    setProjectDialog(true);
+  }
+
+  async function createProject(event: FormEvent) {
+    event.preventDefault();
+    if (!projectName.trim() || !workspacePath.trim()) return;
+
+    setBusy(true);
+    try {
       await api.createProject({
-        name,
-        workspace_path: workspace,
+        name: projectName.trim(),
+        workspace_path: workspacePath.trim(),
       });
+      setProjectDialog(false);
       await load();
+    } catch (error) {
+      setNotice({
+        title: "Project creation failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function addAgent() {
+  function openAgentDialog() {
     if (!project) return;
 
     if (connections.length === 0) {
       setView("connections");
-      window.alert("Create an AI connection before creating an agent.");
+      setNotice({
+        title: "AI uplink required",
+        message:
+          "Create at least one AI connection before deploying an agent.",
+      });
       return;
     }
 
-    const menu = connections
-      .map(
-        (connection, index) =>
-          `${index + 1}. ${connection.name} (${connection.provider_id})`,
-      )
-      .join("\n");
+    const connection = connections[0];
+    setAgentName("Developer");
+    setAgentRole("Developer");
+    setAgentConnectionId(connection.id);
+    setAgentModel(connection.default_model || "");
+    setAgentDialog(true);
+  }
 
-    const selected = window.prompt(
-      "Choose AI connection by number:\n" + menu,
-      "1",
+  function chooseAgentConnection(connectionId: string) {
+    const connection = connections.find((item) => item.id === connectionId);
+    setAgentConnectionId(connectionId);
+    if (connection?.default_model) {
+      setAgentModel(connection.default_model);
+    }
+  }
+
+  async function createAgent(event: FormEvent) {
+    event.preventDefault();
+    if (!project) return;
+
+    const connection = connections.find(
+      (item) => item.id === agentConnectionId,
     );
-    if (!selected) return;
-
-    const connection = connections[Number(selected) - 1];
     if (!connection) {
-      window.alert("Invalid connection selection.");
+      setNotice({
+        title: "Invalid AI uplink",
+        message: "Select a valid AI connection for this agent.",
+        tone: "danger",
+      });
       return;
     }
 
-    const name = window.prompt("Agent name", "Developer");
-    const role = name && window.prompt("Role", "Developer");
-    const model =
-      role &&
-      window.prompt(
-        "Model",
-        connection.default_model || "",
-      );
+    if (!agentName.trim() || !agentRole.trim() || !agentModel.trim()) {
+      setNotice({
+        title: "Agent configuration incomplete",
+        message: "Name, role, connection and model are required.",
+      });
+      return;
+    }
 
-    if (name && role && model) {
+    setBusy(true);
+    try {
       await api.createAgent({
         project_id: project.id,
-        name,
-        role,
+        name: agentName.trim(),
+        role: agentRole.trim(),
         llm: {
           provider_id: connection.provider_id,
           connection_id: connection.id,
-          model,
+          model: agentModel.trim(),
           endpoint: connection.endpoint,
           temperature: 0.2,
           cloud_fallback_allowed: false,
         },
       });
+      setAgentDialog(false);
       await load();
+    } catch (error) {
+      setNotice({
+        title: "Agent deployment failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -206,6 +290,7 @@ export default function Dashboard() {
     event.preventDefault();
     if (!agent || !prompt.trim()) return;
 
+    voice.stop();
     setBusy(true);
     setRun(null);
     try {
@@ -230,27 +315,29 @@ export default function Dashboard() {
     }
   }
 
-
-  async function deleteSelectedAgent() {
+  async function confirmDeleteAgent() {
     if (!agent) return;
-    const confirmed = window.confirm(
-      "Delete agent '" +
-        agent.name +
-        "'? This is blocked if the agent is still referenced by workflow or multi-agent history.",
-    );
-    if (!confirmed) return;
 
+    setBusy(true);
     try {
       await api.deleteAgent(agent.id);
+      setDeleteDialog(false);
       setAgent(null);
       setRun(null);
       await load();
+      setNotice({
+        title: "Agent removed",
+        message: "The selected agent was deleted from this project.",
+      });
     } catch (error) {
-      window.alert(
-        error instanceof Error
-          ? error.message
-          : String(error),
-      );
+      setDeleteDialog(false);
+      setNotice({
+        title: "Agent deletion blocked",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -316,12 +403,16 @@ export default function Dashboard() {
         </nav>
 
         <div className="railFooter">
-          <button className="railQuick" onClick={addProject} title="New project">
+          <button
+            className="railQuick"
+            onClick={openProjectDialog}
+            title="New project"
+          >
             <Plus />
           </button>
           <button
             className="railQuick"
-            onClick={addAgent}
+            onClick={openAgentDialog}
             disabled={!project}
             title="New agent"
           >
@@ -349,10 +440,34 @@ export default function Dashboard() {
             <span>{project?.name || "NO PROJECT"}</span>
           </div>
 
-          <div className={online ? "runtimeBadge online" : "runtimeBadge offline"}>
-            <Radio size={14} />
-            <span>{online ? "RUNTIME ONLINE" : "RUNTIME OFFLINE"}</span>
-            <b>{online ? "LIVE" : "DOWN"}</b>
+          <div className="topControls">
+            <button
+              className={
+                voice.settings.enabled
+                  ? "voiceCoreButton active"
+                  : "voiceCoreButton"
+              }
+              onClick={() => setVoiceOpen(true)}
+              title="Voice Core"
+            >
+              {voice.settings.enabled ? (
+                <Volume2 size={15} />
+              ) : (
+                <VolumeX size={15} />
+              )}
+              <span>VOICE</span>
+              <i className={voice.speaking ? "speaking" : ""} />
+            </button>
+
+            <div
+              className={
+                online ? "runtimeBadge online" : "runtimeBadge offline"
+              }
+            >
+              <Radio size={14} />
+              <span>{online ? "RUNTIME ONLINE" : "RUNTIME OFFLINE"}</span>
+              <b>{online ? "LIVE" : "DOWN"}</b>
+            </div>
           </div>
         </header>
 
@@ -366,7 +481,10 @@ export default function Dashboard() {
           <div className="projectReadout">
             <small>ACTIVE SANDBOX</small>
             <strong>{project?.name || "UNASSIGNED"}</strong>
-            <code>{project?.workspace_path || "Create a project to initialize the workspace."}</code>
+            <code>
+              {project?.workspace_path ||
+                "Create a project to initialize the workspace."}
+            </code>
           </div>
         </div>
 
@@ -388,7 +506,9 @@ export default function Dashboard() {
                 icon={<Bot />}
                 label="Agents"
                 value={agents.length}
-                detail={agents.length ? "READY FOR TASKING" : "NONE CONFIGURED"}
+                detail={
+                  agents.length ? "READY FOR TASKING" : "NONE CONFIGURED"
+                }
               />
               <Telemetry
                 icon={<Plug />}
@@ -444,7 +564,8 @@ export default function Dashboard() {
                         <span className="agentMeta">
                           <b>{item.name}</b>
                           <small>
-                            {item.role} / {linked?.name || item.llm.provider_id}
+                            {item.role} /{" "}
+                            {linked?.name || item.llm.provider_id}
                           </small>
                         </span>
                         <span className="agentModel">{item.llm.model}</span>
@@ -485,7 +606,9 @@ export default function Dashboard() {
                     onClick={() => setAgent(item)}
                     title={item.name}
                   >
-                    <span><Bot size={14} /></span>
+                    <span>
+                      <Bot size={14} />
+                    </span>
                     <b>{item.name}</b>
                     <small>{item.role}</small>
                   </button>
@@ -504,10 +627,16 @@ export default function Dashboard() {
               <div className="hudPanel missionPanel">
                 <PanelLabel icon={<Activity />} label="MISSION CONTROL" />
                 <div className="missionStatus">
-                  <span className={busy ? "statusPulse busy" : "statusPulse"} />
+                  <span
+                    className={busy ? "statusPulse busy" : "statusPulse"}
+                  />
                   <div>
                     <small>CURRENT STATE</small>
-                    <strong>{busy ? "EXECUTING" : run?.status?.toUpperCase() || "READY"}</strong>
+                    <strong>
+                      {busy
+                        ? "EXECUTING"
+                        : run?.status?.toUpperCase() || "READY"}
+                    </strong>
                   </div>
                 </div>
 
@@ -524,30 +653,48 @@ export default function Dashboard() {
 
                 <div className="permissionReadout">
                   <button
-                    className={allowTerminal ? "permissionChip active" : "permissionChip"}
-                    onClick={() => setAllowTerminal((value) => !value)}
+                    className={
+                      allowTerminal
+                        ? "permissionChip active"
+                        : "permissionChip"
+                    }
+                    onClick={() =>
+                      setAllowTerminal((value) => !value)
+                    }
                   >
                     <TerminalSquare size={13} />
                     EXEC
                   </button>
                   <button
-                    className={allowNetwork ? "permissionChip active" : "permissionChip"}
-                    onClick={() => setAllowNetwork((value) => !value)}
+                    className={
+                      allowNetwork
+                        ? "permissionChip active"
+                        : "permissionChip"
+                    }
+                    onClick={() =>
+                      setAllowNetwork((value) => !value)
+                    }
                     title="Allow public internet access for this run"
                   >
                     <Globe2 size={13} />
                     NET
                   </button>
                   <button
-                    className={allowDelete ? "permissionChip danger active" : "permissionChip danger"}
-                    onClick={() => setAllowDelete((value) => !value)}
+                    className={
+                      allowDelete
+                        ? "permissionChip danger active"
+                        : "permissionChip danger"
+                    }
+                    onClick={() =>
+                      setAllowDelete((value) => !value)
+                    }
                   >
                     <Wrench size={13} />
                     FILE DEL
                   </button>
                   <button
                     className="permissionChip danger"
-                    onClick={() => void deleteSelectedAgent()}
+                    onClick={() => setDeleteDialog(true)}
                     disabled={!agent || busy}
                     title="Delete selected agent"
                   >
@@ -561,8 +708,14 @@ export default function Dashboard() {
             <section className="hudCommandPanel">
               <div className="commandHeader">
                 <div>
-                  <span className="hudEyebrow">DIRECTIVE / SINGLE AGENT</span>
-                  <h3>{agent ? `Task ${agent.name}` : "Awaiting agent selection"}</h3>
+                  <span className="hudEyebrow">
+                    DIRECTIVE / SINGLE AGENT
+                  </span>
+                  <h3>
+                    {agent
+                      ? `Task ${agent.name}`
+                      : "Awaiting agent selection"}
+                  </h3>
                 </div>
                 <div className="commandStatus">
                   <i className={busy ? "busy" : ""} />
@@ -596,13 +749,22 @@ export default function Dashboard() {
 
               {run && run.steps.length > 0 && (
                 <div className="trace hudTrace">
-                  <h4>EXECUTION TRACE / {run.status.toUpperCase()}</h4>
+                  <h4>
+                    EXECUTION TRACE / {run.status.toUpperCase()}
+                  </h4>
                   {run.steps.map((step, index) => (
                     <div className="traceRow" key={index}>
-                      <b>{String(step.tool || "tool")}</b>
+                      <b>{String(step.tool || step.type || "runtime")}</b>
                       <span>{String(step.status || "")}</span>
                       <code>
-                        {JSON.stringify(step.arguments || {}, null, 2)}
+                        {JSON.stringify(
+                          step.arguments ||
+                            step.result ||
+                            step.message ||
+                            {},
+                          null,
+                          2,
+                        )}
                       </code>
                     </div>
                   ))}
@@ -612,6 +774,207 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      <HudModal
+        open={projectDialog}
+        onClose={() => setProjectDialog(false)}
+        title="Initialize Project"
+        eyebrow="COMMAND / NEW SANDBOX"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setProjectDialog(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primaryButton"
+              form="project-create-form"
+              type="submit"
+              disabled={busy}
+            >
+              <Plus size={14} />
+              Create project
+            </button>
+          </>
+        }
+      >
+        <form
+          id="project-create-form"
+          className="hudDialogForm"
+          onSubmit={createProject}
+        >
+          <label>
+            Project name
+            <input
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              autoFocus
+            />
+          </label>
+          <label>
+            Windows workspace path
+            <input
+              value={workspacePath}
+              onChange={(event) => setWorkspacePath(event.target.value)}
+            />
+          </label>
+          <p className="dialogHint">
+            This directory becomes the project sandbox boundary used by
+            Agent Man tools.
+          </p>
+        </form>
+      </HudModal>
+
+      <HudModal
+        open={agentDialog}
+        onClose={() => setAgentDialog(false)}
+        title="Deploy Agent"
+        eyebrow="COMMAND / AGENT CONFIGURATION"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setAgentDialog(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primaryButton"
+              form="agent-create-form"
+              type="submit"
+              disabled={busy}
+            >
+              <Bot size={14} />
+              Deploy agent
+            </button>
+          </>
+        }
+      >
+        <form
+          id="agent-create-form"
+          className="hudDialogForm"
+          onSubmit={createAgent}
+        >
+          <div className="dialogGrid">
+            <label>
+              Agent name
+              <input
+                value={agentName}
+                onChange={(event) => setAgentName(event.target.value)}
+                autoFocus
+              />
+            </label>
+            <label>
+              Role
+              <input
+                value={agentRole}
+                onChange={(event) => setAgentRole(event.target.value)}
+              />
+            </label>
+          </div>
+          <label>
+            AI connection
+            <select
+              value={agentConnectionId}
+              onChange={(event) =>
+                chooseAgentConnection(event.target.value)
+              }
+            >
+              {connections.map((connection) => (
+                <option value={connection.id} key={connection.id}>
+                  {connection.name} · {connection.provider_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Model
+            <input
+              value={agentModel}
+              onChange={(event) => setAgentModel(event.target.value)}
+              placeholder="Model identifier"
+            />
+          </label>
+          <p className="dialogHint">
+            Tools and risk permissions can be changed later in Capability
+            Matrix.
+          </p>
+        </form>
+      </HudModal>
+
+      <HudModal
+        open={deleteDialog}
+        onClose={() => setDeleteDialog(false)}
+        title="Delete Agent"
+        eyebrow="SECURITY / DESTRUCTIVE ACTION"
+        tone="danger"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setDeleteDialog(false)}
+            >
+              Keep agent
+            </button>
+            <button
+              className="primaryButton dangerAction"
+              onClick={() => void confirmDeleteAgent()}
+              disabled={busy}
+            >
+              <Trash2 size={14} />
+              Delete agent
+            </button>
+          </>
+        }
+      >
+        <div className="dialogWarning">
+          <ShieldAlert size={22} />
+          <div>
+            <strong>{agent?.name || "Selected agent"}</strong>
+            <p>
+              Agent Man will block deletion if this agent is still referenced
+              by workflow stages, workflow history, or multi-agent history.
+            </p>
+          </div>
+        </div>
+      </HudModal>
+
+      <HudModal
+        open={Boolean(notice)}
+        onClose={() => setNotice(null)}
+        title={notice?.title || "System message"}
+        eyebrow={
+          notice?.tone === "danger"
+            ? "SYSTEM / ATTENTION"
+            : "SYSTEM / MESSAGE"
+        }
+        tone={notice?.tone}
+        footer={
+          <button
+            className="primaryButton"
+            onClick={() => setNotice(null)}
+          >
+            Acknowledge
+          </button>
+        }
+      >
+        <p className="systemMessage">{notice?.message}</p>
+      </HudModal>
+
+      <VoiceControl
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        settings={voice.settings}
+        voices={voice.voices}
+        selectedVoice={voice.selectedVoice}
+        speaking={voice.speaking}
+        onUpdate={voice.update}
+        onTest={voice.testVoice}
+        onStop={voice.stop}
+        onReset={voice.resetSignature}
+      />
     </div>
   );
 }

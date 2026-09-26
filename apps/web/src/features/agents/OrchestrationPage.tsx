@@ -19,6 +19,7 @@ import {
   Workflow,
   WorkflowRun,
 } from "../../services/api";
+import { requestAgentSpeech } from "../audio/useAgentVoice";
 
 type Props = {
   project: Project | null;
@@ -177,6 +178,11 @@ export default function OrchestrationPage({ project, agents }: Props) {
       );
       setActiveRun(run);
       setStatus("Run finished with status: " + run.status);
+      if (run.status === "completed") {
+        requestAgentSpeech(
+          "Workflow completed. " + (run.last_output || "All stages passed."),
+        );
+      }
       await loadRuns(active);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -199,6 +205,11 @@ export default function OrchestrationPage({ project, agents }: Props) {
       );
       setActiveRun(run);
       setStatus("Run status: " + run.status);
+      if (run.status === "completed") {
+        requestAgentSpeech(
+          "Workflow completed. " + (run.last_output || "All stages passed."),
+        );
+      }
       await loadRuns(active);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));

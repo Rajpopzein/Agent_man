@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { BrainCircuit, Globe2, Play, RefreshCw, TerminalSquare, Users } from "lucide-react";
 
 import { api, Agent, MultiAgentTask, Project } from "../../services/api";
+import { requestAgentSpeech } from "../audio/useAgentVoice";
 
 type Props = {
   project: Project | null;
@@ -96,6 +97,16 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
       );
       setActiveTask(result);
       setStatus("Task finished with status: " + result.status);
+      if (result.status === "completed") {
+        const latestFinals = result.messages
+          .filter((message) => message.kind === "final")
+          .slice(-2)
+          .map((message) => message.agent_name + ": " + message.content)
+          .join(" ");
+        requestAgentSpeech(
+          "Peer task completed. Stable consensus reached. " + latestFinals,
+        );
+      }
       await loadTasks();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -122,6 +133,11 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
       );
       setActiveTask(result);
       setStatus("Task status: " + result.status);
+      if (result.status === "completed") {
+        requestAgentSpeech(
+          "Peer task completed. All active agents confirmed the job is complete.",
+        );
+      }
       await loadTasks();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));

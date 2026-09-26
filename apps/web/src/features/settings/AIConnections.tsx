@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Cloud, Cpu, Plug, RefreshCw, Trash2 } from "lucide-react";
 
+import HudModal from "../../components/HudModal";
 import {
   api,
   AIConnection,
@@ -23,6 +24,8 @@ export default function AIConnections({ connections, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [tests, setTests] = useState<Record<string, AIConnectionTest>>({});
+  const [connectionToDelete, setConnectionToDelete] =
+    useState<AIConnection | null>(null);
 
   useEffect(() => {
     api.aiProviders().then(setProviders).catch((error) => setStatus(String(error)));
@@ -90,11 +93,12 @@ export default function AIConnections({ connections, onChanged }: Props) {
     await onChanged();
   }
 
-  async function remove(connection: AIConnection) {
-    if (!window.confirm("Delete AI connection '" + connection.name + "'?")) return;
+  async function removeConfirmed() {
+    if (!connectionToDelete) return;
     try {
-      await api.deleteAIConnection(connection.id);
+      await api.deleteAIConnection(connectionToDelete.id);
       setStatus("Connection deleted.");
+      setConnectionToDelete(null);
       await onChanged();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -216,7 +220,7 @@ export default function AIConnections({ connections, onChanged }: Props) {
                   </div>
                   <button
                     className="iconButton danger"
-                    onClick={() => void remove(connection)}
+                    onClick={() => setConnectionToDelete(connection)}
                     title="Delete connection"
                   >
                     <Trash2 size={16} />
@@ -265,6 +269,37 @@ export default function AIConnections({ connections, onChanged }: Props) {
       </div>
 
       {status && <div className="connectionStatus">{status}</div>}
+
+      <HudModal
+        open={Boolean(connectionToDelete)}
+        onClose={() => setConnectionToDelete(null)}
+        title="Delete AI Connection"
+        eyebrow="UPLINK / DESTRUCTIVE ACTION"
+        tone="danger"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setConnectionToDelete(null)}
+            >
+              Keep connection
+            </button>
+            <button
+              className="primaryButton dangerAction"
+              onClick={() => void removeConfirmed()}
+            >
+              <Trash2 size={14} />
+              Delete connection
+            </button>
+          </>
+        }
+      >
+        <p className="systemMessage">
+          Remove {connectionToDelete?.name || "this AI connection"} from
+          Agent Man? Agents that still reference this connection may need to be
+          reconfigured before they can run again.
+        </p>
+      </HudModal>
     </section>
   );
 }
