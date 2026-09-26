@@ -50,6 +50,7 @@ import {
   MainAgentConfig,
   MainAgentReply,
   Project,
+  RuntimeEvent,
   Tool,
 } from "../../services/api";
 
@@ -224,15 +225,81 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!busy || !project) return;
+    if (!project) return;
 
-    void refreshWorkers(project.id);
-    const timer = window.setInterval(() => {
-      void refreshWorkers(project.id);
-    }, 650);
+    const stream = new EventSource(
+      api.runtimeEventsUrl(project.id),
+    );
 
-    return () => window.clearInterval(timer);
-  }, [busy, project?.id]);
+    stream.onmessage = (event) => {
+      let runtimeEvent: RuntimeEvent;
+
+      try {
+        runtimeEvent = JSON.parse(event.data) as RuntimeEvent;
+      } catch {
+        return;
+      }
+
+      if (
+        runtimeEvent.type === "agent.state.changed" &&
+        runtimeEvent.agent_id &&
+        runtimeEvent.state
+      ) {
+        setAgents((current) =>
+          current.map((item) =>
+            item.id === runtimeEvent.agent_id
+              ? { ...item, state: runtimeEvent.state as string }
+              : item,
+          ),
+        );
+        setAgent((current) =>
+          current && current.id === runtimeEvent.agent_id
+            ? { ...current, state: runtimeEvent.state as string }
+            : current,
+        );
+        return;
+      }
+
+      if (
+        runtimeEvent.type === "agent.delegated" &&
+        runtimeEvent.agent_id
+      ) {
+        setAgents((current) =>
+          current.map((item) =>
+            item.id === runtimeEvent.agent_id
+              ? { ...item, state: "assigned" }
+              : item,
+          ),
+        );
+        setAgent((current) =>
+          current && current.id === runtimeEvent.agent_id
+            ? { ...current, state: "assigned" }
+            : current,
+        );
+        return;
+      }
+
+      if (
+        runtimeEvent.type === "agent.deleted" &&
+        runtimeEvent.agent_id
+      ) {
+        setAgents((current) =>
+          current.filter(
+            (item) => item.id !== runtimeEvent.agent_id,
+          ),
+        );
+        setAgent((current) =>
+          current?.id === runtimeEvent.agent_id
+            ? null
+            : current,
+        );
+      }
+    };
+
+    return () => {
+      stream.close();
+    };
+  }, [project?.id]);
 
   useEffect(() => {
     if (wake.state === "listening" && wake.liveTranscript) {

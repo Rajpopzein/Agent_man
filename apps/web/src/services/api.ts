@@ -189,6 +189,19 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type RuntimeEvent = {
+  id: string;
+  sequence: number;
+  type: string;
+  timestamp: string;
+  project_id?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_role?: string;
+  state?: string;
+  [key: string]: unknown;
+};
+
 export type LLMLog = {
   id: string;
   project_id: string | null;
@@ -224,6 +237,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request("/health"),
+  runtimeEventsUrl: (projectId: string) =>
+    BASE +
+    "/api/events/stream?project_id=" +
+    encodeURIComponent(projectId),
   projects: () => request<Project[]>("/api/projects"),
   createProject: (payload: { name: string; workspace_path: string }) =>
     request<Project>("/api/projects", {
