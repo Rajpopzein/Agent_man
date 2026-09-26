@@ -41,6 +41,7 @@ type Props = {
   selectedElevenVoice: ElevenLabsVoice | null;
   elevenLoading: boolean;
   elevenStatus: string;
+  audioStatus: string;
   onUpdate: (patch: Partial<VoiceSettings>) => void;
   onTest: () => void;
   onStop: () => void;
@@ -75,6 +76,7 @@ export default function VoiceControl({
   selectedElevenVoice,
   elevenLoading,
   elevenStatus,
+  audioStatus,
   onUpdate,
   onTest,
   onStop,
@@ -196,6 +198,14 @@ export default function VoiceControl({
           <span>PROFILE</span>
           <strong>AGENT MAN SIGNATURE</strong>
           <small>{voiceIdentity}</small>
+        </div>
+      </div>
+
+      <div className="voiceRuntimeStatus">
+        <span className={speaking ? "active" : ""} />
+        <div>
+          <small>AUDIO OUTPUT</small>
+          <strong>{audioStatus}</strong>
         </div>
       </div>
 

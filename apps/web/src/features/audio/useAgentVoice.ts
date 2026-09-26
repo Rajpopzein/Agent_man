@@ -100,11 +100,50 @@ export function useAgentVoice() {
     useState(false);
   const [elevenStatus, setElevenStatus] =
     useState("");
+  const [audioStatus, setAudioStatus] =
+    useState("Voice ready.");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const audioAbortRef =
     useRef<AbortController | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef =
+    useRef<AudioBufferSourceNode | null>(null);
+
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      const Context =
+        window.AudioContext ||
+        (
+          window as typeof window & {
+            webkitAudioContext?: typeof AudioContext;
+          }
+        ).webkitAudioContext;
+      if (Context) {
+        audioContextRef.current = new Context();
+      }
+    }
+    return audioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    const unlock = () => {
+      const context = getAudioContext();
+      if (context?.state === "suspended") {
+        void context.resume().then(() => {
+          setAudioStatus("Audio output ready.");
+        });
+      }
+    };
+
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [getAudioContext]);
 
   useEffect(() => {
     const synth = window.speechSynthesis;
@@ -191,6 +230,15 @@ export function useAgentVoice() {
   );
 
   const cleanupAudio = useCallback(() => {
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch {
+        // Source may already have ended.
+      }
+      audioSourceRef.current.disconnect();
+      audioSourceRef.current = null;
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = "";
@@ -215,40 +263,88 @@ export function useAgentVoice() {
       window.speechSynthesis.cancel();
       audioAbortRef.current?.abort();
       cleanupAudio();
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
     },
     [cleanupAudio],
   );
 
   const speakBrowserAsync = useCallback(
-    (cleaned: string) =>
-      new Promise<void>((resolve) => {
-        const synth = window.speechSynthesis;
-        synth.cancel();
+    async (cleaned: string) => {
+      const synth = window.speechSynthesis;
 
-        const utterance =
-          new SpeechSynthesisUtterance(cleaned);
-        utterance.rate = settings.rate;
-        utterance.pitch = settings.pitch;
-        utterance.volume = settings.volume;
-        if (selectedVoice) {
-          utterance.voice = selectedVoice;
-          utterance.lang = selectedVoice.lang;
-        } else {
-          utterance.lang = "en-GB";
-        }
+      const speakOnce = (
+        voice: SpeechSynthesisVoice | null,
+      ) =>
+        new Promise<boolean>((resolve) => {
+          let started = false;
+          let settled = false;
+          const utterance =
+            new SpeechSynthesisUtterance(cleaned);
+          utterance.rate = settings.rate;
+          utterance.pitch = settings.pitch;
+          utterance.volume = Math.max(
+            0.05,
+            settings.volume,
+          );
+          if (voice) {
+            utterance.voice = voice;
+            utterance.lang = voice.lang;
+          } else {
+            utterance.lang = "en-GB";
+          }
 
-        utterance.onstart = () =>
-          setSpeaking(true);
-        utterance.onend = () => {
-          setSpeaking(false);
-          resolve();
-        };
-        utterance.onerror = () => {
-          setSpeaking(false);
-          resolve();
-        };
-        synth.speak(utterance);
-      }),
+          const finish = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(startTimer);
+            setSpeaking(false);
+            resolve(ok);
+          };
+
+          utterance.onstart = () => {
+            started = true;
+            setSpeaking(true);
+            setAudioStatus(
+              "System voice speaking" +
+                (voice ? " · " + voice.name : "") +
+                ".",
+            );
+          };
+          utterance.onend = () => {
+            setAudioStatus("Voice ready.");
+            finish(true);
+          };
+          utterance.onerror = (event) => {
+            setAudioStatus(
+              "System voice error: " +
+                (event.error || "unknown error"),
+            );
+            finish(false);
+          };
+
+          const startTimer = window.setTimeout(() => {
+            if (!started) {
+              synth.cancel();
+              setAudioStatus(
+                "System voice did not start; retrying.",
+              );
+              finish(false);
+            }
+          }, 1800);
+
+          window.setTimeout(() => {
+            synth.cancel();
+            synth.resume();
+            synth.speak(utterance);
+          }, 40);
+        });
+
+      const first = await speakOnce(selectedVoice);
+      if (!first && selectedVoice) {
+        await speakOnce(null);
+      }
+    },
     [
       selectedVoice,
       settings.pitch,
@@ -262,166 +358,86 @@ export function useAgentVoice() {
       response: Response,
       controller: AbortController,
     ) => {
-      const canStream =
-        Boolean(response.body) &&
-        typeof MediaSource !== "undefined" &&
-        MediaSource.isTypeSupported("audio/mpeg");
+      const bytes = await response.arrayBuffer();
+      if (controller.signal.aborted) return;
+      if (!bytes.byteLength) {
+        throw new Error(
+          "ElevenLabs returned an empty audio response.",
+        );
+      }
 
-      if (!canStream || !response.body) {
-        const blob = await response.blob();
-        if (controller.signal.aborted) return;
+      const context = getAudioContext();
+      if (context) {
+        try {
+          if (context.state === "suspended") {
+            await context.resume();
+          }
 
-        cleanupAudio();
-        const url = URL.createObjectURL(blob);
-        audioUrlRef.current = url;
+          const audioBuffer =
+            await context.decodeAudioData(bytes.slice(0));
+          if (controller.signal.aborted) return;
 
-        const audio = new Audio(url);
-        audio.volume = settings.volume;
-        audioRef.current = audio;
+          const source = context.createBufferSource();
+          const gain = context.createGain();
+          gain.gain.value = Math.max(
+            0.05,
+            settings.volume,
+          );
+          source.buffer = audioBuffer;
+          source.connect(gain);
+          gain.connect(context.destination);
+          audioSourceRef.current = source;
 
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => resolve();
-          audio.onerror = () =>
-            reject(
-              new Error(
-                "Unable to play ElevenLabs audio.",
-              ),
-            );
-          audio.play().catch(reject);
-        });
-        return;
+          await new Promise<void>((resolve) => {
+            source.onended = () => resolve();
+            source.start();
+          });
+
+          if (audioSourceRef.current === source) {
+            audioSourceRef.current = null;
+          }
+          return;
+        } catch (error) {
+          setAudioStatus(
+            "Web Audio playback failed; trying browser audio. " +
+              (error instanceof Error
+                ? error.message
+                : String(error)),
+          );
+        }
       }
 
       cleanupAudio();
-      const mediaSource = new MediaSource();
-      const url = URL.createObjectURL(mediaSource);
+      const blob = new Blob([bytes], {
+        type:
+          response.headers.get("content-type") ||
+          "audio/mpeg",
+      });
+      const url = URL.createObjectURL(blob);
       audioUrlRef.current = url;
-
       const audio = new Audio(url);
-      audio.volume = settings.volume;
+      audio.volume = Math.max(
+        0.05,
+        settings.volume,
+      );
       audioRef.current = audio;
 
-      const ended = new Promise<void>(
-        (resolve, reject) => {
-          audio.onended = () => resolve();
-          audio.onerror = () =>
-            reject(
-              new Error(
-                "Unable to play ElevenLabs audio stream.",
-              ),
-            );
-        },
-      );
-
       await new Promise<void>((resolve, reject) => {
-        mediaSource.addEventListener(
-          "sourceopen",
-          () => resolve(),
-          { once: true },
-        );
-        mediaSource.addEventListener(
-          "sourceclose",
-          () => {
-            if (!controller.signal.aborted) {
-              reject(
-                new Error(
-                  "ElevenLabs media stream closed early.",
-                ),
-              );
-            }
-          },
-          { once: true },
-        );
+        audio.onended = () => resolve();
+        audio.onerror = () =>
+          reject(
+            new Error(
+              "Unable to play ElevenLabs audio.",
+            ),
+          );
+        audio.play().catch(reject);
       });
-
-      if (controller.signal.aborted) return;
-
-      const sourceBuffer =
-        mediaSource.addSourceBuffer("audio/mpeg");
-      const reader = response.body.getReader();
-      let playbackStarted = false;
-
-      const append = (chunk: Uint8Array) =>
-        new Promise<void>((resolve, reject) => {
-          const onDone = () => {
-            cleanupListeners();
-            resolve();
-          };
-          const onError = () => {
-            cleanupListeners();
-            reject(
-              new Error(
-                "Unable to buffer ElevenLabs audio.",
-              ),
-            );
-          };
-          const cleanupListeners = () => {
-            sourceBuffer.removeEventListener(
-              "updateend",
-              onDone,
-            );
-            sourceBuffer.removeEventListener(
-              "error",
-              onError,
-            );
-          };
-
-          sourceBuffer.addEventListener(
-            "updateend",
-            onDone,
-          );
-          sourceBuffer.addEventListener(
-            "error",
-            onError,
-          );
-          const safeChunk = new Uint8Array(
-            chunk.byteLength,
-          );
-          safeChunk.set(chunk);
-          sourceBuffer.appendBuffer(
-            safeChunk.buffer,
-          );
-        });
-
-      try {
-        while (!controller.signal.aborted) {
-          const { done, value } =
-            await reader.read();
-          if (done) break;
-          if (!value?.byteLength) continue;
-
-          await append(value);
-
-          if (!playbackStarted) {
-            await audio.play();
-            playbackStarted = true;
-          }
-        }
-
-        if (
-          !controller.signal.aborted &&
-          mediaSource.readyState === "open"
-        ) {
-          mediaSource.endOfStream();
-        }
-
-        if (
-          !controller.signal.aborted &&
-          !playbackStarted
-        ) {
-          await audio.play();
-        }
-
-        if (!controller.signal.aborted) {
-          await ended;
-        }
-      } finally {
-        if (controller.signal.aborted) {
-          await reader.cancel().catch(() => undefined);
-        }
-      }
     },
-    [cleanupAudio, settings.volume],
+    [
+      cleanupAudio,
+      getAudioContext,
+      settings.volume,
+    ],
   );
 
   const speakElevenAsync = useCallback(
@@ -441,6 +457,7 @@ export function useAgentVoice() {
       const controller = new AbortController();
       audioAbortRef.current = controller;
       setSpeaking(true);
+      setAudioStatus("Generating ElevenLabs voice...");
       setElevenStatus("Generating ElevenLabs voice...");
 
       try {
@@ -450,17 +467,22 @@ export function useAgentVoice() {
             controller.signal,
           );
 
+        setAudioStatus("Playing ElevenLabs voice...");
         setElevenStatus(
-          "ElevenLabs audio streaming...",
+          "ElevenLabs audio received.",
         );
         await playElevenResponse(
           response,
           controller,
         );
 
+        setAudioStatus("Voice ready.");
         setElevenStatus("ElevenLabs voice ready.");
       } catch (error) {
         if (!controller.signal.aborted) {
+          setAudioStatus(
+            "ElevenLabs failed; using system voice.",
+          );
           setElevenStatus(
             "ElevenLabs failed; using system voice. " +
               (error instanceof Error
@@ -651,6 +673,7 @@ export function useAgentVoice() {
     }, []);
 
   const testVoice = useCallback(() => {
+    setAudioStatus("Testing voice output...");
     void speakAsync(
       "Agent Man online. Systems linked. Standing by for your directive.",
       true,
@@ -690,6 +713,7 @@ export function useAgentVoice() {
     elevenVoices,
     elevenLoading,
     elevenStatus,
+    audioStatus,
     update,
     speak,
     speakAsync,

@@ -45,6 +45,8 @@ def health():
             "elevenlabs_voice": True,
             "mission_control_effective_access": True,
             "agent_context": True,
+            "audio_output_recovery": True,
+            "command_server_log": True,
         },
     }
 

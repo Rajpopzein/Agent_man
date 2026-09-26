@@ -60,6 +60,9 @@ def test_runner_emits_incremental_user_facing_text(monkeypatch):
     ]
 
     assert response_events[0]["type"] == "agent.response.started"
+    assert response_events[0]["provider_id"] == "fake"
+    assert response_events[0]["model"] == "fake-model"
+    assert response_events[0]["agent_role"] == "Executive"
 
     deltas = [
         event["text"]
@@ -76,3 +79,5 @@ def test_runner_emits_incremental_user_facing_text(monkeypatch):
     ]
     assert completed
     assert completed[-1]["text"] == "Hello world"
+    assert isinstance(completed[-1]["duration_ms"], int)
+    assert completed[-1]["duration_ms"] >= 0

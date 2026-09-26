@@ -1474,3 +1474,217 @@ label{color:#6f98a8}
   font-size:7px;
   color:#6d949f
 }
+
+/* Voice output diagnostics */
+.voiceRuntimeStatus{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:8px 10px;
+  border:1px solid rgba(99,230,255,.12);
+  background:rgba(2,12,18,.48)
+}
+.voiceRuntimeStatus>span{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#557984;
+  box-shadow:0 0 7px rgba(85,121,132,.45)
+}
+.voiceRuntimeStatus>span.active{
+  background:var(--teal);
+  box-shadow:0 0 9px var(--teal);
+  animation:pulse .8s ease-in-out infinite
+}
+.voiceRuntimeStatus>div{
+  display:grid;
+  gap:2px
+}
+.voiceRuntimeStatus small{
+  font-family:var(--mono);
+  font-size:6px;
+  letter-spacing:.8px;
+  color:#577d88
+}
+.voiceRuntimeStatus strong{
+  font-size:9px;
+  font-weight:500;
+  color:#a9cbd4
+}
+
+/* Command Core + live AI server log */
+.directiveWorkspace{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 320px;
+  gap:10px;
+  align-items:start
+}
+.directiveMain{
+  min-width:0
+}
+.aiServerLogPanel{
+  min-width:0;
+  border:1px solid rgba(99,230,255,.12);
+  background:
+    linear-gradient(180deg,rgba(3,17,25,.86),rgba(1,8,13,.92));
+  min-height:100%;
+  display:grid;
+  grid-template-rows:auto auto minmax(0,1fr) auto;
+  align-self:stretch
+}
+.aiServerLogPanel>header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  padding:10px 11px 8px;
+  border-bottom:1px solid rgba(99,230,255,.08)
+}
+.aiServerLogPanel>header>div{
+  display:grid;
+  gap:2px
+}
+.aiServerLogPanel h4{
+  margin:0;
+  font-size:11px;
+  font-weight:500;
+  color:#b6d7df
+}
+.aiServerLogPanel>header>svg{
+  color:#6edff3
+}
+.aiServerStatus{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:7px 10px;
+  border-bottom:1px solid rgba(99,230,255,.06);
+  font-family:var(--mono);
+  font-size:6px;
+  letter-spacing:.65px;
+  color:#527782
+}
+.aiServerStatus i{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:#496570
+}
+.aiServerStatus i.online{
+  background:var(--teal);
+  box-shadow:0 0 7px var(--teal)
+}
+.aiServerLogList{
+  max-height:420px;
+  overflow:auto;
+  padding:6px;
+  display:grid;
+  align-content:start;
+  gap:5px
+}
+.aiServerLogRow{
+  padding:7px 8px;
+  border-left:2px solid rgba(99,230,255,.2);
+  background:rgba(3,15,22,.55);
+  min-width:0
+}
+.aiServerLogRow.status-running,
+.aiServerLogRow.status-streaming{
+  border-left-color:var(--cyan);
+  background:rgba(5,35,47,.42)
+}
+.aiServerLogRow.status-success{
+  border-left-color:var(--teal)
+}
+.aiServerLogRow.status-error{
+  border-left-color:var(--red);
+  background:rgba(60,15,23,.18)
+}
+.aiServerLogTop{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  align-items:center
+}
+.aiServerLogTop b{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:8px;
+  font-weight:500;
+  color:#a8cbd4
+}
+.aiServerLogTop span{
+  font-family:var(--mono);
+  font-size:6px;
+  text-transform:uppercase;
+  letter-spacing:.55px;
+  color:#6f9aa5
+}
+.aiServerLogRow>small{
+  display:block;
+  margin-top:3px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-family:var(--mono);
+  font-size:6px;
+  color:#4f747f
+}
+.aiServerLogMeta{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  margin-top:5px;
+  font-family:var(--mono);
+  font-size:6px;
+  color:#668994
+}
+.aiServerLogMeta span{
+  display:flex;
+  align-items:center;
+  gap:4px
+}
+.aiServerLogRow em{
+  display:block;
+  margin-top:5px;
+  font-style:normal;
+  font-size:7px;
+  line-height:1.35;
+  color:#d77f8a;
+  overflow-wrap:anywhere
+}
+.aiServerLogEmpty{
+  padding:18px 10px;
+  text-align:center;
+  color:#4c717c;
+  font-family:var(--mono);
+  font-size:7px
+}
+.aiServerLogOpen{
+  border:0;
+  border-top:1px solid rgba(99,230,255,.08);
+  background:rgba(6,31,42,.28);
+  color:#76a9b5;
+  padding:8px 10px;
+  font-family:var(--mono);
+  font-size:7px;
+  letter-spacing:.6px;
+  text-align:left
+}
+.aiServerLogOpen:hover{
+  color:var(--cyan);
+  background:rgba(9,48,62,.38)
+}
+@media(max-width:1050px){
+  .directiveWorkspace{
+    grid-template-columns:1fr
+  }
+  .aiServerLogPanel{
+    min-height:0
+  }
+  .aiServerLogList{
+    max-height:230px
+  }
+}

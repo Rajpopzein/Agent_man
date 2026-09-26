@@ -79,6 +79,10 @@ def run_messages(
         "project_id": getattr(agent, "project_id", None),
         "agent_id": getattr(agent, "id", None),
         "agent_name": str(getattr(agent, "name", "Agent")),
+        "agent_role": str(getattr(agent, "role", "Unknown")),
+        "provider_id": str(provider_id),
+        "model": str(getattr(agent, "model", "")),
+        "endpoint": resolved_endpoint,
         "response_id": response_id,
     }
     structured = any(
@@ -132,10 +136,20 @@ def run_messages(
             "agent.response.completed",
             **event_context,
             text=final_preview,
+            duration_ms=round(
+                (perf_counter() - started) * 1000
+            ),
         )
     except Exception as exc:
-        events.emit("agent.response.error", **event_context,
-                    text="Response interrupted. Check the request error and retry.")
+        events.emit(
+            "agent.response.error",
+            **event_context,
+            text="Response interrupted. Check the request error and retry.",
+            duration_ms=round(
+                (perf_counter() - started) * 1000
+            ),
+            error=str(exc)[:500],
+        )
         _write_log(
             agent=agent,
             provider_id=provider_id,

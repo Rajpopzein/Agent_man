@@ -10,6 +10,7 @@ import {
   Bot,
   Boxes,
   CircleDot,
+  Clock3,
   Cpu,
   GitBranch,
   Globe2,
@@ -20,6 +21,7 @@ import {
   Plus,
   Radio,
   Search,
+  Server,
   FileText,
   Settings2,
   ShieldAlert,
@@ -48,6 +50,7 @@ import {
   Agent,
   AIConnection,
   EffectiveToolAccess,
+  LLMLog,
   MainAgentConfig,
   MainAgentReply,
   Project,
@@ -87,6 +90,19 @@ type LiveActivity = {
   message: string;
   timestamp: string;
 };
+
+type LiveModelCall = {
+  id: string;
+  actorName: string;
+  actorRole: string;
+  providerId: string;
+  model: string;
+  status: "running" | "streaming" | "success" | "error";
+  durationMs: number | null;
+  timestamp: string;
+  error: string;
+};
+
 
 const VIEW_META: Record<
   View,
@@ -150,6 +166,9 @@ export default function Dashboard() {
   const [run, setRun] = useState<MainAgentReply | null>(null);
   const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
   const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
+  const [liveModelCalls, setLiveModelCalls] =
+    useState<LiveModelCall[]>([]);
+  const [serverLogs, setServerLogs] = useState<LLMLog[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
@@ -218,13 +237,16 @@ export default function Dashboard() {
           loadedAgents,
           executiveConfig,
           effectiveAccess,
+          recentServerLogs,
         ] = await Promise.all([
           api.agents(currentProject.id),
           api.mainAgentConfig(currentProject.id),
           api.effectiveMainAgentTools(currentProject.id),
+          api.llmLogs(currentProject.id, 12),
         ]);
         setMainConfig(executiveConfig);
         setExecutiveAccess(effectiveAccess);
+        setServerLogs(recentServerLogs);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -236,6 +258,7 @@ export default function Dashboard() {
         setAgent(null);
         setMainConfig(null);
         setExecutiveAccess(null);
+        setServerLogs([]);
       }
     } catch {
       setOnline(false);
@@ -261,6 +284,22 @@ export default function Dashboard() {
       );
     } catch {
       setExecutiveAccess(null);
+    }
+  }
+
+  async function refreshServerLogs(
+    projectId?: string,
+  ) {
+    const id = projectId || project?.id;
+    if (!id) {
+      setServerLogs([]);
+      return;
+    }
+
+    try {
+      setServerLogs(await api.llmLogs(id, 12));
+    } catch {
+      // Keep the last known server log snapshot.
     }
   }
 
@@ -294,6 +333,7 @@ export default function Dashboard() {
   useEffect(() => {
     setLiveResponses([]);
     setLiveActivities([]);
+    setLiveModelCalls([]);
     setStreamConnected(false);
     if (!project) return;
 
@@ -335,9 +375,60 @@ export default function Dashboard() {
         return;
       }
 
-      if (runtimeEvent.type.startsWith("agent.response.") &&
-          typeof runtimeEvent.response_id === "string") {
+      if (
+        runtimeEvent.type.startsWith("agent.response.") &&
+        typeof runtimeEvent.response_id === "string"
+      ) {
         const responseId = runtimeEvent.response_id;
+        const responseStatus =
+          runtimeEvent.type === "agent.response.started"
+            ? "running"
+            : runtimeEvent.type === "agent.response.delta"
+              ? "streaming"
+              : runtimeEvent.type === "agent.response.error"
+                ? "error"
+                : "success";
+
+        const modelCall: LiveModelCall = {
+          id: responseId,
+          actorName: String(
+            runtimeEvent.agent_name || "Agent",
+          ),
+          actorRole: String(
+            runtimeEvent.agent_role || "Unknown",
+          ),
+          providerId: String(
+            runtimeEvent.provider_id || "provider",
+          ),
+          model: String(
+            runtimeEvent.model || "model",
+          ),
+          status: responseStatus,
+          durationMs:
+            typeof runtimeEvent.duration_ms === "number"
+              ? runtimeEvent.duration_ms
+              : null,
+          timestamp: String(
+            runtimeEvent.timestamp || "",
+          ),
+          error: String(runtimeEvent.error || ""),
+        };
+
+        setLiveModelCalls((current) => {
+          const found = current.some(
+            (item) => item.id === responseId,
+          );
+          return (
+            found
+              ? current.map((item) =>
+                  item.id === responseId
+                    ? { ...item, ...modelCall }
+                    : item,
+                )
+              : [...current, modelCall]
+          ).slice(-12);
+        });
+
         const response: LiveResponse = {
           id: responseId,
           agentId: String(runtimeEvent.agent_id || ""),
@@ -678,6 +769,7 @@ export default function Dashboard() {
     setRun(null);
     setLiveResponses([]);
     setLiveActivities([]);
+    setLiveModelCalls([]);
 
     let result: MainAgentReply | null = null;
 
@@ -699,6 +791,8 @@ export default function Dashboard() {
       });
     } finally {
       await refreshWorkers(project.id);
+      await refreshServerLogs(project.id);
+      setLiveModelCalls([]);
       setBusy(false);
       setProcessingStartedAt(null);
     }
@@ -859,6 +953,35 @@ export default function Dashboard() {
         liveResponses.length ||
         liveActivities.length,
     );
+
+  const serverLogRows = [
+    ...[...liveModelCalls]
+      .reverse()
+      .map((item) => ({
+        id: "live:" + item.id,
+        actorName: item.actorName,
+        actorRole: item.actorRole,
+        providerId: item.providerId,
+        model: item.model,
+        status: item.status,
+        durationMs: item.durationMs,
+        timestamp: item.timestamp,
+        error: item.error,
+        live: true,
+      })),
+    ...serverLogs.map((item) => ({
+      id: "saved:" + item.id,
+      actorName: item.actor_name,
+      actorRole: item.actor_role,
+      providerId: item.provider_id,
+      model: item.model,
+      status: item.status,
+      durationMs: item.duration_ms,
+      timestamp: item.created_at,
+      error: item.error_text,
+      live: false,
+    })),
+  ].slice(0, 10);
 
     const meta = VIEW_META[view];
 
@@ -1425,6 +1548,8 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              <div className="directiveWorkspace">
+                <div className="directiveMain">
               {(voice.settings.wakeEnabled ||
                 interactionPhase === "processing" ||
                 interactionPhase === "speaking") && (
@@ -1585,6 +1710,95 @@ export default function Dashboard() {
                   ))}
                 </div>
               )}
+                </div>
+
+                <aside className="aiServerLogPanel">
+                  <header>
+                    <div>
+                      <span className="hudEyebrow">
+                        AI SERVER / LIVE
+                      </span>
+                      <h4>Model Traffic</h4>
+                    </div>
+                    <Server size={15} />
+                  </header>
+
+                  <div className="aiServerStatus">
+                    <i
+                      className={
+                        streamConnected ? "online" : ""
+                      }
+                    />
+                    <span>
+                      {streamConnected
+                        ? "EVENT STREAM CONNECTED"
+                        : "EVENT STREAM OFFLINE"}
+                    </span>
+                  </div>
+
+                  <div
+                    className="aiServerLogList"
+                    role="log"
+                    aria-live="polite"
+                  >
+                    {serverLogRows.length === 0 && (
+                      <div className="aiServerLogEmpty">
+                        No model calls yet.
+                      </div>
+                    )}
+
+                    {serverLogRows.map((item) => (
+                      <div
+                        className={
+                          "aiServerLogRow status-" +
+                          item.status
+                        }
+                        key={item.id}
+                      >
+                        <div className="aiServerLogTop">
+                          <b>{item.actorName}</b>
+                          <span>{item.status}</span>
+                        </div>
+                        <small>
+                          {item.providerId} / {item.model}
+                        </small>
+                        <div className="aiServerLogMeta">
+                          <span>
+                            <Clock3 size={10} />
+                            {item.durationMs === null
+                              ? item.live
+                                ? "LIVE"
+                                : "—"
+                              : item.durationMs < 1000
+                                ? item.durationMs + " ms"
+                                : (
+                                    item.durationMs / 1000
+                                  ).toFixed(2) + " s"}
+                          </span>
+                          <time>
+                            {item.timestamp
+                              ? new Date(
+                                  item.timestamp,
+                                ).toLocaleTimeString()
+                              : "—"}
+                          </time>
+                        </div>
+                        {item.error && (
+                          <em>{item.error}</em>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    className="aiServerLogOpen"
+                    type="button"
+                    onClick={() => setView("logs")}
+                  >
+                    Open full LLM logs
+                  </button>
+                </aside>
+              </div>
             </section>
           </div>
         )}
@@ -1920,6 +2134,7 @@ export default function Dashboard() {
         selectedElevenVoice={voice.selectedElevenVoice}
         elevenLoading={voice.elevenLoading}
         elevenStatus={voice.elevenStatus}
+        audioStatus={voice.audioStatus}
         wakeSupported={wake.supported}
         wakeState={wake.state}
         lastHeard={wake.lastHeard}
