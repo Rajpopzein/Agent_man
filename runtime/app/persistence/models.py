@@ -119,3 +119,58 @@ class AgentToolRecord(Base):
         primary_key=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class WorkflowRecord(Base):
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    start_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class WorkflowNodeRecord(Base):
+    __tablename__ = "workflow_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    on_success_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    on_failure_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    max_retries: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WorkflowRunRecord(Base):
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="created")
+    current_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    input_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    last_output: Mapped[str] = mapped_column(Text, default="")
+    step_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkflowRunStepRecord(Base):
+    __tablename__ = "workflow_run_steps"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.id"), index=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    output_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

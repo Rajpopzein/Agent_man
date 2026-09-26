@@ -104,6 +104,57 @@ export type AgentTool = {
   assigned: boolean;
 };
 
+export type WorkflowNode = {
+  id: string;
+  key: string;
+  name: string;
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  instructions: string;
+  position: number;
+  on_success_key: string | null;
+  on_failure_key: string | null;
+  max_retries: number;
+};
+
+export type Workflow = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  start_node_id: string | null;
+  created_at: string;
+  nodes: WorkflowNode[];
+};
+
+export type WorkflowRunStep = {
+  id: string;
+  node_id: string;
+  node_name: string;
+  agent_id: string;
+  agent_name: string;
+  attempt: number;
+  status: string;
+  outcome: string | null;
+  output_text: string;
+  created_at: string;
+};
+
+export type WorkflowRun = {
+  id: string;
+  workflow_id: string;
+  project_id: string;
+  status: string;
+  current_node_id: string | null;
+  input_prompt: string;
+  last_output: string;
+  step_count: number;
+  created_at: string;
+  completed_at: string | null;
+  steps: WorkflowRunStep[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -238,6 +289,66 @@ export const api = {
       {
         method: "PUT",
         body: JSON.stringify({ enabled }),
+      },
+    ),
+  workflows: (projectId: string) =>
+    request<Workflow[]>(
+      "/api/orchestration/projects/" + projectId + "/workflows",
+    ),
+  createWorkflow: (payload: {
+    project_id: string;
+    name: string;
+    description: string;
+    nodes: Array<{
+      key: string;
+      name: string;
+      agent_id: string;
+      instructions: string;
+      on_success_key?: string | null;
+      on_failure_key?: string | null;
+      max_retries: number;
+    }>;
+  }) =>
+    request<Workflow>("/api/orchestration/workflows", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  workflowRuns: (workflowId: string) =>
+    request<WorkflowRun[]>(
+      "/api/orchestration/workflows/" + workflowId + "/runs",
+    ),
+  runWorkflow: (
+    workflowId: string,
+    inputPrompt: string,
+    allowTerminal: boolean,
+    allowDelete: boolean,
+  ) =>
+    request<WorkflowRun>(
+      "/api/orchestration/workflows/" + workflowId + "/runs",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          input_prompt: inputPrompt,
+          allow_terminal: allowTerminal,
+          allow_delete: allowDelete,
+        }),
+      },
+    ),
+  resumeWorkflowRun: (
+    runId: string,
+    inputPrompt: string,
+    allowTerminal: boolean,
+    allowDelete: boolean,
+  ) =>
+    request<WorkflowRun>(
+      "/api/orchestration/runs/" + runId + "/resume",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          input_prompt: inputPrompt,
+          allow_terminal: allowTerminal,
+          allow_delete: allowDelete,
+        }),
       },
     ),
 };

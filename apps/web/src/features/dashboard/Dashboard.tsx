@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   BrainCircuit,
   Home,
+  GitBranch,
   Network,
   Plug,
   Plus,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
+import OrchestrationPage from "../agents/OrchestrationPage";
 import AIConnections from "../settings/AIConnections";
 import ToolsPage from "../tools/ToolsPage";
 import {
@@ -20,7 +22,12 @@ import {
   Project,
 } from "../../services/api";
 
-type View = "dashboard" | "multi-agent" | "tools" | "connections";
+type View =
+  | "dashboard"
+  | "orchestration"
+  | "multi-agent"
+  | "tools"
+  | "connections";
 
 export default function Dashboard() {
   const [view, setView] = useState<View>("dashboard");
@@ -197,6 +204,12 @@ export default function Dashboard() {
             <Home /> Dashboard
           </button>
           <button
+            className={view === "orchestration" ? "active" : ""}
+            onClick={() => setView("orchestration")}
+          >
+            <GitBranch /> Orchestration
+          </button>
+          <button
             className={view === "multi-agent" ? "active" : ""}
             onClick={() => setView("multi-agent")}
           >
@@ -232,18 +245,22 @@ export default function Dashboard() {
             <h2>
               {view === "dashboard"
                 ? project?.name || "Agent Man"
-                : view === "multi-agent"
-                  ? "Peer Agent Collaboration"
-                  : view === "tools"
+                : view === "orchestration"
+                  ? "Agent Workflow Orchestration"
+                  : view === "multi-agent"
+                    ? "Peer Agent Collaboration"
+                    : view === "tools"
                     ? "Agent Tool Registry"
                     : "Provider Configuration"}
             </h2>
             <small>
               {view === "dashboard"
                 ? project?.workspace_path || "Create a project to begin"
-                : view === "multi-agent"
-                  ? "Shared project context with no permanent coordinator."
-                  : view === "tools"
+                : view === "orchestration"
+                  ? "Explicit stage handoffs with success and failure routing."
+                  : view === "multi-agent"
+                    ? "Shared project context with no permanent coordinator."
+                    : view === "tools"
                     ? "Control the capabilities exposed to each agent."
                     : "Connections are reusable across agents."}
             </small>
@@ -258,6 +275,8 @@ export default function Dashboard() {
             connections={connections}
             onChanged={reloadConnections}
           />
+        ) : view === "orchestration" ? (
+          <OrchestrationPage project={project} agents={agents} />
         ) : view === "multi-agent" ? (
           <MultiAgentWorkspace project={project} agents={agents} />
         ) : view === "tools" ? (

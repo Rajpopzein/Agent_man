@@ -172,3 +172,77 @@ class AgentToolView(BaseModel):
     version: str
     globally_enabled: bool
     assigned: bool
+
+
+class WorkflowNodeInput(BaseModel):
+    key: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=160)
+    agent_id: str
+    instructions: str = Field(min_length=1, max_length=20_000)
+    on_success_key: str | None = Field(default=None, max_length=80)
+    on_failure_key: str | None = Field(default=None, max_length=80)
+    max_retries: int = Field(default=0, ge=0, le=5)
+
+
+class WorkflowCreate(BaseModel):
+    project_id: str
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    nodes: list[WorkflowNodeInput] = Field(min_length=1, max_length=20)
+
+
+class WorkflowNodeView(BaseModel):
+    id: str
+    key: str
+    name: str
+    agent_id: str
+    agent_name: str
+    role: str
+    instructions: str
+    position: int
+    on_success_key: str | None
+    on_failure_key: str | None
+    max_retries: int
+
+
+class WorkflowView(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    description: str
+    start_node_id: str | None
+    created_at: datetime
+    nodes: list[WorkflowNodeView]
+
+
+class WorkflowRunRequest(BaseModel):
+    input_prompt: str = Field(min_length=1, max_length=30_000)
+    allow_terminal: bool = False
+    allow_delete: bool = False
+
+
+class WorkflowRunStepView(BaseModel):
+    id: str
+    node_id: str
+    node_name: str
+    agent_id: str
+    agent_name: str
+    attempt: int
+    status: str
+    outcome: str | None
+    output_text: str
+    created_at: datetime
+
+
+class WorkflowRunView(BaseModel):
+    id: str
+    workflow_id: str
+    project_id: str
+    status: str
+    current_node_id: str | None
+    input_prompt: str
+    last_output: str
+    step_count: int
+    created_at: datetime
+    completed_at: datetime | None
+    steps: list[WorkflowRunStepView]
