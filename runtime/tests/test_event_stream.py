@@ -67,3 +67,29 @@ def test_dashboard_does_not_poll_agents_while_executive_is_busy():
 
     # One final refresh after the Executive request is expected.
     assert dashboard.count("await refreshWorkers(project.id);") == 1
+
+
+
+def test_dashboard_renders_stream_in_command_output():
+    root = Path(__file__).resolve().parents[2]
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'runtimeEvent.type === "executive.activity"' in dashboard
+    assert "latestLiveResponse" in dashboard
+    assert "liveOutputText" in dashboard
+    assert "LIVE STREAM" in dashboard
+    assert "liveActivityFeed" in dashboard
+
+    # Streaming is not restricted to the Executive response id.
+    assert (
+        'find((item) => item.agentId === "main-agent:"'
+        not in dashboard
+    )

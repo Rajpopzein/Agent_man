@@ -77,6 +77,16 @@ type LiveResponse = {
   status: string;
 };
 
+type LiveActivity = {
+  id: string;
+  agentName: string;
+  phase: string;
+  status: string;
+  label: string;
+  message: string;
+  timestamp: string;
+};
+
 const VIEW_META: Record<
   View,
   { label: string; eyebrow: string; description: string }
@@ -129,6 +139,7 @@ export default function Dashboard() {
   const [prompt, setPrompt] = useState("");
   const [run, setRun] = useState<MainAgentReply | null>(null);
   const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
+  const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
@@ -236,6 +247,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     setLiveResponses([]);
+    setLiveActivities([]);
     setStreamConnected(false);
     if (!project) return;
 
@@ -251,6 +263,29 @@ export default function Dashboard() {
       try {
         runtimeEvent = JSON.parse(event.data) as RuntimeEvent;
       } catch {
+        return;
+      }
+
+      if (
+        runtimeEvent.type === "executive.activity" &&
+        typeof runtimeEvent.id === "string"
+      ) {
+        const activity: LiveActivity = {
+          id: runtimeEvent.id,
+          agentName: String(
+            runtimeEvent.agent_name || "Agent Man",
+          ),
+          phase: String(runtimeEvent.phase || "runtime"),
+          status: String(runtimeEvent.status || "working"),
+          label: String(runtimeEvent.label || "runtime"),
+          message: String(
+            runtimeEvent.message || "Working...",
+          ),
+          timestamp: String(runtimeEvent.timestamp || ""),
+        };
+        setLiveActivities((current) =>
+          [...current, activity].slice(-40),
+        );
         return;
       }
 
@@ -539,6 +574,7 @@ export default function Dashboard() {
     setProcessingStartedAt(Date.now());
     setRun(null);
     setLiveResponses([]);
+    setLiveActivities([]);
 
     let result: MainAgentReply | null = null;
 
@@ -656,7 +692,35 @@ export default function Dashboard() {
                 ? "WAKE READY"
                 : "READY";
 
-  const meta = VIEW_META[view];
+  const latestLiveResponse =
+    [...liveResponses]
+      .reverse()
+      .find((item) => Boolean(item.text)) || null;
+  const latestLiveActivity =
+    liveActivities.length > 0
+      ? liveActivities[liveActivities.length - 1]
+      : null;
+  const liveOutputText =
+    latestLiveResponse?.text ||
+    latestLiveActivity?.message ||
+    "";
+  const liveOutputAgent =
+    latestLiveResponse?.name ||
+    latestLiveActivity?.agentName ||
+    "Agent Man";
+  const liveOutputStatus =
+    latestLiveResponse?.status ||
+    latestLiveActivity?.status ||
+    "working";
+  const streamActive =
+    busy &&
+    Boolean(
+      liveOutputText ||
+        liveResponses.length ||
+        liveActivities.length,
+    );
+
+    const meta = VIEW_META[view];
 
   return (
     <div className="jarvisShell">
@@ -814,23 +878,6 @@ export default function Dashboard() {
             </code>
           </div>
         </div>
-
-        {liveResponses.length > 0 && (
-          <section className="liveResponses" aria-label="Live agent responses">
-            <header>
-              <strong>LIVE AGENT RESPONSES</strong>
-              <span>{streamConnected ? "Connected · previews until execution completes" : "Reconnecting… updates may be delayed"}</span>
-            </header>
-            <div className="liveResponseList" role="log" aria-live="polite" aria-relevant="additions text">
-              {liveResponses.filter((item) => item.text || item.status !== "completed").map((item) => (
-                <article key={item.id}>
-                  <div><strong>{item.name}</strong><small>{item.status === "started" || item.status === "delta" ? "Generating…" : item.status === "completed" ? "Response received" : "Interrupted"}</small></div>
-                  <p>{item.text || "Working on the next action…"}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
 
         {view === "connections" ? (
           <AIConnections
@@ -1199,17 +1246,77 @@ export default function Dashboard() {
                 </button>
               </form>
 
-              <div className="commandOutput">
+              <div className={"commandOutput " + (streamActive ? "streaming" : "")}>
                 <div className="outputRail">
                   <span />
-                  <small>OUTPUT</small>
+                  <small>{streamActive ? "LIVE" : "OUTPUT"}</small>
                 </div>
                 <div className="outputBody">
-                  {run?.text ||
-                    (busy && [...liveResponses].reverse().find((item) => item.agentId === "main-agent:" + project?.id)?.text) ||
-                    (mainConfig
-                      ? "Agent Man is standing by. Give me the objective; I will choose and coordinate the workers."
-                      : "Configure Agent Man's executive model to begin.")}
+                  <div className="outputStreamHeader">
+                    <span
+                      className={
+                        "streamState " +
+                        (streamActive ? "active" : "idle")
+                      }
+                    >
+                      {streamActive
+                        ? streamConnected
+                          ? "LIVE STREAM"
+                          : "RECONNECTING"
+                        : run
+                          ? "FINAL"
+                          : "STANDBY"}
+                    </span>
+                    <b>
+                      {streamActive
+                        ? liveOutputAgent
+                        : "Agent Man"}
+                    </b>
+                    {streamActive && (
+                      <small>{liveOutputStatus}</small>
+                    )}
+                  </div>
+
+                  <div
+                    className="outputText"
+                    role="log"
+                    aria-live="polite"
+                    aria-atomic="false"
+                  >
+                    {run?.text ||
+                      (busy && liveOutputText) ||
+                      (busy
+                        ? "Agent Man is working on the directive..."
+                        : mainConfig
+                          ? "Agent Man is standing by. Give me the objective; I will choose and coordinate the workers."
+                          : "Configure Agent Man's executive model to begin.")}
+                    {streamActive && (
+                      <span
+                        className="streamCursor"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+
+                  {busy && liveActivities.length > 0 && (
+                    <div className="liveActivityFeed">
+                      {liveActivities
+                        .slice(-6)
+                        .map((item) => (
+                          <div
+                            className={
+                              "liveActivityRow status-" +
+                              item.status
+                            }
+                            key={item.id}
+                          >
+                            <span>{item.phase}</span>
+                            <b>{item.label}</b>
+                            <small>{item.message}</small>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

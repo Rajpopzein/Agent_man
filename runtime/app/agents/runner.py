@@ -102,16 +102,37 @@ def run_messages(
         for chunk in chunks:
             result += chunk
             now = perf_counter()
-            if now - last_emitted >= 0.05:
-                text = response_preview(result, structured=structured)
-                if text and text != last_text:
-                    events.emit("agent.response.delta", **event_context, text=text)
-                    last_text = text
-                    last_emitted = now
+            text = response_preview(result, structured=structured)
+            should_emit = bool(
+                text
+                and text != last_text
+                and (
+                    not last_text
+                    or now - last_emitted >= 0.03
+                    or len(text) - len(last_text) >= 24
+                )
+            )
+            if should_emit:
+                events.emit(
+                    "agent.response.delta",
+                    **event_context,
+                    text=text,
+                )
+                last_text = text
+                last_emitted = now
+
         if not result.strip():
             raise RuntimeError("The model returned an empty response stream.")
-        events.emit("agent.response.completed", **event_context,
-                    text=response_preview(result, structured=structured))
+
+        final_preview = response_preview(
+            result,
+            structured=structured,
+        )
+        events.emit(
+            "agent.response.completed",
+            **event_context,
+            text=final_preview,
+        )
     except Exception as exc:
         events.emit("agent.response.error", **event_context,
                     text="Response interrupted. Check the request error and retry.")

@@ -375,6 +375,20 @@ def run_main_agent(
             }
 
         steps.append(discovery_step)
+        events.emit(
+            "executive.activity",
+            project_id=project.id,
+            agent_id="main-agent:" + project.id,
+            agent_name="Agent Man",
+            phase="tool_preflight",
+            status=str(discovery_step.get("status", "")),
+            label=discovery_tool,
+            message=(
+                "Discovering runtime data with " + discovery_tool
+                if discovery_step.get("status") == "ok"
+                else "Discovery failed in " + discovery_tool
+            ),
+        )
         messages.append(
             {
                 "role": "user",
@@ -488,6 +502,17 @@ def run_main_agent(
             if not isinstance(arguments, dict):
                 arguments = {}
 
+            events.emit(
+                "executive.activity",
+                project_id=project.id,
+                agent_id="main-agent:" + project.id,
+                agent_name="Agent Man",
+                phase="tool",
+                status="started",
+                label=tool_name,
+                message="Running " + tool_name,
+            )
+
             try:
                 result = tools.execute(
                     name=tool_name,
@@ -504,6 +529,16 @@ def run_main_agent(
                     "status": "ok",
                     "result": result,
                 }
+                events.emit(
+                    "executive.activity",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    phase="tool",
+                    status="completed",
+                    label=tool_name,
+                    message=tool_name + " completed",
+                )
             except ApprovalRequired as exc:
                 step = {
                     "type": "tool",
@@ -514,6 +549,21 @@ def run_main_agent(
                     "permission": exc.permission.value,
                 }
                 steps.append(step)
+                events.emit(
+                    "executive.activity",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    phase="tool",
+                    status="approval_required",
+                    label=tool_name,
+                    message=(
+                        tool_name
+                        + " needs "
+                        + exc.permission.value
+                        + " approval"
+                    ),
+                )
                 text = (
                     "Agent Man needs approval to run "
                     + tool_name
@@ -543,6 +593,16 @@ def run_main_agent(
                     "error": str(exc),
                     "recovery_tools": list(recovery),
                 }
+                events.emit(
+                    "executive.activity",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    phase="tool",
+                    status="error",
+                    label=tool_name,
+                    message=tool_name + " failed: " + str(exc)[:240],
+                )
 
             steps.append(step)
             messages.append({"role": "assistant", "content": raw})
@@ -636,6 +696,16 @@ def run_main_agent(
                 }
             else:
                 agent = db.get(AgentRecord, agent_id)
+                events.emit(
+                    "executive.activity",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    phase="delegation",
+                    status="started",
+                    label=agent.name,
+                    message="Delegating to " + agent.name,
+                )
                 agent.state = "assigned"
                 db.commit()
                 events.emit(
@@ -666,6 +736,19 @@ def run_main_agent(
                 "result": result,
             }
             steps.append(step)
+            events.emit(
+                "executive.activity",
+                project_id=project.id,
+                agent_id="main-agent:" + project.id,
+                agent_name="Agent Man",
+                phase="delegation",
+                status=str(result.get("status", "completed")),
+                label=(agent.name if agent_id in worker_ids else "worker"),
+                message=(
+                    (agent.name if agent_id in worker_ids else "Worker")
+                    + " returned to Agent Man"
+                ),
+            )
 
         elif kind == "delegate_peers":
             agent_ids = [

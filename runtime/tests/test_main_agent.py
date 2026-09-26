@@ -933,3 +933,64 @@ def test_executive_intelligently_discovers_esp32_before_opening(monkeypatch):
     assert body["steps"][1]["tool"] == "serial_open"
     assert body["steps"][2]["tool"] == "serial_read"
     assert calls["tools"][0][0] == "list_serial_ports"
+
+
+
+def test_executive_emits_live_tool_activity(monkeypatch):
+    from app.events.bus import events
+
+    project, _workers = _setup()
+    answers = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "list_files",
+            "args": {"path": "."},
+        }),
+        json.dumps({
+            "type": "reply",
+            "message": "I inspected the project files.",
+        }),
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: next(answers),
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        lambda **kwargs: [
+            {"path": "README.md", "type": "file"}
+        ],
+    )
+
+    cursor = events.current_sequence()
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "List files in the project.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+
+    assert response.status_code == 200
+
+    _, emitted = events.wait_since(
+        cursor,
+        timeout=0,
+        project_id=project["id"],
+    )
+    activity = [
+        event
+        for event in emitted
+        if event["type"] == "executive.activity"
+        and event.get("label") == "list_files"
+    ]
+
+    assert [event["status"] for event in activity] == [
+        "started",
+        "completed",
+    ]
+    assert activity[0]["message"] == "Running list_files"
