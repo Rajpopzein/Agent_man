@@ -596,3 +596,146 @@ def test_main_agent_assignment_set_rejects_unknown_tool():
     )
     assert response.status_code == 400
     assert "Unknown tools" in response.json()["detail"]
+
+
+
+def test_health_reports_current_runtime_revision():
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime"] == "agent-man"
+    assert body["api_revision"] == "executive-tools-v2"
+    assert body["features"]["executive_tool_assignment_set"] is True
+
+
+def test_exact_bulk_set_route_is_registered():
+    project, _workers = _setup()
+    path = (
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/bulk/set"
+    )
+
+    response = client.put(
+        path,
+        json={"tool_names": ["list_files", "read_file"]},
+    )
+    assert response.status_code == 200
+    assert {
+        item["name"] for item in response.json()["tools"]
+    } == {"list_files", "read_file"}
+
+
+def test_executive_blocks_peer_fanout_without_explicit_request(
+    monkeypatch,
+):
+    project, workers = _setup()
+    calls = {"count": 0, "peer_called": False}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "delegate_peers",
+                "agent_ids": [
+                    workers["Developer"]["id"],
+                    workers["Tester"]["id"],
+                ],
+                "task": "Work on the feature together.",
+            })
+        assert "RUNTIME CORRECTION" in messages[-1]["content"]
+        return json.dumps({
+            "type": "delegate_agent",
+            "agent_id": workers["Developer"]["id"],
+            "task": "Implement the feature.",
+        })
+
+    def fake_peer_task(**kwargs):
+        calls["peer_called"] = True
+        raise AssertionError("peer fan-out should be blocked")
+
+    def fake_execute_agent(**kwargs):
+        return {
+            "status": "completed",
+            "text": "Implemented.",
+            "steps": [],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.run_peer_task",
+        fake_peer_task,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.execute_agent",
+        fake_execute_agent,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Implement this feature.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert calls["peer_called"] is False
+    assert body["steps"][0]["type"] == "runtime_guard"
+    assert body["steps"][0]["reason"] == "parallel_not_requested"
+    assert body["steps"][1]["type"] == "delegate_agent"
+
+
+def test_executive_allows_peer_fanout_when_explicitly_requested(
+    monkeypatch,
+):
+    project, workers = _setup()
+    calls = {"count": 0, "peer_called": False}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "delegate_peers",
+                "agent_ids": [
+                    workers["Developer"]["id"],
+                    workers["Tester"]["id"],
+                ],
+                "task": "Work in parallel.",
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "Parallel work completed.",
+        })
+
+    def fake_peer_task(*, task, **kwargs):
+        calls["peer_called"] = True
+        task.status = "completed"
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.run_peer_task",
+        fake_peer_task,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Have multiple agents work in parallel on this.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+    assert response.status_code == 200
+    assert calls["peer_called"] is True

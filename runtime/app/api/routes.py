@@ -29,7 +29,17 @@ router = APIRouter()
 
 @router.get("/health")
 def health():
-    return {"status": "healthy", "runtime": "agent-man", "version": settings.version}
+    return {
+        "status": "healthy",
+        "runtime": "agent-man",
+        "version": settings.version,
+        "api_revision": settings.api_revision,
+        "features": {
+            "executive_tool_assignment_set": True,
+            "executive_effective_tools": True,
+            "serial_device_broker": True,
+        },
+    }
 
 
 @router.post("/api/projects", response_model=ProjectView, status_code=201)

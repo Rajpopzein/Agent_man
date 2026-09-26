@@ -426,17 +426,72 @@ export const api = {
         body: JSON.stringify({ enabled }),
       },
     ),
-  setMainAgentToolAssignments: (
+  setMainAgentToolAssignments: async (
     projectId: string,
     toolNames: string[],
-  ) =>
-    request<EffectiveToolAccess>(
-      "/api/tools/main-agent/" + projectId + "/bulk/set",
-      {
-        method: "PUT",
-        body: JSON.stringify({ tool_names: toolNames }),
-      },
-    ),
+  ) => {
+    try {
+      return await request<EffectiveToolAccess>(
+        "/api/tools/main-agent/" + projectId + "/bulk/set",
+        {
+          method: "PUT",
+          body: JSON.stringify({ tool_names: toolNames }),
+        },
+      );
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !/not found/i.test(error.message)
+      ) {
+        throw error;
+      }
+
+      const requested = new Set(toolNames);
+      const current = await request<AgentTool[]>(
+        "/api/tools/main-agent/" + projectId,
+      );
+
+      for (const tool of current) {
+        const shouldAssign =
+          tool.globally_enabled && requested.has(tool.name);
+        if (tool.assigned === shouldAssign) continue;
+
+        await request<AgentTool>(
+          "/api/tools/main-agent/" +
+            projectId +
+            "/" +
+            tool.name,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              enabled: shouldAssign,
+            }),
+          },
+        );
+      }
+
+      const updated = await request<AgentTool[]>(
+        "/api/tools/main-agent/" + projectId,
+      );
+      const effectiveTools = updated
+        .filter(
+          (tool) =>
+            tool.globally_enabled && tool.assigned,
+        )
+        .map((tool) => ({
+          name: tool.name,
+          category: tool.category,
+          risk: tool.risk,
+          description: tool.description,
+        }));
+
+      return {
+        project_id: projectId,
+        count: effectiveTools.length,
+        tools: effectiveTools,
+      };
+    }
+  },
   grantAllMainAgentTools: (projectId: string) =>
     request<{ updated: number; assigned: string[] }>(
       "/api/tools/main-agent/" + projectId + "/bulk/grant-all",
