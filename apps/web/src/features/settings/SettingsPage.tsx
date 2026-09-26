@@ -15,6 +15,7 @@ import {
   api,
   AgentTool,
   AIConnection,
+  EffectiveToolAccess,
   MainAgentConfig,
   Project,
 } from "../../services/api";
@@ -39,7 +40,10 @@ export default function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [executiveTools, setExecutiveTools] = useState<AgentTool[]>([]);
+  const [effectiveTools, setEffectiveTools] =
+    useState<EffectiveToolAccess | null>(null);
   const [toolStatus, setToolStatus] = useState("");
+  const [verifyingTools, setVerifyingTools] = useState(false);
 
   useEffect(() => {
     const connection =
@@ -55,9 +59,11 @@ export default function SettingsPage({
   useEffect(() => {
     if (!project) {
       setExecutiveTools([]);
+      setEffectiveTools(null);
       return;
     }
     void loadExecutiveTools(project.id);
+    void verifyExecutiveTools(project.id, false);
   }, [project?.id]);
 
   async function loadExecutiveTools(projectId: string) {
@@ -67,6 +73,38 @@ export default function SettingsPage({
       setToolStatus(
         error instanceof Error ? error.message : String(error),
       );
+    }
+  }
+
+  async function verifyExecutiveTools(
+    projectId: string,
+    announce = true,
+  ) {
+    setVerifyingTools(true);
+    try {
+      const effective = await api.effectiveMainAgentTools(projectId);
+      setEffectiveTools(effective);
+      if (announce) {
+        setToolStatus(
+          effective.count > 0
+            ? "Runtime verified: Agent Man receives " +
+                effective.count +
+                " effective tools."
+            : "Runtime verified: Agent Man currently receives 0 effective tools.",
+        );
+      }
+      return effective;
+    } catch (error) {
+      setEffectiveTools(null);
+      if (announce) {
+        setToolStatus(
+          "Unable to verify Executive runtime access: " +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+      return null;
+    } finally {
+      setVerifyingTools(false);
     }
   }
 
@@ -172,6 +210,7 @@ export default function SettingsPage({
           item.name === updated.name ? updated : item,
         ),
       );
+      await verifyExecutiveTools(project.id, false);
       setToolStatus(
         updated.name +
           (updated.assigned
@@ -193,10 +232,16 @@ export default function SettingsPage({
     try {
       const result = await api.grantAllMainAgentTools(project.id);
       await loadExecutiveTools(project.id);
+      const effective = await verifyExecutiveTools(
+        project.id,
+        false,
+      );
       setToolStatus(
         "Granted " +
           result.updated +
-          " enabled runtime tools to Agent Man Executive.",
+          " enabled runtime tools to Agent Man Executive. Runtime now exposes " +
+          (effective?.count ?? 0) +
+          " tools.",
       );
     } catch (error) {
       setToolStatus(
@@ -213,6 +258,7 @@ export default function SettingsPage({
     try {
       const result = await api.revokeAllMainAgentTools(project.id);
       await loadExecutiveTools(project.id);
+      await verifyExecutiveTools(project.id, false);
       setToolStatus(
         "Removed " +
           result.updated +
@@ -221,6 +267,29 @@ export default function SettingsPage({
     } catch (error) {
       setToolStatus(
         "Unable to remove Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  async function repairExecutiveTools() {
+    if (!project) return;
+
+    setToolStatus("Repairing Executive runtime tool access...");
+    try {
+      await api.grantAllMainAgentTools(project.id);
+      await loadExecutiveTools(project.id);
+      const effective = await verifyExecutiveTools(project.id, false);
+      setToolStatus(
+        effective && effective.count > 0
+          ? "Executive tool access repaired. Runtime confirms " +
+              effective.count +
+              " effective tools."
+          : "Repair completed, but runtime still reports 0 effective tools.",
+      );
+    } catch (error) {
+      setToolStatus(
+        "Unable to repair Executive tool access: " +
           (error instanceof Error ? error.message : String(error)),
       );
     }
@@ -420,6 +489,26 @@ export default function SettingsPage({
             <button
               type="button"
               className="secondaryButton"
+              onClick={() => void verifyExecutiveTools(project.id)}
+              disabled={verifyingTools}
+            >
+              <RefreshCw
+                size={13}
+                className={verifyingTools ? "spinIcon" : ""}
+              />
+              {verifyingTools ? "Verifying..." : "Verify runtime"}
+            </button>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={() => void repairExecutiveTools()}
+              disabled={executiveTools.length === 0}
+            >
+              Repair access
+            </button>
+            <button
+              type="button"
+              className="secondaryButton"
               onClick={() => void grantAllExecutiveTools()}
               disabled={executiveTools.length === 0}
             >
@@ -434,6 +523,27 @@ export default function SettingsPage({
               Remove all
             </button>
           </div>
+        </div>
+
+        <div
+          className={
+            "executiveRuntimeAccess " +
+            (effectiveTools?.count ? "verified" : "empty")
+          }
+        >
+          <div>
+            <small>EFFECTIVE RUNTIME ACCESS</small>
+            <strong>
+              {effectiveTools
+                ? effectiveTools.count + " tools visible to Executive LLM"
+                : "Not verified"}
+            </strong>
+          </div>
+          <p>
+            {effectiveTools && effectiveTools.count > 0
+              ? effectiveTools.tools.map((tool) => tool.name).join(", ")
+              : "Use Verify runtime. If this says 0, Repair access will restore all globally enabled tools."}
+          </p>
         </div>
 
         <div className="executiveToolGroups">

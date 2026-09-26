@@ -104,6 +104,17 @@ export type AgentTool = {
   assigned: boolean;
 };
 
+export type EffectiveToolAccess = {
+  project_id: string;
+  count: number;
+  tools: Array<{
+    name: string;
+    category: string;
+    risk: string;
+    description: string;
+  }>;
+};
+
 export type WorkflowNode = {
   id: string;
   key: string;
@@ -398,6 +409,10 @@ export const api = {
   mainAgentTools: (projectId: string) =>
     request<AgentTool[]>(
       "/api/tools/main-agent/" + projectId,
+    ),
+  effectiveMainAgentTools: (projectId: string) =>
+    request<EffectiveToolAccess>(
+      "/api/tools/main-agent/" + projectId + "/effective",
     ),
   setMainAgentTool: (
     projectId: string,

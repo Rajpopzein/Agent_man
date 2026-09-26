@@ -11,6 +11,7 @@ from app.persistence.models import (
     ProjectRecord,
     ToolRecord,
 )
+from app.tools.executive_access import executive_tool_access
 from app.tools.service import (
     ensure_agent_defaults,
     ensure_main_agent_defaults,
@@ -322,3 +323,17 @@ def revoke_all_main_agent_tools(
         "updated": len(rows),
         "assigned": [],
     }
+
+
+
+@router.get("/main-agent/{project_id}/effective")
+def effective_main_agent_tools(
+    project_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    return executive_tool_access(
+        db,
+        project_id,
+    ).as_dict()

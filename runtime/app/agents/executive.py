@@ -26,11 +26,12 @@ from app.tools.capabilities import (
     CAPABILITY_TOOLS,
     detect_missing_capability,
 )
-from app.tools.registry import catalog_for_prompt, tools
-from app.tools.service import allowed_main_agent_tool_names
+from app.tools.executive_access import executive_tool_access
+from app.tools.registry import tools
 
 MAX_EXECUTIVE_STEPS = 30
 MAX_HISTORY = 20
+MAX_TOOL_CORRECTIONS = 3
 
 SYSTEM_PROMPT = """You are Agent Man, the executive agent and primary user interface.
 The user talks to you, not directly to worker agents.
@@ -53,8 +54,16 @@ actually complete.
 The runtime enforces permissions. Never bypass approval requirements and never
 invent tool results.
 
+RUNTIME TOOL ACCESS IS CONFIRMED.
+You currently have {tool_count} effective runtime tools.
+These tools are directly executable by the runtime when you emit a valid tool
+action. Do not claim you cannot access tools that appear in this list.
+
 Available runtime tools:
 {tools}
+
+Effective tool names:
+{tool_names}
 
 Available workers:
 {workers}
@@ -84,11 +93,73 @@ If you believe a capability is missing:
 
 Rules:
 - Do not claim you lack a capability before checking the available runtime tools.
+- If the user asks you to inspect, read, list, edit, run, test, build, fetch,
+  browse, inspect Git, inspect processes, inspect ports, or access serial/COM
+  hardware, use a relevant runtime tool before replying.
 - If a tool attempt fails, inspect the failure and try another safe approach.
+- If a tool requires approval, call it anyway; the runtime will return the
+  required permission and pause safely.
 - Do not ask the user to manually choose Developer/Tester when you can select them.
 - Only reply with the final user-facing result when the overall objective is complete,
   or when a required runtime permission/capability genuinely prevents progress.
 """
+
+
+def _looks_like_tool_denial(text: str) -> bool:
+    lowered = text.lower()
+    phrases = (
+        "i don't have access",
+        "i do not have access",
+        "i can't access",
+        "i cannot access",
+        "i'm unable to access",
+        "i am unable to access",
+        "no access to",
+        "don't have direct access",
+        "do not have direct access",
+        "cannot directly access",
+        "can't directly access",
+        "unable to directly access",
+    )
+    return any(phrase in lowered for phrase in phrases)
+
+
+def _request_requires_tool(text: str) -> bool:
+    lowered = text.lower()
+    phrases = (
+        "list files",
+        "show files",
+        "read file",
+        "open file",
+        "edit file",
+        "write file",
+        "search files",
+        "run command",
+        "execute command",
+        "run tests",
+        "run test",
+        "build project",
+        "run build",
+        "lint",
+        "git status",
+        "git diff",
+        "git commit",
+        "check port",
+        "allocate port",
+        "list processes",
+        "start process",
+        "stop process",
+        "fetch ",
+        "open website",
+        "browse ",
+        "internet",
+        "web access",
+        "serial port",
+        "com port",
+        "esp32",
+        "hardware",
+    )
+    return any(phrase in lowered for phrase in phrases)
 
 
 def _parse(raw: str):
@@ -209,10 +280,11 @@ def run_main_agent(
     )
     worker_ids = {a.id for a in workers}
     workflow_ids = {w.id for w in workflows}
-    allowed_tools = allowed_main_agent_tool_names(
+    tool_access = executive_tool_access(
         db,
         project.id,
     )
+    allowed_tools = set(tool_access.names)
 
     approvals: set[str] = set()
     if allow_terminal:
@@ -228,7 +300,9 @@ def run_main_agent(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                tools=catalog_for_prompt(allowed_tools),
+                tools=tool_access.catalog or "(none)",
+                tool_count=tool_access.count,
+                tool_names=", ".join(tool_access.names) or "(none)",
                 workers=worker_text,
                 workflows=workflow_text,
             ),
@@ -240,6 +314,7 @@ def run_main_agent(
     )
     proxy = _proxy(config, db)
     steps: list[dict] = []
+    tool_corrections = 0
 
     for step_number in range(1, MAX_EXECUTIVE_STEPS + 1):
         raw = run_messages(proxy, messages)
@@ -247,6 +322,52 @@ def run_main_agent(
         kind = str(action.get("type", "reply")).lower()
 
         if kind == "reply":
+            text = str(action.get("message", raw)).strip()
+            should_force_tool = (
+                bool(allowed_tools)
+                and tool_corrections < MAX_TOOL_CORRECTIONS
+                and (
+                    _looks_like_tool_denial(text)
+                    or (
+                        not steps
+                        and _request_requires_tool(message)
+                    )
+                )
+            )
+
+            if should_force_tool:
+                tool_corrections += 1
+                guard_step = {
+                    "type": "runtime_guard",
+                    "step": step_number,
+                    "status": "retry",
+                    "reason": (
+                        "false_tool_denial"
+                        if _looks_like_tool_denial(text)
+                        else "tool_required_for_request"
+                    ),
+                    "effective_tools": sorted(allowed_tools),
+                }
+                steps.append(guard_step)
+                messages.append(
+                    {"role": "assistant", "content": raw}
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME CORRECTION: You DO have direct runtime "
+                            "tool access. Effective tools are: "
+                            + ", ".join(sorted(allowed_tools))
+                            + ". Do not answer that you cannot access the "
+                            "system. Use the relevant tool now by returning "
+                            "a JSON tool action. If approval is required, "
+                            "call the tool and let the runtime request it."
+                        ),
+                    }
+                )
+                continue
+
             text = str(action.get("message", raw)).strip()
             _store_assistant_message(db, project.id, text)
             return {

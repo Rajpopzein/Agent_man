@@ -440,3 +440,95 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
     assert body["status"] == "waiting_approval"
     assert body["steps"][0]["tool"] == "serial_open"
     assert body["steps"][0]["permission"] == "hardware.serial"
+
+
+
+def test_effective_executive_tool_endpoint_reports_runtime_tools():
+    project, _workers = _setup()
+
+    response = client.get(
+        "/api/tools/main-agent/" + project["id"] + "/effective"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_id"] == project["id"]
+    assert body["count"] > 0
+    names = {item["name"] for item in body["tools"]}
+    assert "read_file" in names
+    assert "run_tests" in names
+    assert "list_serial_ports" in names
+
+    removed = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/read_file",
+        json={"enabled": False},
+    )
+    assert removed.status_code == 200
+
+    after = client.get(
+        "/api/tools/main-agent/" + project["id"] + "/effective"
+    )
+    assert after.status_code == 200
+    after_names = {item["name"] for item in after.json()["tools"]}
+    assert "read_file" not in after_names
+
+
+def test_executive_rejects_false_no_tool_access_reply(monkeypatch):
+    project, _workers = _setup()
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert "read_file" in messages[0]["content"]
+            assert "list_files" in messages[0]["content"]
+            return json.dumps({
+                "type": "reply",
+                "message": "I cannot access the project files directly.",
+            })
+        if calls["count"] == 2:
+            assert "RUNTIME CORRECTION" in messages[-1]["content"]
+            return json.dumps({
+                "type": "tool",
+                "tool": "list_files",
+                "args": {"path": "."},
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "I accessed the project and found README.md.",
+        })
+
+    def fake_execute(**kwargs):
+        assert kwargs["name"] == "list_files"
+        assert "list_files" in kwargs["allowed_names"]
+        return [{"path": "README.md", "type": "file"}]
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        fake_execute,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "List files in the project.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["text"] == "I accessed the project and found README.md."
+    assert body["steps"][0]["type"] == "runtime_guard"
+    assert body["steps"][0]["reason"] == "false_tool_denial"
+    assert body["steps"][1]["type"] == "tool"
+    assert body["steps"][1]["tool"] == "list_files"
+    assert body["steps"][1]["status"] == "ok"
