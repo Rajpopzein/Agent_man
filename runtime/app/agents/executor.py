@@ -13,6 +13,35 @@ from app.tools.service import allowed_tool_names
 
 MAX_TURNS = 30
 
+VALIDATION_ROLES = ("tester", "test", "qa", "validator", "validation")
+
+
+def _working_state(agent) -> str:
+    role = str(getattr(agent, "role", "")).lower()
+    if any(token in role for token in VALIDATION_ROLES):
+        return "validating"
+    return "working"
+
+
+def _set_agent_state(
+    *,
+    agent,
+    db,
+    project_id: str,
+    state: str,
+    **payload: object,
+) -> None:
+    agent.state = state
+    db.commit()
+    events.emit(
+        "agent.state.changed",
+        agent_id=agent.id,
+        project_id=project_id,
+        state=state,
+        **payload,
+    )
+
+
 SYSTEM_PROMPT = """You are an autonomous worker inside Agent Man.
 Your job is to keep working until the user's objective is actually complete,
 or until the runtime requires an explicit permission that has not been granted.
@@ -120,6 +149,13 @@ def execute_agent(
     trace: list[dict[str, Any]] = []
     verification_pending = False
 
+    _set_agent_state(
+        agent=agent,
+        db=db,
+        project_id=project.id,
+        state=_working_state(agent),
+        source="run",
+    )
     events.emit(
         "agent.run.started",
         agent_id=agent.id,
@@ -128,7 +164,17 @@ def execute_agent(
     )
 
     for turn_number in range(1, MAX_TURNS + 1):
-        raw = run_messages(agent, messages, endpoint)
+        try:
+            raw = run_messages(agent, messages, endpoint)
+        except Exception:
+            _set_agent_state(
+                agent=agent,
+                db=db,
+                project_id=project.id,
+                state="failed",
+                source="llm",
+            )
+            raise
         action = _parse_action(raw)
         action_type = str(action.get("type", "message")).lower()
 
@@ -152,6 +198,14 @@ def execute_agent(
             trace.append(step)
 
             if not resolved:
+                _set_agent_state(
+                    agent=agent,
+                    db=db,
+                    project_id=project.id,
+                    state="waiting_capability",
+                    source="capability",
+                    capability=capability,
+                )
                 events.emit(
                     "agent.capability.unavailable",
                     agent_id=agent.id,
@@ -199,6 +253,13 @@ def execute_agent(
 
             if not verification_pending:
                 verification_pending = True
+                _set_agent_state(
+                    agent=agent,
+                    db=db,
+                    project_id=project.id,
+                    state="verifying",
+                    source="completion_review",
+                )
                 trace.append(
                     {
                         "turn": turn_number,
@@ -237,6 +298,13 @@ def execute_agent(
                 )
                 continue
 
+            _set_agent_state(
+                agent=agent,
+                db=db,
+                project_id=project.id,
+                state="completed",
+                source="run",
+            )
             events.emit(
                 "agent.run.completed",
                 agent_id=agent.id,
@@ -264,6 +332,14 @@ def execute_agent(
             )
             continue
 
+        if verification_pending:
+            _set_agent_state(
+                agent=agent,
+                db=db,
+                project_id=project.id,
+                state=_working_state(agent),
+                source="run",
+            )
         verification_pending = False
         tool_name = str(action.get("tool", ""))
         arguments = action.get("args") or {}
@@ -294,6 +370,14 @@ def execute_agent(
                 "permission": exc.permission.value,
             }
             trace.append(step)
+            _set_agent_state(
+                agent=agent,
+                db=db,
+                project_id=project.id,
+                state="waiting_approval",
+                source="permission",
+                permission=exc.permission.value,
+            )
             events.emit(
                 "tool.approval_required",
                 agent_id=agent.id,
@@ -343,6 +427,13 @@ def execute_agent(
             }
         )
 
+    _set_agent_state(
+        agent=agent,
+        db=db,
+        project_id=project.id,
+        state="attention",
+        source="turn_limit",
+    )
     events.emit(
         "agent.run.stopped",
         agent_id=agent.id,

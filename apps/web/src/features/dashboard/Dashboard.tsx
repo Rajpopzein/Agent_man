@@ -200,9 +200,37 @@ export default function Dashboard() {
     setConnections(await api.aiConnections());
   }
 
+  async function refreshWorkers(projectId?: string) {
+    const id = projectId || project?.id;
+    if (!id) return;
+
+    try {
+      const loadedAgents = await api.agents(id);
+      setAgents(loadedAgents);
+      setAgent((current) =>
+        current
+          ? loadedAgents.find((item) => item.id === current.id) || current
+          : loadedAgents[0] || null,
+      );
+    } catch {
+      // Keep the last known worker state if a polling request fails.
+    }
+  }
+
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!busy || !project) return;
+
+    void refreshWorkers(project.id);
+    const timer = window.setInterval(() => {
+      void refreshWorkers(project.id);
+    }, 650);
+
+    return () => window.clearInterval(timer);
+  }, [busy, project?.id]);
 
   useEffect(() => {
     if (wake.state === "listening" && wake.liveTranscript) {
@@ -427,6 +455,7 @@ export default function Dashboard() {
         steps: [],
       });
     } finally {
+      await refreshWorkers(project.id);
       setBusy(false);
       setProcessingStartedAt(null);
     }
@@ -481,6 +510,17 @@ export default function Dashboard() {
       )?.name || agent.llm.provider_id
     );
   }, [agent, connections]);
+
+  const activeWorkerStates = new Set([
+    "assigned",
+    "working",
+    "validating",
+    "verifying",
+    "waiting_approval",
+    "waiting_capability",
+  ]);
+  const activeWorker =
+    agents.find((item) => activeWorkerStates.has(item.state)) || null;
 
   const interactionPhase =
     voice.speaking
@@ -773,7 +813,9 @@ export default function Dashboard() {
                       <button
                         key={item.id}
                         className={
-                          "matrixAgent " +
+                          "matrixAgent state-" +
+                          item.state +
+                          " " +
                           (agent?.id === item.id ? "active" : "")
                         }
                         onClick={() => setAgent(item)}
@@ -866,10 +908,22 @@ export default function Dashboard() {
                   <b>AGENT MAN</b>
                   <span>EXECUTIVE STATUS</span>
                   <b>{mainConfig ? "ONLINE" : "SETUP REQUIRED"}</b>
-                  <span>INSPECTED WORKER</span>
-                  <b>{agent?.name || "—"}</b>
+                  <span>ACTIVE WORKER</span>
+                  <b>
+                    {activeWorker
+                      ? activeWorker.name
+                      : busy
+                        ? "Agent Man direct"
+                        : "—"}
+                  </b>
                   <span>WORKER STATE</span>
-                  <b>{agent?.state || "—"}</b>
+                  <b>
+                    {activeWorker
+                      ? activeWorker.state.toUpperCase()
+                      : busy
+                        ? "EXECUTIVE WORKING"
+                        : "—"}
+                  </b>
                 </div>
 
                 <div className="permissionReadout">
@@ -966,8 +1020,13 @@ export default function Dashboard() {
                         ? wake.liveTranscript ||
                           "Listening for your command..."
                         : interactionPhase === "processing"
-                          ? "Agent Man is processing: " +
-                            (wake.finalTranscript || prompt)
+                          ? activeWorker
+                            ? "Agent Man delegated to " +
+                              activeWorker.name +
+                              " · " +
+                              activeWorker.state.toUpperCase()
+                            : "Agent Man is processing: " +
+                              (wake.finalTranscript || prompt)
                           : interactionPhase === "speaking"
                             ? "Agent Man is speaking the result."
                             : wake.errorMessage ||

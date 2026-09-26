@@ -1044,3 +1044,52 @@ label{color:#6f98a8}
   .executiveToolSettingsHeader{flex-direction:column}
   .executiveToolGroups{grid-template-columns:1fr}
 }
+
+/* Worker lifecycle states */
+.matrixAgent.state-assigned,
+.matrixAgent.state-working,
+.matrixAgent.state-validating,
+.matrixAgent.state-verifying,
+.matrixAgent.state-waiting_approval,
+.matrixAgent.state-waiting_capability{
+  border-color:rgba(99,230,255,.2);
+  background:linear-gradient(90deg,rgba(8,42,54,.38),rgba(2,13,18,.62));
+}
+.matrixAgent.state-working .agentSignal i,
+.matrixAgent.state-validating .agentSignal i,
+.matrixAgent.state-verifying .agentSignal i{
+  background:var(--teal);
+  box-shadow:0 0 10px var(--teal);
+  animation:pulse .85s ease-in-out infinite;
+}
+.matrixAgent.state-assigned .agentSignal i{
+  background:var(--cyan);
+  box-shadow:0 0 9px var(--cyan);
+}
+.matrixAgent.state-waiting_approval .agentSignal i,
+.matrixAgent.state-waiting_capability .agentSignal i{
+  background:var(--amber);
+  box-shadow:0 0 9px var(--amber);
+  animation:pulse 1.1s ease-in-out infinite;
+}
+.matrixAgent.state-completed .agentSignal i{
+  background:var(--teal);
+  box-shadow:0 0 7px rgba(79,255,195,.7);
+}
+.matrixAgent.state-failed .agentSignal i,
+.matrixAgent.state-attention .agentSignal i{
+  background:var(--red);
+  box-shadow:0 0 8px rgba(255,100,116,.72);
+}
+.matrixAgent.state-working em,
+.matrixAgent.state-validating em,
+.matrixAgent.state-verifying em{
+  color:var(--teal);
+}
+.matrixAgent.state-waiting_approval em,
+.matrixAgent.state-waiting_capability em{
+  color:var(--amber);
+}
+.matrixAgent.state-completed em{color:#7fd7bd}
+.matrixAgent.state-failed em,
+.matrixAgent.state-attention em{color:var(--red)}

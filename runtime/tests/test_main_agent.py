@@ -281,3 +281,88 @@ def test_main_agent_tool_assignment_can_be_changed(monkeypatch):
     assert body["steps"][0]["type"] == "tool"
     assert body["steps"][0]["status"] == "error"
     assert "disabled or not assigned" in body["steps"][0]["error"]
+
+
+
+def test_worker_state_moves_through_working_verifying_completed(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert agent.state == "working"
+            return json.dumps({
+                "type": "final",
+                "verified": True,
+                "message": "Implementation candidate complete.",
+            })
+
+        assert agent.state == "verifying"
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Implementation verified complete.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={
+            "prompt": "Complete and verify the implementation.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+    listed = client.get(
+        "/api/projects/" + project["id"] + "/agents"
+    )
+    assert listed.status_code == 200
+    saved = next(
+        item
+        for item in listed.json()
+        if item["id"] == developer["id"]
+    )
+    assert saved["state"] == "completed"
+
+
+def test_tester_enters_validating_state(monkeypatch):
+    project, workers = _setup()
+    tester = workers["Tester"]
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert agent.state == "validating"
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Validation complete.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/agents/" + tester["id"] + "/execute",
+        json={
+            "prompt": "Validate the implementation.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"

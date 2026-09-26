@@ -9,6 +9,7 @@ from app.agents.multi_agent import run_peer_task
 from app.agents.orchestration import execute_workflow_run
 from app.agents.runner import run_messages
 from app.core.permissions import ApprovalRequired, Permission
+from app.events.bus import events
 from app.persistence.models import (
     AgentRecord,
     MainAgentConfigRecord,
@@ -385,6 +386,17 @@ def run_main_agent(
                 }
             else:
                 agent = db.get(AgentRecord, agent_id)
+                agent.state = "assigned"
+                db.commit()
+                events.emit(
+                    "agent.delegated",
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                    agent_role=agent.role,
+                    project_id=project.id,
+                    task=str(action.get("task", message))[:500],
+                    state="assigned",
+                )
                 bind_agent_connection(agent, db)
                 result = execute_agent(
                     agent=agent,
