@@ -315,7 +315,7 @@ label{color:#6f98a8}
 @media(max-width:760px){
   .jarvisShell{grid-template-columns:1fr;padding-bottom:72px}
   .commandRail{position:fixed;left:0;right:0;bottom:0;top:auto;width:100%;height:64px;z-index:30;flex-direction:row;padding:6px 10px;border-right:0;border-top:1px solid rgba(99,230,255,.18)}
-  .commandRail:after{display:none}.coreMark{display:none}.railNav{grid-template-columns:repeat(6,1fr);gap:3px}.railButton{height:50px}.railButton.active:after{display:none}.railFooter{display:none}
+  .commandRail:after{display:none}.coreMark{display:none}.railNav{grid-template-columns:repeat(7,1fr);gap:3px}.railButton{height:50px}.railButton.active:after{display:none}.railFooter{display:none}
   .hudWorkspace{padding:0 14px 24px}.hudTopbar{height:62px}.systemIdentity small{display:none}.runtimeBadge span{display:none}
   .hudTitleRow{display:block;padding:20px 0 13px}.projectReadout{width:100%;margin-top:14px;text-align:left}
   .telemetryStrip{grid-template-columns:1fr 1fr}.telemetryCell{min-height:72px;padding:10px}.telemetryCell:nth-child(2){border-right:0}.telemetryCell:nth-child(-n+2){border-bottom:1px solid rgba(99,230,255,.08)}
@@ -572,4 +572,124 @@ label{color:#6f98a8}
 }
 @media(max-width:760px){
   .modelDetectRow,.dialogModelDetect{grid-template-columns:1fr}
+}
+
+.llmLogsPage{margin-top:4px}
+.logsToolbar{
+  display:grid;grid-template-columns:150px 180px minmax(220px,1fr) auto auto;
+  gap:9px;align-items:end;padding:12px;margin-bottom:10px
+}
+.logsToolbar label{
+  display:grid;gap:5px;font-family:var(--mono);font-size:7px;
+  letter-spacing:.7px;text-transform:uppercase;color:#5e8794
+}
+.logsSearch{min-width:0}
+.logsList{display:grid;gap:7px}
+.llmLogCard{
+  border:1px solid rgba(99,230,255,.10);background:rgba(2,11,17,.70);
+  clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)
+}
+.llmLogCard.success{border-left:2px solid rgba(79,255,195,.48)}
+.llmLogCard.error{border-left:2px solid rgba(255,100,116,.58)}
+.llmLogCard summary{
+  list-style:none;display:grid;
+  grid-template-columns:32px minmax(120px,.75fr) minmax(180px,1.2fr) 90px 78px 160px;
+  gap:10px;align-items:center;padding:10px 12px;cursor:pointer
+}
+.llmLogCard summary::-webkit-details-marker{display:none}
+.llmLogCard[open] summary{
+  border-bottom:1px solid rgba(99,230,255,.09);
+  background:rgba(7,35,46,.22)
+}
+.llmLogActorIcon{
+  width:29px;height:29px;display:grid;place-items:center;
+  border:1px solid rgba(99,230,255,.15);color:var(--cyan);
+  background:rgba(7,39,51,.25)
+}
+.llmLogIdentity,.llmLogModel{display:grid;min-width:0}
+.llmLogIdentity b,.llmLogModel b{
+  font-size:9px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.llmLogIdentity small,.llmLogModel small{
+  font-family:var(--mono);font-size:7px;color:#537985;margin-bottom:2px
+}
+.llmLogTiming{
+  display:flex;align-items:center;gap:5px;color:#7098a5;
+  font-family:var(--mono);font-size:7px
+}
+.llmLogStatus{
+  justify-self:start;border:1px solid;padding:3px 6px;
+  font-family:var(--mono);font-size:7px;letter-spacing:.6px
+}
+.llmLogStatus.success{
+  color:var(--teal);border-color:rgba(79,255,195,.25);
+  background:rgba(8,55,43,.13)
+}
+.llmLogStatus.error{
+  color:var(--red);border-color:rgba(255,100,116,.28);
+  background:rgba(80,19,28,.13)
+}
+.llmLogCard time{
+  text-align:right;font-family:var(--mono);font-size:7px;color:#4f727d
+}
+.llmLogDetails{padding:12px;display:grid;gap:9px}
+.llmLogMeta{
+  display:grid;grid-template-columns:.6fr 1fr .6fr 1.8fr;gap:7px
+}
+.llmLogMeta>span{
+  display:grid;gap:2px;padding:7px;border:1px solid rgba(99,230,255,.07);
+  background:rgba(1,8,13,.48);min-width:0
+}
+.llmLogMeta small{
+  font-family:var(--mono);font-size:6px;letter-spacing:.7px;color:#4d707b
+}
+.llmLogMeta b,.llmLogMeta code{
+  font-family:var(--mono);font-size:7px;font-weight:500;color:#8db8c2;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.llmPayload,.llmErrorPayload{
+  border:1px solid rgba(99,230,255,.08);background:rgba(1,7,12,.72)
+}
+.llmPayload header,.llmErrorPayload header{
+  padding:7px 9px;border-bottom:1px solid rgba(99,230,255,.07);
+  font-family:var(--mono);font-size:7px;letter-spacing:.8px;color:#668f9c
+}
+.llmErrorPayload{border-color:rgba(255,100,116,.14)}
+.llmErrorPayload header{color:var(--red);display:flex;align-items:center;gap:5px}
+.llmPayload pre,.llmErrorPayload pre{
+  margin:0;padding:10px;max-height:360px;overflow:auto;white-space:pre-wrap;
+  overflow-wrap:anywhere;font-family:var(--mono);font-size:8px;line-height:1.5;
+  color:#89acb6
+}
+.llmErrorPayload pre{color:#c38991}
+.logsEmpty{
+  min-height:220px;display:grid;place-items:center;align-content:center;
+  text-align:center;color:#547884
+}
+.logsEmpty h3{margin:8px 0 3px}
+
+@media(max-width:1100px){
+  .logsToolbar{grid-template-columns:1fr 1fr}
+  .logsSearch{grid-column:1/-1}
+  .llmLogCard summary{
+    grid-template-columns:30px minmax(110px,1fr) minmax(150px,1.2fr) 78px 70px
+  }
+  .llmLogCard time{display:none}
+  .llmLogMeta{grid-template-columns:1fr 1fr}
+}
+@media(max-width:760px){
+  .logsToolbar{grid-template-columns:1fr}
+  .logsSearch{grid-column:auto}
+  .llmLogCard summary{
+    grid-template-columns:30px 1fr auto;
+    grid-template-areas:
+      "icon identity status"
+      "icon model timing"
+  }
+  .llmLogActorIcon{grid-area:icon}
+  .llmLogIdentity{grid-area:identity}
+  .llmLogModel{grid-area:model}
+  .llmLogTiming{grid-area:timing;justify-self:end}
+  .llmLogStatus{grid-area:status;justify-self:end}
+  .llmLogMeta{grid-template-columns:1fr}
 }

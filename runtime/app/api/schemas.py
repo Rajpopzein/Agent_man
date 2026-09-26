@@ -287,3 +287,20 @@ class MainAgentChatReply(BaseModel):
     status: str
     text: str
     steps: list[dict[str, Any]]
+
+
+class LLMLogView(BaseModel):
+    id: str
+    project_id: str | None
+    actor_id: str | None
+    actor_name: str
+    actor_role: str
+    provider_id: str
+    model: str
+    endpoint: str | None
+    status: str
+    duration_ms: int
+    request_json: str
+    response_text: str
+    error_text: str
+    created_at: datetime

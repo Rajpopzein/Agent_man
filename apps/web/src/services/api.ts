@@ -178,6 +178,23 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type LLMLog = {
+  id: string;
+  project_id: string | null;
+  actor_id: string | null;
+  actor_name: string;
+  actor_role: string;
+  provider_id: string;
+  model: string;
+  endpoint: string | null;
+  status: string;
+  duration_ms: number;
+  request_json: string;
+  response_text: string;
+  error_text: string;
+  created_at: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -279,6 +296,15 @@ export const api = {
           allow_network: allowNetwork,
         }),
       },
+    ),
+  llmLogs: (projectId: string, limit = 200) =>
+    request<LLMLog[]>(
+      "/api/llm-logs/projects/" + projectId + "?limit=" + limit,
+    ),
+  clearLLMLogs: (projectId: string) =>
+    request<{ cleared: boolean; count: number }>(
+      "/api/llm-logs/projects/" + projectId,
+      { method: "DELETE" },
     ),
   aiProviders: () => request<AIProvider[]>("/api/ai/providers"),
   aiConnections: () => request<AIConnection[]>("/api/ai/connections"),

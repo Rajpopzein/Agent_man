@@ -18,6 +18,7 @@ import {
   Plus,
   Radio,
   Search,
+  FileText,
   Settings2,
   ShieldAlert,
   ShieldCheck,
@@ -37,6 +38,7 @@ import VoiceControl from "../audio/VoiceControl";
 import { useAgentVoice } from "../audio/useAgentVoice";
 import { useWakeWord } from "../audio/useWakeWord";
 import AIConnections from "../settings/AIConnections";
+import LLMLogsPage from "../settings/LLMLogsPage";
 import SettingsPage from "../settings/SettingsPage";
 import ToolsPage from "../tools/ToolsPage";
 import {
@@ -55,6 +57,7 @@ type View =
   | "multi-agent"
   | "tools"
   | "connections"
+  | "logs"
   | "settings";
 
 type Notice = {
@@ -91,6 +94,11 @@ const VIEW_META: Record<
     label: "AI Uplink",
     eyebrow: "SYSTEM / PROVIDERS",
     description: "Configure local and cloud model connections.",
+  },
+  logs: {
+    label: "LLM Logs",
+    eyebrow: "SYSTEM / MODEL ACTIVITY",
+    description: "Inspect model requests, responses, latency, and failures.",
   },
   settings: {
     label: "Settings",
@@ -495,6 +503,12 @@ export default function Dashboard() {
             onClick={() => setView("connections")}
           />
           <RailButton
+            active={view === "logs"}
+            label="Logs"
+            icon={<FileText />}
+            onClick={() => setView("logs")}
+          />
+          <RailButton
             active={view === "settings"}
             label="Settings"
             icon={<Settings2 />}
@@ -609,6 +623,8 @@ export default function Dashboard() {
             connections={connections}
             onChanged={reloadConnections}
           />
+        ) : view === "logs" ? (
+          <LLMLogsPage project={project} />
         ) : view === "settings" ? (
           <SettingsPage
             project={project}
@@ -668,27 +684,9 @@ export default function Dashboard() {
                       <span>
                         {mainConfig
                           ? "Executive core online"
-                          : "Executive model not configured"}
+                          : "Executive setup required"}
                       </span>
                     </div>
-                  </div>
-
-                  <div className="executiveAgentMeta">
-                    <span>
-                      <small>PROVIDER</small>
-                      <b>
-                        {mainConfig
-                          ? connections.find(
-                              (item) =>
-                                item.id === mainConfig.connection_id,
-                            )?.name || mainConfig.provider_id
-                          : "—"}
-                      </b>
-                    </span>
-                    <span>
-                      <small>MODEL</small>
-                      <b>{mainConfig?.model || "—"}</b>
-                    </span>
                   </div>
 
                   <div className="executiveManagedNote">
@@ -812,12 +810,12 @@ export default function Dashboard() {
                 <div className="missionReadout">
                   <span>PRIMARY AGENT</span>
                   <b>AGENT MAN</b>
-                  <span>EXECUTIVE MODEL</span>
-                  <b>{mainConfig?.model || "NOT CONFIGURED"}</b>
+                  <span>EXECUTIVE STATUS</span>
+                  <b>{mainConfig ? "ONLINE" : "SETUP REQUIRED"}</b>
                   <span>INSPECTED WORKER</span>
                   <b>{agent?.name || "—"}</b>
-                  <span>WORKER MODEL</span>
-                  <b>{agent?.llm.model || "—"}</b>
+                  <span>WORKER STATE</span>
+                  <b>{agent?.state || "—"}</b>
                 </div>
 
                 <div className="permissionReadout">

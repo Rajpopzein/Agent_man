@@ -205,3 +205,26 @@ class MainAgentMessageRecord(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class LLMLogRecord(Base):
+    __tablename__ = "llm_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"),
+        nullable=True,
+        index=True,
+    )
+    actor_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    actor_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    endpoint: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    request_json: Mapped[str] = mapped_column(Text, default="")
+    response_text: Mapped[str] = mapped_column(Text, default="")
+    error_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)

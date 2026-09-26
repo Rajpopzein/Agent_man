@@ -79,6 +79,8 @@ def _parse(raw: str):
 
 def _proxy(config: MainAgentConfigRecord, db: Session):
     proxy = SimpleNamespace(
+        id="main-agent:" + config.project_id,
+        project_id=config.project_id,
         name="Agent Man",
         role="Executive",
         provider_id=config.provider_id,
