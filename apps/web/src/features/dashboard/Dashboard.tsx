@@ -171,7 +171,7 @@ export default function Dashboard() {
   const [agentDialog, setAgentDialog] = useState(false);
   const [agentName, setAgentName] = useState("Developer");
   const [agentRole, setAgentRole] = useState("Developer");
-  const [agentContext, setAgentContext] = useState(
+  const [agentContext, setAgentContext] = useState<string>(
     AGENT_CONTEXT_TEMPLATES.Developer,
   );
   const [agentConnectionId, setAgentConnectionId] = useState("");
