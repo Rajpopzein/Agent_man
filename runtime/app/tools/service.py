@@ -61,6 +61,16 @@ def ensure_agent_defaults(db: Session, agent_id: str) -> None:
         db.commit()
 
 
+def globally_enabled_tool_names(db: Session) -> set[str]:
+    sync_builtin_tools(db)
+    rows = db.execute(
+        select(ToolRecord.name).where(
+            ToolRecord.enabled.is_(True)
+        )
+    ).all()
+    return {row[0] for row in rows}
+
+
 def allowed_tool_names(db: Session, agent_id: str) -> set[str]:
     agent = db.get(AgentRecord, agent_id)
     if agent is None:

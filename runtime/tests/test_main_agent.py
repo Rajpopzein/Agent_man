@@ -142,3 +142,83 @@ def test_main_agent_can_reply_without_delegating(monkeypatch):
     assert response.status_code == 200
     assert response.json()["text"] == "All systems are available."
     assert response.json()["steps"] == []
+
+
+
+def test_main_agent_can_use_runtime_tools_directly(monkeypatch):
+    project, _workers = _setup()
+    calls = {"count": 0, "allowed": set()}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "tool",
+                "tool": "read_file",
+                "args": {"path": "README.md"},
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "I inspected the project directly with my runtime tools.",
+        })
+
+    def fake_execute(**kwargs):
+        calls["allowed"] = set(kwargs["allowed_names"])
+        assert kwargs["name"] == "read_file"
+        assert kwargs["workspace_path"] == project["workspace_path"]
+        return {"path": "README.md", "content": "Agent Man"}
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        fake_execute,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Inspect README yourself.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["steps"][0]["type"] == "tool"
+    assert body["steps"][0]["tool"] == "read_file"
+    assert body["steps"][0]["status"] == "ok"
+    assert "read_file" in calls["allowed"]
+    assert "run_tests" in calls["allowed"]
+    assert "http_get" in calls["allowed"]
+
+
+def test_main_agent_direct_tool_respects_approval(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: json.dumps({
+            "type": "tool",
+            "tool": "run_command",
+            "args": {"command": "echo hello"},
+        }),
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Run the command yourself.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_approval"
+    assert body["steps"][0]["permission"] == "terminal.execute"

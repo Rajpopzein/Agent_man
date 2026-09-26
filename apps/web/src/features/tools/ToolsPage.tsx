@@ -116,12 +116,30 @@ export default function ToolsPage({ agents }: Props) {
           <h2>Tools</h2>
           <p>
             Built-in capabilities are registered by the trusted runtime.
-            Agents only see and execute tools assigned here.
+            Worker agents only see tools assigned here. Agent Man Executive
+            sees every globally enabled runtime tool.
           </p>
         </div>
         <span className="connectionCount">
           {tools.filter((tool) => tool.enabled).length}/{tools.length} enabled
         </span>
+      </div>
+
+      <div className="executiveToolsNotice panel">
+        <div>
+          <Globe2 size={18} />
+          <span>
+            <b>Agent Man Executive</b>
+            <small>
+              Automatically receives every globally enabled runtime tool.
+              EXECUTE, NETWORK, and destructive operations still require the
+              run permissions from Command Core.
+            </small>
+          </span>
+        </div>
+        <strong>
+          {tools.filter((tool) => tool.enabled).length}/{tools.length} tools
+        </strong>
       </div>
 
       <div className="toolControls panel">
