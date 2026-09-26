@@ -689,8 +689,9 @@ def test_health_reports_current_runtime_revision():
     assert response.status_code == 200
     body = response.json()
     assert body["runtime"] == "agent-man"
-    assert body["api_revision"] == "executive-tools-v2"
+    assert body["api_revision"] == "voice-elevenlabs-v1"
     assert body["features"]["executive_tool_assignment_set"] is True
+    assert body["features"]["elevenlabs_voice"] is True
 
 
 def test_exact_bulk_set_route_is_registered():

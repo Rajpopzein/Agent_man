@@ -5,7 +5,7 @@ from pathlib import Path
 class Settings:
     app_name: str = "Agent Man Runtime"
     version: str = "0.1.0"
-    api_revision: str = "executive-tools-v2"
+    api_revision: str = "voice-elevenlabs-v1"
     data_dir: Path = Path.home() / ".agent-man"
 
 settings = Settings()

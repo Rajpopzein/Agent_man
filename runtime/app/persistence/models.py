@@ -38,6 +38,40 @@ class AIConnectionRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class VoiceProviderConfigRecord(Base):
+    __tablename__ = "voice_provider_configs"
+
+    provider_id: Mapped[str] = mapped_column(
+        String(80),
+        primary_key=True,
+    )
+    voice_id: Mapped[str] = mapped_column(
+        String(160),
+        default="",
+    )
+    model_id: Mapped[str] = mapped_column(
+        String(160),
+        default="eleven_flash_v2_5",
+    )
+    output_format: Mapped[str] = mapped_column(
+        String(80),
+        default="mp3_44100_128",
+    )
+    has_secret: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        onupdate=_now,
+    )
+
+
 class AgentRecord(Base):
     __tablename__ = "agents"
 

@@ -1323,3 +1323,67 @@ label{color:#6f98a8}
     white-space:normal
   }
 }
+
+/* ElevenLabs voice provider */
+.elevenVoicePanel{
+  display:grid;
+  gap:10px;
+  margin-top:10px;
+  padding:11px;
+  border:1px solid rgba(179,140,255,.18);
+  background:
+    linear-gradient(135deg,rgba(70,42,112,.08),rgba(2,12,18,.58))
+}
+.elevenVoiceHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(179,140,255,.12)
+}
+.elevenVoiceHeader>div{display:grid;gap:2px}
+.elevenVoiceHeader small{
+  font-family:var(--mono);
+  font-size:6px;
+  letter-spacing:.9px;
+  color:#7b6a9b
+}
+.elevenVoiceHeader strong{
+  font-family:var(--mono);
+  font-size:9px;
+  font-weight:500;
+  color:#c9afff
+}
+.elevenVoiceHeader>span{
+  border:1px solid rgba(179,140,255,.22);
+  padding:4px 7px;
+  color:#a990dc;
+  font-family:var(--mono);
+  font-size:7px;
+  letter-spacing:.7px
+}
+.elevenKeyRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  align-items:end
+}
+.elevenActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px
+}
+.elevenStatus{
+  border:1px solid rgba(179,140,255,.14);
+  border-left:2px solid #b38cff;
+  background:rgba(72,43,112,.08);
+  color:#a895c6;
+  padding:8px 9px;
+  font-size:8px;
+  line-height:1.45
+}
+.elevenVolume{grid-template-columns:1fr}
+@media(max-width:760px){
+  .elevenKeyRow{grid-template-columns:1fr}
+}

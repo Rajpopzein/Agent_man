@@ -8,6 +8,7 @@ from app.api.main_agent import router as main_agent_router
 from app.api.llm_logs import router as llm_logs_router
 from app.api.orchestration import router as orchestration_router
 from app.api.tools import router as tools_router
+from app.api.voice import router as voice_router
 from app.api.routes import router
 from app.core.config import settings
 from app.persistence.database import SessionLocal
@@ -33,3 +34,4 @@ app.include_router(main_agent_router)
 app.include_router(llm_logs_router)
 app.include_router(orchestration_router)
 app.include_router(tools_router)
+app.include_router(voice_router)

@@ -1,14 +1,25 @@
 import {
+  useEffect,
+  useState,
+} from "react";
+import {
+  KeyRound,
   Mic,
   MicOff,
   Radio,
+  RefreshCw,
   RotateCcw,
+  Save,
   Square,
   Volume2,
   VolumeX,
 } from "lucide-react";
 
 import HudModal from "../../components/HudModal";
+import {
+  ElevenLabsVoice,
+  ElevenLabsVoiceConfig,
+} from "../../services/api";
 import { VoiceSettings } from "./useAgentVoice";
 import { WakeState } from "./useWakeWord";
 
@@ -25,11 +36,25 @@ type Props = {
   liveTranscript: string;
   finalTranscript: string;
   errorMessage: string;
+  elevenConfig: ElevenLabsVoiceConfig;
+  elevenVoices: ElevenLabsVoice[];
+  selectedElevenVoice: ElevenLabsVoice | null;
+  elevenLoading: boolean;
+  elevenStatus: string;
   onUpdate: (patch: Partial<VoiceSettings>) => void;
   onTest: () => void;
   onStop: () => void;
   onReset: () => void;
   onListenNow: () => void;
+  onRefreshElevenVoices: () => Promise<ElevenLabsVoice[]>;
+  onSaveElevenLabs: (payload: {
+    apiKey?: string;
+    voiceId?: string;
+    modelId?: string;
+    outputFormat?: string;
+    clearSecret?: boolean;
+  }) => Promise<ElevenLabsVoiceConfig>;
+  onTestElevenLabs: () => Promise<boolean>;
 };
 
 export default function VoiceControl({
@@ -45,12 +70,26 @@ export default function VoiceControl({
   liveTranscript,
   finalTranscript,
   errorMessage,
+  elevenConfig,
+  elevenVoices,
+  selectedElevenVoice,
+  elevenLoading,
+  elevenStatus,
   onUpdate,
   onTest,
   onStop,
   onReset,
   onListenNow,
+  onRefreshElevenVoices,
+  onSaveElevenLabs,
+  onTestElevenLabs,
 }: Props) {
+  const [apiKey, setApiKey] = useState("");
+
+  useEffect(() => {
+    if (!open) setApiKey("");
+  }, [open]);
+
   const englishVoices = voices.filter((voice) =>
     voice.lang.toLowerCase().startsWith("en"),
   );
@@ -78,6 +117,28 @@ export default function VoiceControl({
     lastHeard ||
     "Say the wake phrase or press Listen now.";
 
+  const voiceIdentity =
+    settings.engine === "elevenlabs"
+      ? selectedElevenVoice
+        ? selectedElevenVoice.name +
+          " / " +
+          elevenConfig.model_id
+        : "ElevenLabs / select a voice"
+      : selectedVoice
+        ? selectedVoice.name +
+          " / " +
+          selectedVoice.lang
+        : "System speech voice";
+
+  async function saveApiKey() {
+    if (!apiKey.trim()) return;
+    await onSaveElevenLabs({
+      apiKey: apiKey.trim(),
+    });
+    setApiKey("");
+    await onRefreshElevenVoices();
+  }
+
   return (
     <HudModal
       open={open}
@@ -86,7 +147,10 @@ export default function VoiceControl({
       eyebrow="AUDIO / AGENT MAN SIGNATURE"
       footer={
         <>
-          <button className="secondaryButton" onClick={onReset}>
+          <button
+            className="secondaryButton"
+            onClick={onReset}
+          >
             <RotateCcw size={14} />
             Signature preset
           </button>
@@ -94,10 +158,17 @@ export default function VoiceControl({
             className="secondaryButton"
             onClick={speaking ? onStop : onTest}
           >
-            {speaking ? <Square size={14} /> : <Radio size={14} />}
+            {speaking ? (
+              <Square size={14} />
+            ) : (
+              <Radio size={14} />
+            )}
             {speaking ? "Stop voice" : "Test voice"}
           </button>
-          <button className="primaryButton" onClick={onClose}>
+          <button
+            className="primaryButton"
+            onClick={onClose}
+          >
             Apply
           </button>
         </>
@@ -115,34 +186,51 @@ export default function VoiceControl({
                   : "voiceOrb"
           }
         >
-          {settings.enabled ? <Volume2 size={28} /> : <VolumeX size={28} />}
+          {settings.enabled ? (
+            <Volume2 size={28} />
+          ) : (
+            <VolumeX size={28} />
+          )}
         </div>
         <div>
           <span>PROFILE</span>
           <strong>AGENT MAN SIGNATURE</strong>
-          <small>
-            {selectedVoice
-              ? selectedVoice.name + " / " + selectedVoice.lang
-              : "System speech voice"}
-          </small>
+          <small>{voiceIdentity}</small>
         </div>
       </div>
 
       <div className="voiceToggleGrid">
         <button
-          className={settings.enabled ? "voiceToggle active" : "voiceToggle"}
-          onClick={() => onUpdate({ enabled: !settings.enabled })}
+          className={
+            settings.enabled
+              ? "voiceToggle active"
+              : "voiceToggle"
+          }
+          onClick={() =>
+            onUpdate({
+              enabled: !settings.enabled,
+            })
+          }
         >
           <Volume2 size={15} />
           Voice {settings.enabled ? "ON" : "OFF"}
         </button>
 
         <button
-          className={settings.autoSpeak ? "voiceToggle active" : "voiceToggle"}
-          onClick={() => onUpdate({ autoSpeak: !settings.autoSpeak })}
+          className={
+            settings.autoSpeak
+              ? "voiceToggle active"
+              : "voiceToggle"
+          }
+          onClick={() =>
+            onUpdate({
+              autoSpeak: !settings.autoSpeak,
+            })
+          }
         >
           <Radio size={15} />
-          Auto speak {settings.autoSpeak ? "ON" : "OFF"}
+          Auto speak{" "}
+          {settings.autoSpeak ? "ON" : "OFF"}
         </button>
 
         <button
@@ -153,17 +241,21 @@ export default function VoiceControl({
           }
           onClick={() =>
             onUpdate({
-              wakeEnabled: wakeSupported ? !settings.wakeEnabled : false,
+              wakeEnabled: wakeSupported
+                ? !settings.wakeEnabled
+                : false,
             })
           }
           disabled={!wakeSupported}
         >
-          {settings.wakeEnabled && wakeSupported ? (
+          {settings.wakeEnabled &&
+          wakeSupported ? (
             <Mic size={15} />
           ) : (
             <MicOff size={15} />
           )}
-          Wake mode {settings.wakeEnabled ? "ON" : "OFF"}
+          Wake mode{" "}
+          {settings.wakeEnabled ? "ON" : "OFF"}
         </button>
 
         <button
@@ -214,9 +306,11 @@ export default function VoiceControl({
             }
             aria-hidden="true"
           >
-            {Array.from({ length: 12 }).map((_, index) => (
-              <i key={index} />
-            ))}
+            {Array.from({ length: 12 }).map(
+              (_, index) => (
+                <i key={index} />
+              ),
+            )}
           </div>
           <div className="voiceTranscript">
             <small>
@@ -231,7 +325,9 @@ export default function VoiceControl({
         </div>
 
         {errorMessage && (
-          <div className="voiceCaptureError">{errorMessage}</div>
+          <div className="voiceCaptureError">
+            {errorMessage}
+          </div>
         )}
 
         <label className="voiceField">
@@ -239,7 +335,9 @@ export default function VoiceControl({
           <input
             value={settings.wakePhrase}
             onChange={(event) =>
-              onUpdate({ wakePhrase: event.target.value })
+              onUpdate({
+                wakePhrase: event.target.value,
+              })
             }
             placeholder="hey agent man"
           />
@@ -250,63 +348,307 @@ export default function VoiceControl({
           <select
             value={settings.wakeLanguage}
             onChange={(event) =>
-              onUpdate({ wakeLanguage: event.target.value })
+              onUpdate({
+                wakeLanguage: event.target.value,
+              })
             }
           >
-            <option value="en-IN">English · India</option>
-            <option value="en-GB">English · UK</option>
-            <option value="en-US">English · US</option>
+            <option value="en-IN">
+              English · India
+            </option>
+            <option value="en-GB">
+              English · UK
+            </option>
+            <option value="en-US">
+              English · US
+            </option>
           </select>
         </label>
 
         <p className="voiceNote">
-          Say “{settings.wakePhrase}”. Agent Man acknowledges, opens focused
-          command capture, shows the live transcript, and submits after roughly
-          one second of silence. You can still say the wake phrase and command
-          together.
+          Say “{settings.wakePhrase}”. Agent Man
+          acknowledges, opens focused command capture,
+          shows the live transcript, and submits after a
+          short silence.
         </p>
       </div>
 
       <label className="voiceField">
         Voice engine
         <select
-          value={selectedVoice?.voiceURI || ""}
-          onChange={(event) => onUpdate({ voiceURI: event.target.value })}
+          value={settings.engine}
+          onChange={(event) =>
+            onUpdate({
+              engine: event.target.value as
+                | "browser"
+                | "elevenlabs",
+            })
+          }
         >
-          {englishVoices.map((voice) => (
-            <option value={voice.voiceURI} key={voice.voiceURI}>
-              {voice.name} · {voice.lang}
-            </option>
-          ))}
+          <option value="browser">
+            System / browser speech
+          </option>
+          <option value="elevenlabs">
+            ElevenLabs
+          </option>
         </select>
       </label>
 
-      <div className="voiceSliders">
-        <VoiceSlider
-          label="Rate"
-          value={settings.rate}
-          min={0.6}
-          max={1.35}
-          step={0.01}
-          onChange={(rate) => onUpdate({ rate })}
-        />
-        <VoiceSlider
-          label="Pitch"
-          value={settings.pitch}
-          min={0.5}
-          max={1.2}
-          step={0.01}
-          onChange={(pitch) => onUpdate({ pitch })}
-        />
-        <VoiceSlider
-          label="Volume"
-          value={settings.volume}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(volume) => onUpdate({ volume })}
-        />
-      </div>
+      {settings.engine === "browser" ? (
+        <>
+          <label className="voiceField">
+            System voice
+            <select
+              value={selectedVoice?.voiceURI || ""}
+              onChange={(event) =>
+                onUpdate({
+                  voiceURI: event.target.value,
+                })
+              }
+            >
+              {englishVoices.map((voice) => (
+                <option
+                  value={voice.voiceURI}
+                  key={voice.voiceURI}
+                >
+                  {voice.name} · {voice.lang}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="voiceSliders">
+            <VoiceSlider
+              label="Rate"
+              value={settings.rate}
+              min={0.6}
+              max={1.35}
+              step={0.01}
+              onChange={(rate) =>
+                onUpdate({ rate })
+              }
+            />
+            <VoiceSlider
+              label="Pitch"
+              value={settings.pitch}
+              min={0.5}
+              max={1.2}
+              step={0.01}
+              onChange={(pitch) =>
+                onUpdate({ pitch })
+              }
+            />
+            <VoiceSlider
+              label="Volume"
+              value={settings.volume}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(volume) =>
+                onUpdate({ volume })
+              }
+            />
+          </div>
+        </>
+      ) : (
+        <section className="elevenVoicePanel">
+          <div className="elevenVoiceHeader">
+            <div>
+              <small>ELEVENLABS UPLINK</small>
+              <strong>
+                {elevenConfig.has_secret
+                  ? "API KEY SECURED"
+                  : "SETUP REQUIRED"}
+              </strong>
+            </div>
+            <span>
+              {elevenConfig.has_secret
+                ? "DPAPI"
+                : "NO KEY"}
+            </span>
+          </div>
+
+          <div className="elevenKeyRow">
+            <label className="voiceField">
+              API key
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(event) =>
+                  setApiKey(event.target.value)
+                }
+                placeholder={
+                  elevenConfig.has_secret
+                    ? "Stored securely · enter to replace"
+                    : "Paste ElevenLabs API key"
+                }
+              />
+            </label>
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={
+                elevenLoading || !apiKey.trim()
+              }
+              onClick={() => void saveApiKey()}
+            >
+              <KeyRound size={14} />
+              Save key
+            </button>
+          </div>
+
+          <div className="elevenActions">
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={
+                elevenLoading ||
+                !elevenConfig.has_secret
+              }
+              onClick={() =>
+                void onRefreshElevenVoices()
+              }
+            >
+              <RefreshCw
+                size={14}
+                className={
+                  elevenLoading ? "spinIcon" : ""
+                }
+              />
+              Detect voices
+            </button>
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={
+                elevenLoading ||
+                !elevenConfig.has_secret
+              }
+              onClick={() =>
+                void onTestElevenLabs()
+              }
+            >
+              <Radio size={14} />
+              Test connection
+            </button>
+            {elevenConfig.has_secret && (
+              <button
+                className="secondaryButton dangerAction"
+                type="button"
+                disabled={elevenLoading}
+                onClick={() =>
+                  void onSaveElevenLabs({
+                    clearSecret: true,
+                  })
+                }
+              >
+                Remove key
+              </button>
+            )}
+          </div>
+
+          <label className="voiceField">
+            ElevenLabs voice
+            <select
+              value={elevenConfig.voice_id}
+              disabled={
+                elevenLoading ||
+                elevenVoices.length === 0
+              }
+              onChange={(event) =>
+                void onSaveElevenLabs({
+                  voiceId: event.target.value,
+                })
+              }
+            >
+              <option value="">
+                {elevenVoices.length
+                  ? "Select voice"
+                  : "Detect voices first"}
+              </option>
+              {elevenVoices.map((voice) => (
+                <option
+                  value={voice.voice_id}
+                  key={voice.voice_id}
+                >
+                  {voice.name}
+                  {voice.labels.accent
+                    ? " · " +
+                      voice.labels.accent
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="voiceField">
+            ElevenLabs model
+            <select
+              value={elevenConfig.model_id}
+              onChange={(event) =>
+                void onSaveElevenLabs({
+                  modelId: event.target.value,
+                })
+              }
+            >
+              <option value="eleven_flash_v2_5">
+                Flash v2.5 · low latency
+              </option>
+              <option value="eleven_multilingual_v2">
+                Multilingual v2 · quality
+              </option>
+              <option value="eleven_v3">
+                Eleven v3 · expressive
+              </option>
+            </select>
+          </label>
+
+          <label className="voiceField">
+            Audio quality
+            <select
+              value={elevenConfig.output_format}
+              onChange={(event) =>
+                void onSaveElevenLabs({
+                  outputFormat:
+                    event.target.value,
+                })
+              }
+            >
+              <option value="mp3_22050_32">
+                MP3 · 22.05 kHz · 32 kbps
+              </option>
+              <option value="mp3_44100_128">
+                MP3 · 44.1 kHz · 128 kbps
+              </option>
+            </select>
+          </label>
+
+          <div className="voiceSliders elevenVolume">
+            <VoiceSlider
+              label="Playback volume"
+              value={settings.volume}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(volume) =>
+                onUpdate({ volume })
+              }
+            />
+          </div>
+
+          {elevenStatus && (
+            <div className="elevenStatus">
+              {elevenStatus}
+            </div>
+          )}
+
+          <p className="voiceNote">
+            The API key is stored by the local Agent Man
+            runtime using Windows DPAPI. It is never stored
+            in browser localStorage or sent back to this UI.
+          </p>
+        </section>
+      )}
     </HudModal>
   );
 }
@@ -338,7 +680,9 @@ function VoiceSlider({
         max={max}
         step={step}
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) =>
+          onChange(Number(event.target.value))
+        }
       />
     </label>
   );

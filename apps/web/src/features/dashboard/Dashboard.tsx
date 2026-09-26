@@ -1572,6 +1572,11 @@ export default function Dashboard() {
         voices={voice.voices}
         selectedVoice={voice.selectedVoice}
         speaking={voice.speaking}
+        elevenConfig={voice.elevenConfig}
+        elevenVoices={voice.elevenVoices}
+        selectedElevenVoice={voice.selectedElevenVoice}
+        elevenLoading={voice.elevenLoading}
+        elevenStatus={voice.elevenStatus}
         wakeSupported={wake.supported}
         wakeState={wake.state}
         lastHeard={wake.lastHeard}
@@ -1583,6 +1588,9 @@ export default function Dashboard() {
         onStop={voice.stop}
         onReset={voice.resetSignature}
         onListenNow={() => void wake.listenNow()}
+        onRefreshElevenVoices={voice.refreshElevenVoices}
+        onSaveElevenLabs={voice.saveElevenLabs}
+        onTestElevenLabs={voice.testElevenLabs}
       />
     </div>
   );

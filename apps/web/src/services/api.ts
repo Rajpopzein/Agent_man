@@ -51,6 +51,23 @@ export type AIConnectionTest = {
   models: string[];
 };
 
+export type ElevenLabsVoiceConfig = {
+  provider_id: "elevenlabs";
+  voice_id: string;
+  model_id: string;
+  output_format: string;
+  has_secret: boolean;
+};
+
+export type ElevenLabsVoice = {
+  voice_id: string;
+  name: string;
+  category: string;
+  description: string;
+  preview_url: string | null;
+  labels: Record<string, string>;
+};
+
 export type MultiAgentParticipant = {
   agent_id: string;
   agent_name: string;
@@ -329,6 +346,56 @@ export const api = {
         }),
       },
     ),
+  elevenLabsVoiceConfig: () =>
+    request<ElevenLabsVoiceConfig>(
+      "/api/voice/elevenlabs/config",
+    ),
+  configureElevenLabsVoice: (payload: {
+    voice_id: string;
+    model_id: string;
+    output_format: string;
+    api_key?: string | null;
+    clear_secret?: boolean;
+  }) =>
+    request<ElevenLabsVoiceConfig>(
+      "/api/voice/elevenlabs/config",
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    ),
+  elevenLabsVoices: () =>
+    request<ElevenLabsVoice[]>(
+      "/api/voice/elevenlabs/voices",
+    ),
+  testElevenLabsVoice: () =>
+    request<{ ok: boolean; voices_visible: number }>(
+      "/api/voice/elevenlabs/test",
+      { method: "POST" },
+    ),
+  streamElevenLabsSpeech: async (
+    text: string,
+    signal?: AbortSignal,
+  ) => {
+    const response = await fetch(
+      BASE + "/api/voice/elevenlabs/speech",
+      {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(
+        payload.detail || response.statusText,
+      );
+    }
+    return response;
+  },
   llmLogs: (projectId: string, limit = 200) =>
     request<LLMLog[]>(
       "/api/llm-logs/projects/" + projectId + "?limit=" + limit,

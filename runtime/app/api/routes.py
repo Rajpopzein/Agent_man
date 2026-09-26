@@ -42,6 +42,7 @@ def health():
             "executive_tool_assignment_set": True,
             "executive_effective_tools": True,
             "serial_device_broker": True,
+            "elevenlabs_voice": True,
         },
     }
 

@@ -312,3 +312,44 @@ class LLMLogView(BaseModel):
     response_text: str
     error_text: str
     created_at: datetime
+
+
+
+class VoiceProviderConfigInput(BaseModel):
+    voice_id: str = Field(default="", max_length=160)
+    model_id: str = Field(
+        default="eleven_flash_v2_5",
+        min_length=1,
+        max_length=160,
+    )
+    output_format: str = Field(
+        default="mp3_44100_128",
+        min_length=1,
+        max_length=80,
+    )
+    api_key: str | None = Field(
+        default=None,
+        max_length=4096,
+    )
+    clear_secret: bool = False
+
+
+class VoiceProviderConfigView(BaseModel):
+    provider_id: str
+    voice_id: str
+    model_id: str
+    output_format: str
+    has_secret: bool
+
+
+class ElevenLabsVoiceView(BaseModel):
+    voice_id: str
+    name: str
+    category: str
+    description: str
+    preview_url: str | None
+    labels: dict[str, str]
+
+
+class VoiceSpeechInput(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
