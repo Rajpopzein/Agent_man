@@ -720,6 +720,18 @@ export default function Dashboard() {
   ]);
   const activeWorker =
     agents.find((item) => activeWorkerStates.has(item.state)) || null;
+  const activeWorkerDisplayState =
+    activeWorker?.state === "assigned"
+      ? "CONNECTING"
+      : activeWorker?.state.toUpperCase() || "—";
+  const activeWorkerMessage = activeWorker
+    ? activeWorker.state === "assigned"
+      ? "Connecting with " + activeWorker.name + "..."
+      : activeWorker.name +
+        " is " +
+        activeWorker.state.replaceAll("_", " ") +
+        "..."
+    : "";
 
   const interactionPhase =
     voice.speaking
@@ -1061,7 +1073,11 @@ export default function Dashboard() {
                           </small>
                         </span>
                         <span className="agentModel">{item.llm.model}</span>
-                        <em>{item.state}</em>
+                        <em>
+                          {item.state === "assigned"
+                            ? "connecting"
+                            : item.state}
+                        </em>
                       </button>
                     );
                   })}
@@ -1157,7 +1173,7 @@ export default function Dashboard() {
                   <span>WORKER STATE</span>
                   <b>
                     {activeWorker
-                      ? activeWorker.state.toUpperCase()
+                      ? activeWorkerDisplayState
                       : busy
                         ? "EXECUTIVE WORKING"
                         : "—"}
@@ -1351,10 +1367,7 @@ export default function Dashboard() {
                           "Listening for your command..."
                         : interactionPhase === "processing"
                           ? activeWorker
-                            ? "Agent Man delegated to " +
-                              activeWorker.name +
-                              " · " +
-                              activeWorker.state.toUpperCase()
+                            ? activeWorkerMessage
                             : "Agent Man is processing: " +
                               (wake.finalTranscript || prompt)
                           : interactionPhase === "speaking"

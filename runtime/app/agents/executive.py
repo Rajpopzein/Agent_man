@@ -724,9 +724,9 @@ def run_main_agent(
                     agent_id="main-agent:" + project.id,
                     agent_name="Agent Man",
                     phase="delegation",
-                    status="started",
+                    status="connecting",
                     label=agent.name,
-                    message="Delegating to " + agent.name,
+                    message="Connecting with " + agent.name + "...",
                 )
                 agent.state = "assigned"
                 db.commit()

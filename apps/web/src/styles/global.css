@@ -1344,6 +1344,10 @@ label{color:#6f98a8}
 .liveActivityRow.status-started{
   border-left-color:var(--cyan)
 }
+.liveActivityRow.status-connecting{
+  border-left-color:var(--cyan);
+  background:rgba(8,42,54,.28)
+}
 .liveActivityRow.status-completed,
 .liveActivityRow.status-ok{
   border-left-color:var(--teal)

@@ -1037,3 +1037,111 @@ def test_effective_executive_tools_report_mission_control_gates():
         tools["delete_path"]["permission"]
         == "project.files.delete"
     )
+
+
+
+def test_executive_delegation_emits_connecting_then_worker_working(monkeypatch):
+    from app.events.bus import events
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    executive_calls = {"count": 0}
+    worker_calls = {"count": 0}
+
+    def executive_response(agent, messages, endpoint=None):
+        executive_calls["count"] += 1
+        if executive_calls["count"] == 1:
+            return json.dumps({
+                "type": "delegate_agent",
+                "agent_id": developer["id"],
+                "task": "Implement the requested change.",
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "Developer completed the requested change.",
+        })
+
+    def worker_response(agent, messages, endpoint=None):
+        worker_calls["count"] += 1
+        if worker_calls["count"] == 1:
+            return json.dumps({
+                "type": "final",
+                "verified": True,
+                "message": "Implementation is complete.",
+            })
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Rechecked. Implementation is complete.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        executive_response,
+    )
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        worker_response,
+    )
+
+    cursor = events.current_sequence()
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Implement this change.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+    _, emitted = events.wait_since(
+        cursor,
+        timeout=0,
+        project_id=project["id"],
+    )
+
+    relevant = [
+        event
+        for event in emitted
+        if (
+            event["type"] == "executive.activity"
+            and event.get("phase") == "delegation"
+        )
+        or (
+            event["type"] == "agent.delegated"
+            and event.get("agent_id") == developer["id"]
+        )
+        or (
+            event["type"] == "agent.state.changed"
+            and event.get("agent_id") == developer["id"]
+        )
+    ]
+
+    connecting_index = next(
+        index
+        for index, event in enumerate(relevant)
+        if event["type"] == "executive.activity"
+        and event.get("status") == "connecting"
+    )
+    assigned_index = next(
+        index
+        for index, event in enumerate(relevant)
+        if event["type"] == "agent.delegated"
+        and event.get("state") == "assigned"
+    )
+    working_index = next(
+        index
+        for index, event in enumerate(relevant)
+        if event["type"] == "agent.state.changed"
+        and event.get("state") == "working"
+    )
+
+    assert relevant[connecting_index]["message"] == (
+        "Connecting with " + developer["name"] + "..."
+    )
+    assert connecting_index < assigned_index < working_index
