@@ -744,3 +744,107 @@ def test_executive_allows_peer_fanout_when_explicitly_requested(
     )
     assert response.status_code == 200
     assert calls["peer_called"] is True
+
+
+
+def test_executive_intelligently_discovers_esp32_before_opening(monkeypatch):
+    project, _workers = _setup()
+    calls = {"llm": 0, "tools": []}
+
+    def fake_execute(**kwargs):
+        calls["tools"].append(
+            (kwargs["name"], dict(kwargs["arguments"]))
+        )
+        if kwargs["name"] == "list_serial_ports":
+            return [
+                {
+                    "device": "COM7",
+                    "description": "USB JTAG/serial debug unit",
+                    "manufacturer": "Espressif",
+                    "vid": 0x303A,
+                    "pid": 0x1001,
+                    "active_session_id": None,
+                }
+            ]
+        if kwargs["name"] == "serial_open":
+            assert kwargs["arguments"]["device"] == "COM7"
+            return {
+                "session_id": "session-1",
+                "device": "COM7",
+                "baudrate": 115200,
+                "is_open": True,
+            }
+        if kwargs["name"] == "serial_read":
+            assert kwargs["arguments"]["session_id"] == "session-1"
+            return {
+                "session_id": "session-1",
+                "device": "COM7",
+                "bytes_read": 5,
+                "text": "ready",
+                "hex": "72 65 61 64 79",
+            }
+        raise AssertionError("Unexpected tool " + kwargs["name"])
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["llm"] += 1
+
+        if calls["llm"] == 1:
+            system = messages[0]["content"]
+            assert "Intent: serial_hardware" in system
+            assert "list_serial_ports -> serial_open -> serial_read" in system
+            preflight = messages[-1]["content"]
+            assert "RUNTIME PREFLIGHT RESULT" in preflight
+            assert "COM7" in preflight
+            assert "Espressif" in preflight
+            return json.dumps({
+                "type": "tool",
+                "tool": "serial_open",
+                "args": {
+                    "device": "COM7",
+                    "baudrate": 115200,
+                },
+            })
+
+        if calls["llm"] == 2:
+            return json.dumps({
+                "type": "tool",
+                "tool": "serial_read",
+                "args": {
+                    "session_id": "session-1",
+                    "max_bytes": 128,
+                },
+            })
+
+        return json.dumps({
+            "type": "reply",
+            "message": "ESP32 is available on COM7 and reports ready.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        fake_execute,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Access my ESP32 and read its serial output.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["steps"][0]["type"] == "tool_preflight"
+    assert body["steps"][0]["tool"] == "list_serial_ports"
+    assert body["steps"][1]["tool"] == "serial_open"
+    assert body["steps"][2]["tool"] == "serial_read"
+    assert calls["tools"][0][0] == "list_serial_ports"

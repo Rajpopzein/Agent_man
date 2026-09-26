@@ -27,6 +27,11 @@ from app.tools.capabilities import (
     detect_missing_capability,
 )
 from app.tools.executive_access import executive_tool_access
+from app.tools.intelligence import (
+    plan_tools,
+    preflight_tool,
+    recovery_guidance,
+)
 from app.tools.registry import tools
 
 MAX_EXECUTIVE_STEPS = 30
@@ -65,6 +70,13 @@ Available runtime tools:
 Effective tool names:
 {tool_names}
 
+RUNTIME TOOL PLAN FOR THIS OBJECTIVE:
+{tool_plan}
+
+Treat the runtime tool plan as operational guidance, not optional prose. If it
+identifies a required tool sequence, start with the first safe prerequisite
+instead of guessing arguments that discovery tools can provide.
+
 Available workers:
 {workers}
 
@@ -96,7 +108,10 @@ Rules:
 - If the user asks you to inspect, read, list, edit, run, test, build, fetch,
   browse, inspect Git, inspect processes, inspect ports, or access serial/COM
   hardware, use a relevant runtime tool before replying.
-- If a tool attempt fails, inspect the failure and try another safe approach.
+- If a tool attempt fails, inspect the failure and follow runtime recovery
+  guidance before giving up.
+- Never invent a COM port, file path, process id, session id, URL, or other
+  runtime identifier when a discovery/inspection tool can obtain it first.
 - If a tool requires approval, call it anyway; the runtime will return the
   required permission and pause safely.
 - Do not ask the user to manually choose Developer/Tester when you can select them.
@@ -308,6 +323,7 @@ def run_main_agent(
         project.id,
     )
     allowed_tools = set(tool_access.names)
+    tool_plan = plan_tools(message, allowed_tools)
 
     approvals: set[str] = set()
     if allow_terminal:
@@ -326,6 +342,7 @@ def run_main_agent(
                 tools=tool_access.catalog or "(none)",
                 tool_count=tool_access.count,
                 tool_names=", ".join(tool_access.names) or "(none)",
+                tool_plan=tool_plan.prompt_text(),
                 workers=worker_text,
                 workflows=workflow_text,
             ),
@@ -338,6 +355,54 @@ def run_main_agent(
     proxy = _proxy(config, db)
     steps: list[dict] = []
     tool_corrections = 0
+
+    discovery_tool = preflight_tool(
+        tool_plan,
+        allowed_tools,
+    )
+    if discovery_tool:
+        try:
+            discovery_result = tools.execute(
+                name=discovery_tool,
+                arguments={},
+                workspace_path=project.workspace_path,
+                approvals=approvals,
+                allowed_names=allowed_tools,
+            )
+            discovery_step = {
+                "type": "tool_preflight",
+                "step": 0,
+                "tool": discovery_tool,
+                "arguments": {},
+                "status": "ok",
+                "result": discovery_result,
+            }
+        except Exception as exc:
+            discovery_step = {
+                "type": "tool_preflight",
+                "step": 0,
+                "tool": discovery_tool,
+                "arguments": {},
+                "status": "error",
+                "error": str(exc),
+            }
+
+        steps.append(discovery_step)
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "RUNTIME PREFLIGHT RESULT:\n"
+                    + json.dumps(
+                        discovery_step,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\nUse this real discovery result when choosing the "
+                    "next tool. Never invent a device or runtime identifier."
+                ),
+            }
+        )
 
     for step_number in range(1, MAX_EXECUTIVE_STEPS + 1):
         raw = run_messages(proxy, messages)
@@ -353,7 +418,10 @@ def run_main_agent(
                     _looks_like_tool_denial(text)
                     or (
                         not steps
-                        and _request_requires_tool(message)
+                        and (
+                            tool_plan.requires_tool
+                            or _request_requires_tool(message)
+                        )
                     )
                 )
             )
@@ -443,6 +511,11 @@ def run_main_agent(
                     "steps": steps,
                 }
             except Exception as exc:
+                recovery = recovery_guidance(
+                    tool_name,
+                    str(exc),
+                    allowed_tools,
+                )
                 step = {
                     "type": "tool",
                     "step": step_number,
@@ -450,10 +523,21 @@ def run_main_agent(
                     "arguments": arguments,
                     "status": "error",
                     "error": str(exc),
+                    "recovery_tools": list(recovery),
                 }
 
             steps.append(step)
             messages.append({"role": "assistant", "content": raw})
+            recovery_text = ""
+            if step.get("status") == "error":
+                recovery_tools = step.get("recovery_tools") or []
+                if recovery_tools:
+                    recovery_text = (
+                        "\nRUNTIME RECOVERY: Try these assigned discovery/"
+                        "prerequisite tools before repeating the failed tool: "
+                        + ", ".join(recovery_tools)
+                        + "."
+                    )
             messages.append(
                 {
                     "role": "user",
@@ -464,6 +548,7 @@ def run_main_agent(
                             ensure_ascii=False,
                             default=str,
                         )
+                        + recovery_text
                         + "\nContinue the overall objective. If the tool "
                         "failed, inspect the error and try another safe "
                         "approach when possible."
