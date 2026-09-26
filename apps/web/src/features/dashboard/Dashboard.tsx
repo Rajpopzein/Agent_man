@@ -129,6 +129,13 @@ const VIEW_META: Record<
   },
 };
 
+const AGENT_CONTEXT_TEMPLATES = {
+  Developer:
+    "You are the implementation specialist. Inspect the existing codebase before changing it, implement requested features and fixes, keep changes scoped to the objective, use assigned development tools, and validate your work with relevant tests/builds before reporting completion.",
+  Tester:
+    "You are the validation and quality specialist. Reproduce reported issues, inspect the implementation, run relevant tests and builds, identify regressions and edge cases, and only confirm completion when the requested behavior is verified with evidence.",
+} as const;
+
 export default function Dashboard() {
   const [view, setView] = useState<View>("dashboard");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -164,11 +171,16 @@ export default function Dashboard() {
   const [agentDialog, setAgentDialog] = useState(false);
   const [agentName, setAgentName] = useState("Developer");
   const [agentRole, setAgentRole] = useState("Developer");
+  const [agentContext, setAgentContext] = useState(
+    AGENT_CONTEXT_TEMPLATES.Developer,
+  );
   const [agentConnectionId, setAgentConnectionId] = useState("");
   const [agentModel, setAgentModel] = useState("");
   const [agentDetectedModels, setAgentDetectedModels] = useState<string[]>([]);
   const [detectingAgentModels, setDetectingAgentModels] = useState(false);
 
+  const [agentContextDialog, setAgentContextDialog] = useState(false);
+  const [editingAgentContext, setEditingAgentContext] = useState("");
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -473,6 +485,7 @@ export default function Dashboard() {
     const connection = connections[0];
     setAgentName("Developer");
     setAgentRole("Developer");
+    setAgentContext(AGENT_CONTEXT_TEMPLATES.Developer);
     setAgentConnectionId(connection.id);
     setAgentModel(connection.default_model || "");
     setAgentDetectedModels([]);
@@ -538,10 +551,16 @@ export default function Dashboard() {
       return;
     }
 
-    if (!agentName.trim() || !agentRole.trim() || !agentModel.trim()) {
+    if (
+      !agentName.trim() ||
+      !agentRole.trim() ||
+      !agentContext.trim() ||
+      !agentModel.trim()
+    ) {
       setNotice({
         title: "Agent configuration incomplete",
-        message: "Name, role, connection and model are required.",
+        message:
+          "Name, role, context, connection and model are required.",
       });
       return;
     }
@@ -552,6 +571,7 @@ export default function Dashboard() {
         project_id: project.id,
         name: agentName.trim(),
         role: agentRole.trim(),
+        context: agentContext.trim(),
         llm: {
           provider_id: connection.provider_id,
           connection_id: connection.id,
@@ -567,6 +587,55 @@ export default function Dashboard() {
       setNotice({
         title: "Agent deployment failed",
         message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAgentContextDialog() {
+    if (!agent) return;
+    setEditingAgentContext(agent.context || "");
+    setAgentContextDialog(true);
+  }
+
+  async function saveAgentContext(event: FormEvent) {
+    event.preventDefault();
+    if (!agent || !editingAgentContext.trim()) {
+      setNotice({
+        title: "Agent context required",
+        message:
+          "Describe what this agent is responsible for before saving.",
+      });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const updated = await api.updateAgent(agent.id, {
+        context: editingAgentContext.trim(),
+      });
+      setAgent(updated);
+      setAgents((current) =>
+        current.map((item) =>
+          item.id === updated.id ? updated : item,
+        ),
+      );
+      setAgentContextDialog(false);
+      setNotice({
+        title: "Agent context updated",
+        message:
+          updated.name +
+          " will use the new context on its next task.",
+      });
+    } catch (error) {
+      setNotice({
+        title: "Context update failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
         tone: "danger",
       });
     } finally {
@@ -1311,6 +1380,18 @@ export default function Dashboard() {
                     </span>
                   </button>
                   <button
+                    className="permissionChip available"
+                    onClick={openAgentContextDialog}
+                    disabled={!agent || busy}
+                    title="Edit selected worker agent context"
+                  >
+                    <Settings2 size={13} />
+                    <span>
+                      AGENT CTX
+                      <small>ROLE INSTRUCTIONS</small>
+                    </span>
+                  </button>
+                  <button
                     className="permissionChip danger"
                     onClick={() => setDeleteDialog(true)}
                     disabled={!agent || busy}
@@ -1608,6 +1689,51 @@ export default function Dashboard() {
               />
             </label>
           </div>
+
+          <label className="agentContextField">
+            Agent context
+            <textarea
+              value={agentContext}
+              onChange={(event) =>
+                setAgentContext(event.target.value)
+              }
+              maxLength={8000}
+              rows={7}
+              placeholder="Describe this agent's responsibilities, scope, constraints, and what good completion looks like."
+            />
+          </label>
+          <div className="agentContextTemplates">
+            <span>STARTING TEMPLATES</span>
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={() => {
+                setAgentRole("Developer");
+                setAgentContext(
+                  AGENT_CONTEXT_TEMPLATES.Developer,
+                );
+              }}
+            >
+              Developer
+            </button>
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={() => {
+                setAgentRole("Tester");
+                setAgentContext(
+                  AGENT_CONTEXT_TEMPLATES.Tester,
+                );
+              }}
+            >
+              Tester
+            </button>
+          </div>
+          <p className="dialogHint">
+            Context tells the agent what it is responsible for. Tool access is
+            still controlled separately in Capability Matrix.
+          </p>
+
           <label>
             AI connection
             <select
@@ -1663,6 +1789,62 @@ export default function Dashboard() {
           <p className="dialogHint">
             Tools and risk permissions can be changed later in Capability
             Matrix.
+          </p>
+        </form>
+      </HudModal>
+
+      <HudModal
+        open={agentContextDialog}
+        onClose={() => setAgentContextDialog(false)}
+        title="Agent Context"
+        eyebrow="COMMAND / WORKER ROLE"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setAgentContextDialog(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primaryButton"
+              form="agent-context-form"
+              type="submit"
+              disabled={busy || !editingAgentContext.trim()}
+            >
+              <Settings2 size={14} />
+              Save context
+            </button>
+          </>
+        }
+      >
+        <form
+          id="agent-context-form"
+          className="hudDialogForm"
+          onSubmit={saveAgentContext}
+        >
+          <div className="agentContextIdentity">
+            <small>SELECTED WORKER</small>
+            <strong>{agent?.name || "No agent selected"}</strong>
+            <span>{agent?.role || "—"}</span>
+          </div>
+          <label className="agentContextField">
+            Agent context
+            <textarea
+              value={editingAgentContext}
+              onChange={(event) =>
+                setEditingAgentContext(event.target.value)
+              }
+              maxLength={8000}
+              rows={9}
+              placeholder="Describe this agent's responsibilities, scope, constraints, and completion criteria."
+              autoFocus
+            />
+          </label>
+          <p className="dialogHint">
+            The Executive sees a summary of this context when choosing a
+            worker, and the worker receives the full context on every task.
+            Context does not grant tools or permissions.
           </p>
         </form>
       </HudModal>

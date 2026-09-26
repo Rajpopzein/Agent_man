@@ -14,3 +14,8 @@ def run_migrations() -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE agents ADD COLUMN endpoint VARCHAR(512)"
             )
+    if "context" not in columns:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "ALTER TABLE agents ADD COLUMN context TEXT NOT NULL DEFAULT ''"
+            )

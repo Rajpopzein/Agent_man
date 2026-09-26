@@ -1431,3 +1431,46 @@ label{color:#6f98a8}
 @media(max-width:760px){
   .elevenKeyRow{grid-template-columns:1fr}
 }
+
+/* Worker role context */
+.agentContextField textarea{
+  min-height:130px;
+  resize:vertical;
+  line-height:1.5
+}
+.agentContextTemplates{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:7px
+}
+.agentContextTemplates>span{
+  margin-right:auto;
+  font-family:var(--mono);
+  font-size:6px;
+  letter-spacing:.8px;
+  color:#5d818c
+}
+.agentContextIdentity{
+  display:grid;
+  gap:3px;
+  padding:9px 10px;
+  border:1px solid rgba(99,230,255,.12);
+  background:rgba(3,14,22,.42)
+}
+.agentContextIdentity small{
+  font-family:var(--mono);
+  font-size:6px;
+  letter-spacing:.8px;
+  color:#557984
+}
+.agentContextIdentity strong{
+  font-size:12px;
+  font-weight:500;
+  color:#b8dbe4
+}
+.agentContextIdentity span{
+  font-family:var(--mono);
+  font-size:7px;
+  color:#6d949f
+}

@@ -29,6 +29,12 @@ MAX_TRANSITIONS = 25
 SYSTEM_PROMPT = """You are executing one stage in an Agent Man workflow.
 You are not the coordinator. The runtime owns workflow transitions.
 
+Your configured role context:
+{agent_context}
+
+This context defines your responsibilities and scope. It does not grant tools
+or permissions beyond the runtime tool list below.
+
 Use only the tools listed below:
 {tools}
 
@@ -104,7 +110,12 @@ def _execute_node(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                tools=catalog_for_prompt(allowed_names)
+                agent_context=(
+                    str(agent.context).strip()
+                    if getattr(agent, "context", "")
+                    else "(no custom context provided)"
+                ),
+                tools=catalog_for_prompt(allowed_names),
             ),
         },
         {

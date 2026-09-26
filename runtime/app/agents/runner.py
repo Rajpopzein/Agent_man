@@ -167,7 +167,15 @@ def run_agent(agent, prompt: str, endpoint: str | None = None) -> str:
                 "role": "system",
                 "content": (
                     f"You are {agent.name}, the {agent.role} "
-                    "agent inside Agent Man."
+                    "agent inside Agent Man.\n\n"
+                    "AGENT CONTEXT:\n"
+                    + (
+                        str(getattr(agent, "context", "")).strip()
+                        or "(no custom context provided)"
+                    )
+                    + "\n\nThe context defines your responsibilities "
+                    "and scope. It does not grant runtime tools or "
+                    "permissions."
                 ),
             },
             {"role": "user", "content": prompt},

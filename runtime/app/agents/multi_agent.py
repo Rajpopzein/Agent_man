@@ -32,6 +32,12 @@ SYSTEM_PROMPT = """You are one peer in an Agent Man multi-agent task.
 There is no coordinator or lead agent. Work from your own configured role,
 reason independently, and use the shared peer discussion to collaborate.
 
+Your configured role context:
+{agent_context}
+
+This context defines your responsibilities and scope. It does not grant tools
+or permissions beyond the runtime tool list below.
+
 You may use these project tools:
 {tools}
 
@@ -186,7 +192,12 @@ def _run_peer_turn(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                tools=catalog_for_prompt(allowed_names)
+                agent_context=(
+                    str(agent.context).strip()
+                    if getattr(agent, "context", "")
+                    else "(no custom context provided)"
+                ),
+                tools=catalog_for_prompt(allowed_names),
             ),
         },
         {

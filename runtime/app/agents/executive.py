@@ -264,7 +264,16 @@ def _context(project_id: str, db: Session):
         select(WorkflowRecord).where(WorkflowRecord.project_id == project_id)
     ).all()
     worker_text = "\n".join(
-        f"- {a.id}: {a.name} ({a.role}) model={a.model}"
+        (
+            f"- {a.id}: {a.name} ({a.role}) model={a.model}; "
+            + "context="
+            + (
+                " ".join(
+                    str(getattr(a, "context", "") or "").split()
+                )[:1200]
+                or "(no custom context)"
+            )
+        )
         for a in workers
     ) or "(none)"
     workflow_text = "\n".join(

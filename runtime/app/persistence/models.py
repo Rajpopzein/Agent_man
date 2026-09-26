@@ -79,6 +79,7 @@ class AgentRecord(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str] = mapped_column(String(120), nullable=False)
+    context: Mapped[str] = mapped_column(Text, default="")
     state: Mapped[str] = mapped_column(String(32), default="idle")
     provider_id: Mapped[str] = mapped_column(String(80), nullable=False)
     connection_id: Mapped[str] = mapped_column(String(120), nullable=False)

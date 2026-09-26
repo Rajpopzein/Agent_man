@@ -68,7 +68,14 @@ class AgentCreate(BaseModel):
     project_id: str
     name: str = Field(min_length=1, max_length=120)
     role: str = Field(min_length=1, max_length=120)
+    context: str = Field(default="", max_length=8_000)
     llm: LLMConfigInput
+
+
+class AgentUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    role: str | None = Field(default=None, min_length=1, max_length=120)
+    context: str | None = Field(default=None, max_length=8_000)
 
 
 class AgentView(BaseModel):
@@ -76,6 +83,7 @@ class AgentView(BaseModel):
     project_id: str
     name: str
     role: str
+    context: str
     state: str
     llm: LLMConfigInput
 

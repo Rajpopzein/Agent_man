@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.executor import execute_agent
 from app.agents.runner import run_agent
-from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentView, LLMConfigInput, ProjectCreate, ProjectView
+from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentUpdate, AgentView, LLMConfigInput, ProjectCreate, ProjectView
 from app.core.config import settings
 from app.events.bus import events
 from app.persistence.database import get_session
@@ -44,6 +44,7 @@ def health():
             "serial_device_broker": True,
             "elevenlabs_voice": True,
             "mission_control_effective_access": True,
+            "agent_context": True,
         },
     }
 
@@ -74,6 +75,7 @@ def create_agent(body: AgentCreate, db: Session = Depends(get_session)):
         project_id=body.project_id,
         name=body.name,
         role=body.role,
+        context=body.context.strip(),
         provider_id=provider_id,
         connection_id=llm.connection_id,
         model=llm.model,
@@ -94,6 +96,28 @@ def create_agent(body: AgentCreate, db: Session = Depends(get_session)):
 def list_agents(project_id: str, db: Session = Depends(get_session)):
     rows = db.scalars(select(AgentRecord).where(AgentRecord.project_id == project_id)).all()
     return [agent_view(row) for row in rows]
+
+
+@router.patch("/api/agents/{agent_id}", response_model=AgentView)
+def update_agent(
+    agent_id: str,
+    body: AgentUpdate,
+    db: Session = Depends(get_session),
+):
+    agent = db.get(AgentRecord, agent_id)
+    if agent is None:
+        raise HTTPException(404, "Agent not found")
+
+    if body.name is not None:
+        agent.name = body.name.strip()
+    if body.role is not None:
+        agent.role = body.role.strip()
+    if body.context is not None:
+        agent.context = body.context.strip()
+
+    db.commit()
+    db.refresh(agent)
+    return agent_view(agent)
 
 
 @router.delete("/api/agents/{agent_id}")
@@ -292,6 +316,7 @@ def agent_view(row: AgentRecord) -> AgentView:
         project_id=row.project_id,
         name=row.name,
         role=row.role,
+        context=row.context or "",
         state=row.state,
         llm=LLMConfigInput(
             provider_id=row.provider_id,

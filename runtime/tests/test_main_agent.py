@@ -689,10 +689,11 @@ def test_health_reports_current_runtime_revision():
     assert response.status_code == 200
     body = response.json()
     assert body["runtime"] == "agent-man"
-    assert body["api_revision"] == "mission-control-v2"
+    assert body["api_revision"] == "agent-context-v1"
     assert body["features"]["executive_tool_assignment_set"] is True
     assert body["features"]["elevenlabs_voice"] is True
     assert body["features"]["mission_control_effective_access"] is True
+    assert body["features"]["agent_context"] is True
 
 
 def test_exact_bulk_set_route_is_registered():
@@ -1145,3 +1146,126 @@ def test_executive_delegation_emits_connecting_then_worker_working(monkeypatch):
         "Connecting with " + developer["name"] + "..."
     )
     assert connecting_index < assigned_index < working_index
+
+
+
+def test_agent_context_persists_and_can_be_updated():
+    project, workers = _setup()
+    developer = workers["Developer"]
+
+    updated = client.patch(
+        "/api/agents/" + developer["id"],
+        json={
+            "context": (
+                "Own backend implementation, inspect existing code, "
+                "and verify changes with tests before completion."
+            )
+        },
+    )
+    assert updated.status_code == 200
+    assert "Own backend implementation" in updated.json()["context"]
+
+    listed = client.get(
+        "/api/projects/" + project["id"] + "/agents"
+    )
+    assert listed.status_code == 200
+    saved = next(
+        item
+        for item in listed.json()
+        if item["id"] == developer["id"]
+    )
+    assert saved["context"] == updated.json()["context"]
+
+
+def test_worker_receives_configured_agent_context(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    context = (
+        "Implement Python backend changes only. Inspect existing code, "
+        "keep modifications scoped, and run relevant tests."
+    )
+
+    patched = client.patch(
+        "/api/agents/" + developer["id"],
+        json={"context": context},
+    )
+    assert patched.status_code == 200
+
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        system = messages[0]["content"]
+        assert "AGENT CONTEXT:" in system
+        assert context in system
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "final",
+                "verified": True,
+                "message": "Implementation completed.",
+            })
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Rechecked and verified.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={
+            "prompt": "Implement the backend change.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert calls["count"] >= 1
+
+
+def test_executive_worker_catalog_includes_agent_context(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    context = (
+        "Specialist for React UI implementation and frontend validation."
+    )
+    patched = client.patch(
+        "/api/agents/" + developer["id"],
+        json={"context": context},
+    )
+    assert patched.status_code == 200
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        system = messages[0]["content"]
+        assert context in system
+        assert developer["id"] in system
+        return json.dumps({
+            "type": "reply",
+            "message": "Developer is configured for frontend implementation.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Which worker handles frontend implementation?",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_hardware": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"

@@ -50,6 +50,15 @@ or until the runtime requires an explicit permission that has not been granted.
 You may only act through the tools listed below. All file paths must be relative
 to the current project workspace. Never invent tool results.
 
+AGENT ROLE:
+{agent_role}
+
+AGENT CONTEXT:
+{agent_context}
+
+The agent context defines your responsibilities, scope, and operating behavior.
+It does not grant permissions or tools; only the runtime tool list below does.
+
 Available tools:
 {tools}
 
@@ -148,7 +157,12 @@ def execute_agent(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                tools=catalog_for_prompt(allowed_names)
+                agent_role=str(getattr(agent, "role", "")) or "(unspecified)",
+                agent_context=(
+                    str(getattr(agent, "context", "")).strip()
+                    or "(no custom context provided)"
+                ),
+                tools=catalog_for_prompt(allowed_names),
             ),
         },
         {"role": "user", "content": prompt},

@@ -5,6 +5,7 @@ export type Agent = {
   project_id: string;
   name: string;
   role: string;
+  context: string;
   state: string;
   llm: {
     provider_id: string;
@@ -328,6 +329,18 @@ export const api = {
   createAgent: (payload: unknown) =>
     request<Agent>("/api/agents", {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAgent: (
+    agentId: string,
+    payload: {
+      name?: string;
+      role?: string;
+      context?: string;
+    },
+  ) =>
+    request<Agent>("/api/agents/" + agentId, {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
   deleteAgent: (agentId: string) =>
