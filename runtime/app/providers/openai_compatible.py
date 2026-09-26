@@ -3,6 +3,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.providers.base import Provider, ProviderSpec
+from app.providers.streaming import stream_json
 
 
 class OpenAICompatibleProvider(Provider):
@@ -39,3 +40,18 @@ class OpenAICompatibleProvider(Provider):
         base = self.resolve_endpoint(endpoint)
         payload = self._request(method="GET", url=base + "/models", api_key=api_key)
         return sorted({str(item["id"]) for item in payload.get("data", []) if item.get("id")})
+
+    def stream_chat(self, *, model, messages, endpoint=None, api_key=None, temperature=0.2):
+        self.validate_key(api_key)
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        for item in stream_json(
+            self.resolve_endpoint(endpoint) + "/chat/completions",
+            {"model": model, "messages": messages, "temperature": temperature, "stream": True},
+            headers,
+        ):
+            for choice in item.get("choices", []):
+                if choice.get("index", 0) != 0:
+                    continue
+                content = choice.get("delta", {}).get("content")
+                if content:
+                    yield content

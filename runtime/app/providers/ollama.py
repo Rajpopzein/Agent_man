@@ -3,6 +3,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.providers.base import Provider, ProviderSpec
+from app.providers.streaming import stream_json
 
 
 class OllamaProvider(Provider):
@@ -44,3 +45,15 @@ class OllamaProvider(Provider):
         base = self.resolve_endpoint(endpoint)
         payload = self._request(method="GET", url=base + "/api/tags")
         return sorted({str(item["name"]) for item in payload.get("models", []) if item.get("name")})
+
+    def stream_chat(self, *, model, messages, endpoint=None, api_key=None, temperature=0.2):
+        for item in stream_json(
+            self.resolve_endpoint(endpoint) + "/api/chat",
+            {"model": model, "messages": messages, "stream": True, "options": {"temperature": temperature}},
+            ndjson=True,
+        ):
+            content = item.get("message", {}).get("content")
+            if content:
+                yield content
+            if item.get("done"):
+                return

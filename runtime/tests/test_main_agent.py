@@ -1,4 +1,5 @@
 import json
+import pytest
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -6,6 +7,44 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_executive_does_not_display_malformed_serial_action(monkeypatch, recovers):
+    project, _ = _setup()
+    calls = []
+    model_calls = []
+
+    def execute(**kwargs):
+        calls.append(kwargs["name"])
+        assert kwargs["name"] == "list_serial_ports"
+        return [{"device": "COM7", "manufacturer": "Espressif"}]
+
+    def respond(agent, messages, endpoint=None):
+        model_calls.append(1)
+        if len(model_calls) == 1 or not recovers:
+            return r'{"type":"tool","tool":"serial\_open","args":{"device":"COM2"}}'
+        assert "Invalid action JSON" in messages[-1]["content"]
+        assert any("COM7" in item["content"] for item in messages)
+        return json.dumps({
+            "type": "reply",
+            "message": "Found an Espressif device on COM7; a connection has not been verified.",
+        })
+
+    monkeypatch.setattr("app.agents.executive.tools.execute", execute)
+    monkeypatch.setattr("app.agents.executive.run_messages", respond)
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "can you access my esp32", "allow_hardware": True},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == ("completed" if recovers else "error")
+    assert "serial\\_open" not in body["text"]
+    assert calls == ["list_serial_ports"]
+    assert len(model_calls) == (2 if recovers else 4)
+    stored = client.get("/api/main-agent/projects/" + project["id"] + "/messages").json()
+    assert stored[-1]["content"] == body["text"]
 
 
 def _setup():

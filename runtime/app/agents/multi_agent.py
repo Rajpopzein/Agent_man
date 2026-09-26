@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.runner import run_messages
+from app.agents.protocol import special_action
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
 from app.persistence.models import (
@@ -68,6 +69,9 @@ Do not select a winner or pretend to coordinate the other agents.
 
 
 def _parse_action(raw: str) -> dict[str, Any]:
+    special = special_action(raw)
+    if special is not None:
+        return special
     cleaned = raw.strip()
     fence = chr(96) * 3
     if cleaned.startswith(fence):

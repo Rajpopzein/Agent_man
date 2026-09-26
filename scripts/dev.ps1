@@ -50,6 +50,25 @@ function Stop-ProcessTree {
     }
 }
 
+function Test-AgentManProcess {
+    param([int]$ProcessId)
+
+    $runtimePython = Join-Path $Root "runtime\.venv\Scripts\python.exe"
+    $seen = @{}
+    while ($ProcessId -gt 0 -and -not $seen.ContainsKey($ProcessId)) {
+        $seen[$ProcessId] = $true
+        $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+        if (-not $candidate) { return $false }
+        if ($candidate.ExecutablePath -eq $runtimePython -and
+            $candidate.CommandLine -match "uvicorn\s+app\.main:app" -and
+            $candidate.CommandLine -match "--port\s+$RuntimePort(?:\s|$)") {
+            return $true
+        }
+        $ProcessId = [int]$candidate.ParentProcessId
+    }
+    return $false
+}
+
 function Get-AgentManRuntimeProcesses {
     $portText = [string]$RuntimePort
 
@@ -71,7 +90,7 @@ function Get-AgentManRuntimeProcesses {
                 $command -match ":$portText(?:\s|$)"
             )
 
-            return $looksLikeRuntime -and $usesRuntimePort
+            return $looksLikeRuntime -and $usesRuntimePort -and (Test-AgentManProcess -ProcessId $_.ProcessId)
         }
 }
 
@@ -107,7 +126,8 @@ function Stop-AgentManRuntime {
         }
 
         $health = Get-AgentManHealth
-        if (-not $health -or $health.runtime -ne "agent-man") {
+        if (-not ($health -and $health.runtime -eq "agent-man") -and
+            -not (Test-AgentManProcess -ProcessId $listener.OwningProcess)) {
             throw "Port $RuntimePort is still in use by a non-Agent-Man process (PID $($listener.OwningProcess))."
         }
 
@@ -129,7 +149,8 @@ $listener = Get-AgentManListener
 if ($listener) {
     $health = Get-AgentManHealth
 
-    if ($health -and $health.runtime -eq "agent-man") {
+    if (($health -and $health.runtime -eq "agent-man") -or
+        (Test-AgentManProcess -ProcessId $listener.OwningProcess)) {
         Stop-AgentManRuntime
     }
     else {

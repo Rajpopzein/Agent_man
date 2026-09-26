@@ -8,6 +8,7 @@ from app.agents.executor import execute_agent
 from app.agents.multi_agent import run_peer_task
 from app.agents.orchestration import execute_workflow_run
 from app.agents.runner import run_messages
+from app.agents.protocol import special_action
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
 from app.persistence.models import (
@@ -112,6 +113,11 @@ Rules:
   guidance before giving up.
 - Never invent a COM port, file path, process id, session id, URL, or other
   runtime identifier when a discovery/inspection tool can obtain it first.
+- Tool actions are internal instructions, never a user-facing answer. Final
+  replies must explain what was discovered, what actually succeeded or failed,
+  and what remains needed. For serial hardware, report the observed port and
+  device description, and distinguish discovery from a verified connection.
+- Use valid JSON; never backslash-escape underscores in tool names.
 - If a tool requires approval, call it anyway; the runtime will return the
   required permission and pause safely.
 - Do not ask the user to manually choose Developer/Tester when you can select them.
@@ -178,6 +184,9 @@ def _request_requires_tool(text: str) -> bool:
 
 
 def _parse(raw: str):
+    special = special_action(raw)
+    if special is not None:
+        return special
     raw = raw.strip()
     try:
         action = json.loads(raw)
@@ -187,12 +196,12 @@ def _parse(raw: str):
             try:
                 action = json.loads(raw[start:end + 1])
             except json.JSONDecodeError:
-                action = {"type": "reply", "message": raw}
+                action = {"type": "invalid_action"}
         else:
             action = {"type": "reply", "message": raw}
 
     if not isinstance(action, dict):
-        action = {"type": "reply", "message": raw}
+        action = {"type": "invalid_action"}
 
     text = str(
         action.get("message")
@@ -332,6 +341,7 @@ def run_main_agent(
     proxy = _proxy(config, db)
     steps: list[dict] = []
     tool_corrections = 0
+    format_corrections = 0
 
     discovery_tool = preflight_tool(
         tool_plan,
@@ -385,6 +395,34 @@ def run_main_agent(
         raw = run_messages(proxy, messages)
         action = _parse(raw)
         kind = str(action.get("type", "reply")).lower()
+
+        if kind == "invalid_action":
+            format_corrections += 1
+            steps.append({
+                "type": "runtime_guard",
+                "step": step_number,
+                "status": "retry" if format_corrections <= MAX_TOOL_CORRECTIONS else "error",
+                "reason": "invalid_action_json",
+            })
+            if format_corrections > MAX_TOOL_CORRECTIONS:
+                text = (
+                    "The executive model returned invalid tool instructions. "
+                    "Those instructions were not executed, so I could not "
+                    "complete your request. Please retry or select another executive model."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {"status": "error", "text": text, "steps": steps}
+            messages.extend([
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": (
+                    "RUNTIME CORRECTION: Invalid action JSON; this action was not executed. "
+                    "Return exactly one valid JSON object. Do not escape underscores. "
+                    "Use the discovery results already provided, never guess a COM port. "
+                    "Execute tools with type=tool; use type=reply only for a plain-language "
+                    "summary of observed results and any remaining blocker."
+                )},
+            ])
+            continue
 
         if kind == "reply":
             text = str(action.get("message", raw)).strip()
@@ -477,9 +515,12 @@ def run_main_agent(
                 }
                 steps.append(step)
                 text = (
-                    "Agent Man can continue after approval for "
+                    "Agent Man needs approval to run "
+                    + tool_name
+                    + (" on " + str(arguments["device"]) if arguments.get("device") else "")
+                    + ". This action has not been executed. Enable "
                     + exc.permission.value
-                    + "."
+                    + " and retry to continue."
                 )
                 _store_assistant_message(db, project.id, text)
                 return {

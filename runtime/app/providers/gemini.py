@@ -4,6 +4,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from app.providers.base import Provider, ProviderSpec
+from app.providers.streaming import stream_json
 
 
 class GeminiProvider(Provider):
@@ -70,3 +71,23 @@ class GeminiProvider(Provider):
             if name:
                 models.append(name)
         return sorted(set(models))
+
+    def stream_chat(self, *, model, messages, endpoint=None, api_key=None, temperature=0.2):
+        self.validate_key(api_key)
+        systems = [item["content"] for item in messages if item.get("role") == "system"]
+        payload = {
+            "contents": [
+                {"role": "model" if item.get("role") == "assistant" else "user",
+                 "parts": [{"text": item.get("content", "")}]} for item in messages
+                if item.get("role") != "system"
+            ],
+            "generationConfig": {"temperature": temperature},
+        }
+        if systems:
+            payload["systemInstruction"] = {"parts": [{"text": "\n".join(systems)}]}
+        url = self.resolve_endpoint(endpoint) + "/models/" + quote(model.removeprefix("models/"), safe="") + ":streamGenerateContent?alt=sse"
+        for item in stream_json(url, payload, {"x-goog-api-key": api_key}):
+            for candidate in item.get("candidates", [])[:1]:
+                for part in candidate.get("content", {}).get("parts", []):
+                    if not part.get("thought") and part.get("text"):
+                        yield part["text"]

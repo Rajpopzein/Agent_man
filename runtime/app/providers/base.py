@@ -14,6 +14,9 @@ class ProviderSpec:
 class Provider(ABC):
     spec: ProviderSpec
 
+    def stream_chat(self, **kwargs):
+        yield self.chat(**kwargs)
+
     @abstractmethod
     def chat(self, *, model: str, messages: list[dict[str, str]], endpoint: str | None = None, api_key: str | None = None, temperature: float = 0.2) -> str:
         raise NotImplementedError

@@ -1,5 +1,9 @@
 import json
 from time import perf_counter
+from uuid import uuid4
+
+from app.agents.protocol import response_preview
+from app.events.bus import events
 
 from app.persistence.database import SessionLocal
 from app.persistence.models import LLMLogRecord
@@ -70,16 +74,47 @@ def run_messages(
     )
     api_key = getattr(agent, "_runtime_api_key", None)
     started = perf_counter()
+    response_id = str(uuid4())
+    event_context = {
+        "project_id": getattr(agent, "project_id", None),
+        "agent_id": getattr(agent, "id", None),
+        "agent_name": str(getattr(agent, "name", "Agent")),
+        "response_id": response_id,
+    }
+    structured = any(
+        item.get("role") == "system" and "Return exactly one JSON object" in item.get("content", "")
+        for item in messages
+    )
+    events.emit("agent.response.started", **event_context, text="")
+    result = ""
 
     try:
-        result = provider.chat(
+        kwargs = dict(
             model=agent.model,
             messages=messages,
             endpoint=resolved_endpoint,
             api_key=api_key,
             temperature=agent.temperature_milli / 1000,
         )
+        chunks = provider.stream_chat(**kwargs) if hasattr(provider, "stream_chat") else [provider.chat(**kwargs)]
+        last_emitted = started
+        last_text = ""
+        for chunk in chunks:
+            result += chunk
+            now = perf_counter()
+            if now - last_emitted >= 0.05:
+                text = response_preview(result, structured=structured)
+                if text != last_text:
+                    events.emit("agent.response.delta", **event_context, text=text)
+                    last_text = text
+                    last_emitted = now
+        if not result.strip():
+            raise RuntimeError("The model returned an empty response stream.")
+        events.emit("agent.response.completed", **event_context,
+                    text=response_preview(result, structured=structured))
     except Exception as exc:
+        events.emit("agent.response.error", **event_context,
+                    text="Response interrupted. Check the request error and retry.")
         _write_log(
             agent=agent,
             provider_id=provider_id,
