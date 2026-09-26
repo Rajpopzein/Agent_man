@@ -144,6 +144,42 @@ export default function ToolsPage({
     }
   }
 
+  async function grantAllExecutiveTools() {
+    if (!project) return;
+    try {
+      const result = await api.grantAllMainAgentTools(project.id);
+      await loadTargetTools(EXECUTIVE_TARGET);
+      setStatus(
+        "Granted " +
+          result.updated +
+          " enabled runtime tools to Agent Man Executive.",
+      );
+    } catch (error) {
+      setStatus(
+        "Unable to grant Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  async function revokeAllExecutiveTools() {
+    if (!project) return;
+    try {
+      const result = await api.revokeAllMainAgentTools(project.id);
+      await loadTargetTools(EXECUTIVE_TARGET);
+      setStatus(
+        "Removed " +
+          result.updated +
+          " Executive tool assignments.",
+      );
+    } catch (error) {
+      setStatus(
+        "Unable to remove Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
   async function toggleTarget(tool: Tool) {
     if (!targetId) return;
 
@@ -216,7 +252,26 @@ export default function ToolsPage({
             </small>
           </span>
         </div>
-        <strong>{assignedCount} assigned</strong>
+        <div className="executiveToolsActions">
+          <strong>{assignedCount} assigned</strong>
+          {configuringExecutive && (
+            <>
+              <button
+                className="secondaryButton"
+                onClick={() => void grantAllExecutiveTools()}
+              >
+                Grant all enabled
+              </button>
+              <button
+                className="secondaryButton dangerAction"
+                onClick={() => void revokeAllExecutiveTools()}
+                disabled={assignedCount === 0}
+              >
+                Remove all
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="toolControls panel">

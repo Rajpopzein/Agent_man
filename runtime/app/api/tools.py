@@ -252,3 +252,73 @@ def set_main_agent_tool(
         globally_enabled=tool.enabled,
         assigned=assignment.enabled,
     )
+
+
+
+@router.put("/main-agent/{project_id}/bulk/grant-all")
+def grant_all_main_agent_tools(
+    project_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    sync_builtin_tools(db)
+    enabled_tools = db.scalars(
+        select(ToolRecord).where(ToolRecord.enabled.is_(True))
+    ).all()
+
+    existing = {
+        row.tool_name: row
+        for row in db.scalars(
+            select(MainAgentToolRecord).where(
+                MainAgentToolRecord.project_id == project_id
+            )
+        ).all()
+    }
+
+    for tool in enabled_tools:
+        assignment = existing.get(tool.name)
+        if assignment is None:
+            db.add(
+                MainAgentToolRecord(
+                    project_id=project_id,
+                    tool_name=tool.name,
+                    enabled=True,
+                )
+            )
+        else:
+            assignment.enabled = True
+
+    db.commit()
+    return {
+        "updated": len(enabled_tools),
+        "assigned": [
+            tool.name for tool in enabled_tools
+        ],
+    }
+
+
+@router.put("/main-agent/{project_id}/bulk/revoke-all")
+def revoke_all_main_agent_tools(
+    project_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    ensure_main_agent_defaults(db, project_id)
+    rows = db.scalars(
+        select(MainAgentToolRecord).where(
+            MainAgentToolRecord.project_id == project_id
+        )
+    ).all()
+
+    for row in rows:
+        row.enabled = False
+
+    db.commit()
+    return {
+        "updated": len(rows),
+        "assigned": [],
+    }

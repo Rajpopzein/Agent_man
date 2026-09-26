@@ -405,6 +405,16 @@ export const api = {
         body: JSON.stringify({ enabled }),
       },
     ),
+  grantAllMainAgentTools: (projectId: string) =>
+    request<{ updated: number; assigned: string[] }>(
+      "/api/tools/main-agent/" + projectId + "/bulk/grant-all",
+      { method: "PUT" },
+    ),
+  revokeAllMainAgentTools: (projectId: string) =>
+    request<{ updated: number; assigned: string[] }>(
+      "/api/tools/main-agent/" + projectId + "/bulk/revoke-all",
+      { method: "PUT" },
+    ),
   agentTools: (agentId: string) =>
     request<AgentTool[]>("/api/tools/agents/" + agentId),
   setAgentTool: (

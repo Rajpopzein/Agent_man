@@ -366,3 +366,44 @@ def test_tester_enters_validating_state(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
+
+
+
+def test_main_agent_bulk_tool_access_controls():
+    project, _workers = _setup()
+
+    revoked = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/bulk/revoke-all"
+    )
+    assert revoked.status_code == 200
+
+    listed = client.get(
+        "/api/tools/main-agent/" + project["id"]
+    )
+    assert listed.status_code == 200
+    assert all(
+        not item["assigned"]
+        for item in listed.json()
+    )
+
+    granted = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/bulk/grant-all"
+    )
+    assert granted.status_code == 200
+    assert granted.json()["updated"] > 0
+
+    listed_again = client.get(
+        "/api/tools/main-agent/" + project["id"]
+    )
+    assert listed_again.status_code == 200
+    enabled = [
+        item
+        for item in listed_again.json()
+        if item["globally_enabled"]
+    ]
+    assert enabled
+    assert all(item["assigned"] for item in enabled)

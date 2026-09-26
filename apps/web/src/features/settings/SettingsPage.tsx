@@ -160,22 +160,68 @@ export default function SettingsPage({
   async function toggleExecutiveTool(tool: AgentTool) {
     if (!project || !tool.globally_enabled) return;
 
+    setToolStatus("Updating " + tool.name + "...");
     try {
-      await api.setMainAgentTool(
+      const updated = await api.setMainAgentTool(
         project.id,
         tool.name,
         !tool.assigned,
       );
-      await loadExecutiveTools(project.id);
+      setExecutiveTools((current) =>
+        current.map((item) =>
+          item.name === updated.name ? updated : item,
+        ),
+      );
       setToolStatus(
-        tool.name +
-          (tool.assigned
-            ? " removed from Agent Man Executive."
-            : " assigned to Agent Man Executive."),
+        updated.name +
+          (updated.assigned
+            ? " now has Executive access."
+            : " Executive access removed."),
       );
     } catch (error) {
       setToolStatus(
-        error instanceof Error ? error.message : String(error),
+        "Unable to update Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  async function grantAllExecutiveTools() {
+    if (!project) return;
+
+    setToolStatus("Granting all enabled runtime tools to Agent Man...");
+    try {
+      const result = await api.grantAllMainAgentTools(project.id);
+      await loadExecutiveTools(project.id);
+      setToolStatus(
+        "Granted " +
+          result.updated +
+          " enabled runtime tools to Agent Man Executive.",
+      );
+    } catch (error) {
+      setToolStatus(
+        "Unable to grant Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  async function revokeAllExecutiveTools() {
+    if (!project) return;
+
+    setToolStatus("Removing Executive tool assignments...");
+    try {
+      const result = await api.revokeAllMainAgentTools(project.id);
+      await loadExecutiveTools(project.id);
+      setToolStatus(
+        "Removed " +
+          result.updated +
+          " Executive tool assignments.",
+      );
+    } catch (error) {
+      setToolStatus(
+        "Unable to remove Executive tool access: " +
+          (error instanceof Error ? error.message : String(error)),
       );
     }
   }
@@ -367,9 +413,27 @@ export default function SettingsPage({
               </p>
             </span>
           </div>
-          <strong>
-            {assignedToolCount}/{executiveTools.length} assigned
-          </strong>
+          <div className="executiveToolHeaderActions">
+            <strong>
+              {assignedToolCount}/{executiveTools.length} assigned
+            </strong>
+            <button
+              type="button"
+              className="secondaryButton"
+              onClick={() => void grantAllExecutiveTools()}
+              disabled={executiveTools.length === 0}
+            >
+              Grant all enabled
+            </button>
+            <button
+              type="button"
+              className="secondaryButton dangerAction"
+              onClick={() => void revokeAllExecutiveTools()}
+              disabled={assignedToolCount === 0}
+            >
+              Remove all
+            </button>
+          </div>
         </div>
 
         <div className="executiveToolGroups">
@@ -391,10 +455,19 @@ export default function SettingsPage({
                     title={
                       tool.globally_enabled
                         ? tool.description
-                        : "This tool is disabled globally in Tools."
+                        : "Enable Runtime access for this tool in Tools first."
                     }
+                    aria-pressed={tool.assigned}
                   >
-                    <Power size={12} />
+                    <span
+                      className={
+                        tool.assigned
+                          ? "executiveToolCheckbox checked"
+                          : "executiveToolCheckbox"
+                      }
+                    >
+                      {tool.assigned ? "✓" : ""}
+                    </span>
                     <span>
                       <b>{tool.name}</b>
                       <small>{tool.risk}</small>
@@ -403,8 +476,8 @@ export default function SettingsPage({
                       {!tool.globally_enabled
                         ? "RUNTIME OFF"
                         : tool.assigned
-                          ? "ASSIGNED"
-                          : "NOT ASSIGNED"}
+                          ? "ACCESS ON"
+                          : "ACCESS OFF"}
                     </em>
                   </button>
                 ))}
