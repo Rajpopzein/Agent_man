@@ -905,3 +905,39 @@ label{color:#6f98a8}
   .voiceCaptureMonitor{grid-template-columns:1fr}
   .voiceWave{height:32px}
 }
+
+/* Stable voice-state rendering: animate indicators, not large screen regions. */
+.intelligenceCore.phase-listening,
+.intelligenceCore.phase-processing,
+.intelligenceCore.phase-speaking{
+  box-shadow:none;
+}
+.intelligenceCore.phase-processing .coreHalo{
+  animation:coreFloat 4.4s ease-in-out infinite;
+}
+.intelligenceCore.phase-listening .orbitOne{
+  animation-duration:24s;
+}
+.intelligenceCore.phase-listening .orbitTwo{
+  animation-duration:15s;
+}
+.interactionMonitor,
+.intelligenceCore,
+.coreHalo{
+  transition:
+    border-color .22s ease,
+    background-color .22s ease,
+    color .22s ease;
+}
+@media (prefers-reduced-motion: reduce){
+  .voiceCoreButton>i,
+  .statusPulse,
+  .interactionBars i,
+  .voiceWave i,
+  .voiceOrb,
+  .coreHalo,
+  .orbit,
+  .identityPulse span{
+    animation:none!important;
+  }
+}
