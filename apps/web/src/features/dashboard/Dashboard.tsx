@@ -1,13 +1,21 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
-  BrainCircuit,
-  Home,
+  Activity,
+  Bot,
+  Boxes,
+  CircleDot,
   GitBranch,
+  Home,
   Network,
   Plug,
   Plus,
+  Radio,
+  Search,
+  ShieldCheck,
+  Sparkles,
   TerminalSquare,
   Wrench,
+  Zap,
 } from "lucide-react";
 
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
@@ -20,6 +28,7 @@ import {
   AgentRun,
   AIConnection,
   Project,
+  Tool,
 } from "../../services/api";
 
 type View =
@@ -29,12 +38,44 @@ type View =
   | "tools"
   | "connections";
 
+const VIEW_META: Record<
+  View,
+  { label: string; eyebrow: string; description: string }
+> = {
+  dashboard: {
+    label: "Command Core",
+    eyebrow: "SYSTEM / OVERVIEW",
+    description: "Live agent command, execution and system awareness.",
+  },
+  orchestration: {
+    label: "Orchestration Grid",
+    eyebrow: "SYSTEM / WORKFLOWS",
+    description: "Deterministic stage handoffs with success and failure routing.",
+  },
+  "multi-agent": {
+    label: "Peer Intelligence",
+    eyebrow: "SYSTEM / MULTI-AGENT",
+    description: "Shared task context with independent peer reasoning.",
+  },
+  tools: {
+    label: "Capability Matrix",
+    eyebrow: "SYSTEM / TOOLS",
+    description: "Control which runtime capabilities each agent can access.",
+  },
+  connections: {
+    label: "AI Uplink",
+    eyebrow: "SYSTEM / PROVIDERS",
+    description: "Configure local and cloud model connections.",
+  },
+};
+
 export default function Dashboard() {
   const [view, setView] = useState<View>("dashboard");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [connections, setConnections] = useState<AIConnection[]>([]);
+  const [tools, setTools] = useState<Tool[]>([]);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
   const [run, setRun] = useState<AgentRun | null>(null);
@@ -47,14 +88,15 @@ export default function Dashboard() {
     try {
       await api.health();
       setOnline(true);
-      const loaded = await Promise.all([
-        api.projects(),
-        api.aiConnections(),
-      ]);
-      const loadedProjects = loaded[0];
-      const loadedConnections = loaded[1];
+      const [loadedProjects, loadedConnections, loadedTools] =
+        await Promise.all([
+          api.projects(),
+          api.aiConnections(),
+          api.tools(),
+        ]);
       setProjects(loadedProjects);
       setConnections(loadedConnections);
+      setTools(loadedTools);
 
       const currentProject = loadedProjects[0] || null;
       setProject(currentProject);
@@ -62,7 +104,11 @@ export default function Dashboard() {
       if (currentProject) {
         const loadedAgents = await api.agents(currentProject.id);
         setAgents(loadedAgents);
-        setAgent(loadedAgents[0] || null);
+        setAgent((current) =>
+          loadedAgents.find((item) => item.id === current?.id) ||
+          loadedAgents[0] ||
+          null,
+        );
       } else {
         setAgents([]);
         setAgent(null);
@@ -110,12 +156,7 @@ export default function Dashboard() {
     const menu = connections
       .map(
         (connection, index) =>
-          String(index + 1) +
-          ". " +
-          connection.name +
-          " (" +
-          connection.provider_id +
-          ")",
+          `${index + 1}. ${connection.name} (${connection.provider_id})`,
       )
       .join("\n");
 
@@ -185,90 +226,121 @@ export default function Dashboard() {
     }
   }
 
-  return (
-    <div className="app">
-      <aside>
-        <div className="brand">
-          <BrainCircuit />
-          <span>
-            AGENT MAN
-            <small>BUILD · AUTOMATE · EVOLVE</small>
-          </span>
-        </div>
+  const activeTools = tools.filter((tool) => tool.enabled).length;
+  const providerLabel = useMemo(() => {
+    if (!agent) return "NO AGENT";
+    return (
+      connections.find(
+        (connection) => connection.id === agent.llm.connection_id,
+      )?.name || agent.llm.provider_id
+    );
+  }, [agent, connections]);
 
-        <nav>
-          <button
-            className={view === "dashboard" ? "active" : ""}
+  const meta = VIEW_META[view];
+
+  return (
+    <div className="jarvisShell">
+      <div className="ambientGrid" aria-hidden="true" />
+      <div className="scanline" aria-hidden="true" />
+
+      <aside className="commandRail">
+        <button
+          className="coreMark"
+          onClick={() => setView("dashboard")}
+          title="Agent Man"
+        >
+          <span className="coreMarkRing">
+            <Sparkles size={18} />
+          </span>
+        </button>
+
+        <nav className="railNav">
+          <RailButton
+            active={view === "dashboard"}
+            label="Core"
+            icon={<Home />}
             onClick={() => setView("dashboard")}
-          >
-            <Home /> Dashboard
-          </button>
-          <button
-            className={view === "orchestration" ? "active" : ""}
+          />
+          <RailButton
+            active={view === "orchestration"}
+            label="Flow"
+            icon={<GitBranch />}
             onClick={() => setView("orchestration")}
-          >
-            <GitBranch /> Orchestration
-          </button>
-          <button
-            className={view === "multi-agent" ? "active" : ""}
+          />
+          <RailButton
+            active={view === "multi-agent"}
+            label="Peers"
+            icon={<Network />}
             onClick={() => setView("multi-agent")}
-          >
-            <Network /> Multi-Agent
-          </button>
-          <button
-            className={view === "tools" ? "active" : ""}
+          />
+          <RailButton
+            active={view === "tools"}
+            label="Tools"
+            icon={<Wrench />}
             onClick={() => setView("tools")}
-          >
-            <Wrench /> Tools
-          </button>
-          <button
-            className={view === "connections" ? "active" : ""}
+          />
+          <RailButton
+            active={view === "connections"}
+            label="Uplink"
+            icon={<Plug />}
             onClick={() => setView("connections")}
-          >
-            <Plug /> AI Connections
-          </button>
+          />
         </nav>
 
-        <div className="sideActions">
-          <button onClick={addProject}>
-            <Plus /> New Project
+        <div className="railFooter">
+          <button className="railQuick" onClick={addProject} title="New project">
+            <Plus />
           </button>
-          <button disabled={!project} onClick={addAgent}>
-            <Plus /> New Agent
+          <button
+            className="railQuick"
+            onClick={addAgent}
+            disabled={!project}
+            title="New agent"
+          >
+            <Bot />
           </button>
         </div>
       </aside>
 
-      <main>
-        <header>
-          <div>
-            <h2>
-              {view === "dashboard"
-                ? project?.name || "Agent Man"
-                : view === "orchestration"
-                  ? "Agent Workflow Orchestration"
-                  : view === "multi-agent"
-                    ? "Peer Agent Collaboration"
-                    : view === "tools"
-                    ? "Agent Tool Registry"
-                    : "Provider Configuration"}
-            </h2>
-            <small>
-              {view === "dashboard"
-                ? project?.workspace_path || "Create a project to begin"
-                : view === "orchestration"
-                  ? "Explicit stage handoffs with success and failure routing."
-                  : view === "multi-agent"
-                    ? "Shared project context with no permanent coordinator."
-                    : view === "tools"
-                    ? "Control the capabilities exposed to each agent."
-                    : "Connections are reusable across agents."}
-            </small>
+      <section className="hudWorkspace">
+        <header className="hudTopbar">
+          <div className="systemIdentity">
+            <div className="identityPulse">
+              <span />
+            </div>
+            <div>
+              <small>AGENT MAN / WINDOWS INTELLIGENCE RUNTIME</small>
+              <strong>{meta.label}</strong>
+            </div>
           </div>
-          <div className={online ? "healthy" : "offline"}>
-            ● {online ? "Runtime Online" : "Runtime Offline"}
+
+          <div className="topCommand">
+            <Search size={15} />
+            <span>{meta.eyebrow}</span>
+            <i />
+            <span>{project?.name || "NO PROJECT"}</span>
+          </div>
+
+          <div className={online ? "runtimeBadge online" : "runtimeBadge offline"}>
+            <Radio size={14} />
+            <span>{online ? "RUNTIME ONLINE" : "RUNTIME OFFLINE"}</span>
+            <b>{online ? "LIVE" : "DOWN"}</b>
           </div>
         </header>
+
+        <div className="hudTitleRow">
+          <div>
+            <span className="hudEyebrow">{meta.eyebrow}</span>
+            <h1>{meta.label}</h1>
+            <p>{meta.description}</p>
+          </div>
+
+          <div className="projectReadout">
+            <small>ACTIVE SANDBOX</small>
+            <strong>{project?.name || "UNASSIGNED"}</strong>
+            <code>{project?.workspace_path || "Create a project to initialize the workspace."}</code>
+          </div>
+        </div>
 
         {view === "connections" ? (
           <AIConnections
@@ -282,148 +354,282 @@ export default function Dashboard() {
         ) : view === "tools" ? (
           <ToolsPage agents={agents} />
         ) : (
-          <>
-            <section className="metrics">
-              <Card label="Projects" value={projects.length} />
-              <Card label="Agents" value={agents.length} />
-              <Card label="AI Connections" value={connections.length} />
-              <Card label="Selected" value={agent?.name || "—"} />
+          <div className="commandDeck">
+            <section className="telemetryStrip">
+              <Telemetry
+                icon={<Bot />}
+                label="Agents"
+                value={agents.length}
+                detail={agents.length ? "READY FOR TASKING" : "NONE CONFIGURED"}
+              />
+              <Telemetry
+                icon={<Plug />}
+                label="AI Uplinks"
+                value={connections.length}
+                detail="MODEL CONNECTIONS"
+              />
+              <Telemetry
+                icon={<Wrench />}
+                label="Tools"
+                value={activeTools}
+                detail={`${tools.length} REGISTERED`}
+              />
+              <Telemetry
+                icon={<ShieldCheck />}
+                label="Sandbox"
+                value={project ? "LOCKED" : "IDLE"}
+                detail="PROJECT BOUNDARY"
+              />
             </section>
 
-            <section className="v1grid">
-              <div className="panel">
-                <h3>Agents</h3>
-                {agents.length === 0 && (
-                  <p className="muted">
-                    Create an AI connection, then create an agent.
-                  </p>
-                )}
-                {agents.map((item) => {
-                  const linked = connections.find(
-                    (connection) =>
-                      connection.id === item.llm.connection_id,
-                  );
-                  return (
-                    <button
-                      key={item.id}
-                      className={
-                        "agentRow " +
-                        (agent?.id === item.id ? "selected" : "")
-                      }
-                      onClick={() => setAgent(item)}
-                    >
-                      <BrainCircuit />
-                      <span>
-                        <b>{item.name}</b>
-                        <small>
-                          {item.role} ·{" "}
-                          {linked?.name || item.llm.provider_id} ·{" "}
-                          {item.llm.model}
-                        </small>
-                      </span>
-                      <em>{item.state}</em>
-                    </button>
-                  );
-                })}
+            <section className="coreGrid">
+              <div className="hudPanel agentMatrix">
+                <PanelLabel icon={<Boxes />} label="AGENT MATRIX" />
+                <div className="agentMatrixList">
+                  {agents.length === 0 && (
+                    <div className="hudEmpty">
+                      <Bot />
+                      <strong>NO AGENTS ONLINE</strong>
+                      <span>Create an AI connection and deploy an agent.</span>
+                    </div>
+                  )}
+                  {agents.map((item, index) => {
+                    const linked = connections.find(
+                      (connection) =>
+                        connection.id === item.llm.connection_id,
+                    );
+                    return (
+                      <button
+                        key={item.id}
+                        className={
+                          "matrixAgent " +
+                          (agent?.id === item.id ? "active" : "")
+                        }
+                        onClick={() => setAgent(item)}
+                      >
+                        <span className="agentIndex">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <span className="agentSignal">
+                          <i />
+                        </span>
+                        <span className="agentMeta">
+                          <b>{item.name}</b>
+                          <small>
+                            {item.role} / {linked?.name || item.llm.provider_id}
+                          </small>
+                        </span>
+                        <span className="agentModel">{item.llm.model}</span>
+                        <em>{item.state}</em>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="panel">
-                <h3>{agent ? "Run " + agent.name : "Agent Runner"}</h3>
-                <p className="muted">
-                  The selected agent uses its linked AI connection.
-                  Credentials never enter the task prompt.
-                </p>
-
-                <form onSubmit={execute}>
-                  <textarea
-                    value={prompt}
-                    onChange={(event) =>
-                      setPrompt(event.target.value)
-                    }
-                    placeholder="Example: inspect this project and create a README describing it"
-                  />
-                  <button
-                    disabled={!agent || !prompt.trim() || busy}
-                  >
-                    {busy ? "Running..." : "Run"}
-                  </button>
-                </form>
-
-                <div className="runApprovals">
-                  <label className="approval">
-                    <input
-                      type="checkbox"
-                      checked={allowTerminal}
-                      onChange={(event) =>
-                        setAllowTerminal(event.target.checked)
-                      }
-                    />
-                    <TerminalSquare size={16} />
-                    Allow execute tools for this run
-                  </label>
-                  <label className="approval">
-                    <input
-                      type="checkbox"
-                      checked={allowDelete}
-                      onChange={(event) =>
-                        setAllowDelete(event.target.checked)
-                      }
-                    />
-                    <Wrench size={16} />
-                    Allow destructive file deletion
-                  </label>
+              <div className="intelligenceCore">
+                <div className="coreBackdrop" />
+                <div className="orbit orbitOne">
+                  <span />
+                  <span />
+                  <span />
                 </div>
-
-                <div className="conversation">
-                  {run?.text ||
-                    "The agent can inspect and modify files inside this project's sandbox."}
+                <div className="orbit orbitTwo">
+                  <span />
+                  <span />
                 </div>
-
-                {run && (
-                  <div className="trace">
-                    <h4>Execution trace · {run.status}</h4>
-                    {run.steps.length === 0 && (
-                      <p className="muted">
-                        No tool calls were made.
-                      </p>
-                    )}
-                    {run.steps.map((step, index) => (
-                      <div className="traceRow" key={index}>
-                        <b>{String(step.tool || "tool")}</b>
-                        <span>{String(step.status || "")}</span>
-                        <code>
-                          {JSON.stringify(
-                            step.arguments || {},
-                            null,
-                            2,
-                          )}
-                        </code>
-                      </div>
-                    ))}
+                <div className="orbit orbitThree" />
+                <div className="coreHalo">
+                  <div className="coreSphere">
+                    <Zap size={34} />
+                    <span>AGENT</span>
+                    <b>MAN</b>
+                    <small>{online ? "CORE ACTIVE" : "CORE STANDBY"}</small>
                   </div>
-                )}
+                </div>
+
+                {agents.slice(0, 6).map((item, index) => (
+                  <button
+                    key={item.id}
+                    className={`orbitalAgent orbitalAgent${index + 1} ${
+                      agent?.id === item.id ? "selected" : ""
+                    }`}
+                    onClick={() => setAgent(item)}
+                    title={item.name}
+                  >
+                    <span><Bot size={14} /></span>
+                    <b>{item.name}</b>
+                    <small>{item.role}</small>
+                  </button>
+                ))}
+
+                <div className="coreCaption">
+                  <CircleDot size={13} />
+                  <span>
+                    {agent
+                      ? `${agent.name.toUpperCase()} / ${providerLabel}`
+                      : "SELECT AN AGENT"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="hudPanel missionPanel">
+                <PanelLabel icon={<Activity />} label="MISSION CONTROL" />
+                <div className="missionStatus">
+                  <span className={busy ? "statusPulse busy" : "statusPulse"} />
+                  <div>
+                    <small>CURRENT STATE</small>
+                    <strong>{busy ? "EXECUTING" : run?.status?.toUpperCase() || "READY"}</strong>
+                  </div>
+                </div>
+
+                <div className="missionReadout">
+                  <span>SELECTED AGENT</span>
+                  <b>{agent?.name || "—"}</b>
+                  <span>ROLE</span>
+                  <b>{agent?.role || "—"}</b>
+                  <span>MODEL</span>
+                  <b>{agent?.llm.model || "—"}</b>
+                  <span>UPLINK</span>
+                  <b>{providerLabel}</b>
+                </div>
+
+                <div className="permissionReadout">
+                  <button
+                    className={allowTerminal ? "permissionChip active" : "permissionChip"}
+                    onClick={() => setAllowTerminal((value) => !value)}
+                  >
+                    <TerminalSquare size={13} />
+                    EXEC
+                  </button>
+                  <button
+                    className={allowDelete ? "permissionChip danger active" : "permissionChip danger"}
+                    onClick={() => setAllowDelete((value) => !value)}
+                  >
+                    <Wrench size={13} />
+                    DELETE
+                  </button>
+                </div>
               </div>
             </section>
-          </>
+
+            <section className="hudCommandPanel">
+              <div className="commandHeader">
+                <div>
+                  <span className="hudEyebrow">DIRECTIVE / SINGLE AGENT</span>
+                  <h3>{agent ? `Task ${agent.name}` : "Awaiting agent selection"}</h3>
+                </div>
+                <div className="commandStatus">
+                  <i className={busy ? "busy" : ""} />
+                  {busy ? "PROCESSING" : "AWAITING DIRECTIVE"}
+                </div>
+              </div>
+
+              <form className="commandComposer" onSubmit={execute}>
+                <span className="commandPrompt">&gt;</span>
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Issue a directive to the selected agent..."
+                />
+                <button disabled={!agent || !prompt.trim() || busy}>
+                  <Zap size={16} />
+                  {busy ? "EXECUTING" : "EXECUTE"}
+                </button>
+              </form>
+
+              <div className="commandOutput">
+                <div className="outputRail">
+                  <span />
+                  <small>OUTPUT</small>
+                </div>
+                <div className="outputBody">
+                  {run?.text ||
+                    "Agent Man is standing by. Select an agent and issue a directive."}
+                </div>
+              </div>
+
+              {run && run.steps.length > 0 && (
+                <div className="trace hudTrace">
+                  <h4>EXECUTION TRACE / {run.status.toUpperCase()}</h4>
+                  {run.steps.map((step, index) => (
+                    <div className="traceRow" key={index}>
+                      <b>{String(step.tool || "tool")}</b>
+                      <span>{String(step.status || "")}</span>
+                      <code>
+                        {JSON.stringify(step.arguments || {}, null, 2)}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
         )}
-      </main>
+      </section>
     </div>
   );
 }
 
-function Card({
+function RailButton({
+  active,
   label,
-  value,
+  icon,
+  onClick,
 }: {
+  active: boolean;
   label: string;
-  value: string | number;
+  icon: ReactNode;
+  onClick: () => void;
 }) {
   return (
-    <div className="card">
-      <span>
-        {label}
-        <b>{value}</b>
-      </span>
+    <button
+      className={active ? "railButton active" : "railButton"}
+      onClick={onClick}
+      title={label}
+    >
+      <span>{icon}</span>
+      <small>{label}</small>
+    </button>
+  );
+}
+
+function Telemetry({
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string | number;
+  detail: string;
+}) {
+  return (
+    <article className="telemetryCell">
+      <div className="telemetryIcon">{icon}</div>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+        <span>{detail}</span>
+      </div>
+      <i />
+    </article>
+  );
+}
+
+function PanelLabel({
+  icon,
+  label,
+}: {
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="panelLabel">
+      <span>{icon}</span>
+      <b>{label}</b>
+      <i />
     </div>
   );
 }
