@@ -438,8 +438,14 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "waiting_approval"
-    assert body["steps"][0]["tool"] == "serial_open"
-    assert body["steps"][0]["permission"] == "hardware.serial"
+    assert body["steps"][0]["type"] == "tool_preflight"
+    assert body["steps"][0]["tool"] == "list_serial_ports"
+    serial_open_step = next(
+        step
+        for step in body["steps"]
+        if step.get("tool") == "serial_open"
+    )
+    assert serial_open_step["permission"] == "hardware.serial"
 
 
 
