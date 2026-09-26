@@ -2,6 +2,16 @@
 
 Agent Man is a Windows-first desktop environment for creating and running role-based AI agents inside project sandboxes.
 
+## Run locally on Windows
+
+From the repository root, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1
+```
+
+This installs dependencies and starts the Python runtime on port 8765 and the web UI at http://localhost:5173. Python and Node.js must be installed. The execution-policy override applies only to this PowerShell process; it does not change your system policy. The launcher uses `npm.cmd` to avoid PowerShell blocking `npm.ps1`.
+
 ## Product principles
 
 - A project owns the sandbox and shared execution environment.

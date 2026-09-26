@@ -1,0 +1,8 @@
+node_modules
+*.swp
+*.swo
+*.pyc
+__pycache__
+.env
+# Added by Agent Man for Node.js projects
+package-lock.json
