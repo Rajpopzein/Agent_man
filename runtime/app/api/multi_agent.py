@@ -87,7 +87,36 @@ def get_task(task_id: str, db: Session = Depends(get_session)):
 def run_task(task_id: str, body: MultiAgentRunRequest, db: Session = Depends(get_session)):
     task = require_task(task_id, db)
 
-    if task.status == "waiting_approval" and body.allow_terminal:
+    if task.status == "round_limit":
+        if body.extend_rounds <= 0:
+            raise HTTPException(
+                409,
+                "Task reached its collaboration safety ceiling. "
+                "Extend the task to continue peer discussion.",
+            )
+        task.max_rounds = min(
+            task.max_rounds + body.extend_rounds,
+            100,
+        )
+        task.status = "active"
+        task.completed_at = None
+        participants = db.scalars(
+            select(MultiAgentParticipantRecord).where(
+                MultiAgentParticipantRecord.task_id == task.id,
+                MultiAgentParticipantRecord.status == "round_limit",
+            )
+        ).all()
+        for participant in participants:
+            participant.status = "active"
+        db.commit()
+    elif body.extend_rounds > 0:
+        task.max_rounds = min(
+            task.max_rounds + body.extend_rounds,
+            100,
+        )
+        db.commit()
+
+    if task.status == "waiting_approval":
         participants = db.scalars(
             select(MultiAgentParticipantRecord).where(
                 MultiAgentParticipantRecord.task_id == task.id,

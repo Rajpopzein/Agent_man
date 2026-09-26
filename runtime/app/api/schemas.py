@@ -109,12 +109,13 @@ class MultiAgentTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     prompt: str = Field(min_length=1, max_length=30_000)
     agent_ids: list[str] = Field(min_length=2, max_length=8)
-    max_rounds: int = Field(default=3, ge=1, le=8)
+    max_rounds: int = Field(default=12, ge=2, le=30)
 
 
 class MultiAgentRunRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
+    extend_rounds: int = Field(default=0, ge=0, le=20)
 
 
 class MultiAgentParticipantView(BaseModel):

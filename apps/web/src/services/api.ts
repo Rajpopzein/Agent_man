@@ -258,6 +258,7 @@ export const api = {
     taskId: string,
     allowTerminal: boolean,
     allowDelete = false,
+    extendRounds = 0,
   ) =>
     request<MultiAgentTask>(
       "/api/multi-agent/tasks/" + taskId + "/run",
@@ -266,6 +267,7 @@ export const api = {
         body: JSON.stringify({
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
+          extend_rounds: extendRounds,
         }),
       },
     ),

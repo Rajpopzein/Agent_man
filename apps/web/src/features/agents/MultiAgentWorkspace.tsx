@@ -12,7 +12,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [title, setTitle] = useState("Peer implementation task");
   const [prompt, setPrompt] = useState("");
-  const [maxRounds, setMaxRounds] = useState(3);
+  const [maxRounds, setMaxRounds] = useState(12);
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
   const [tasks, setTasks] = useState<MultiAgentTask[]>([]);
@@ -53,10 +53,15 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
     prompt.trim().length > 0 &&
     !busy;
 
-  const finals = useMemo(
-    () => activeTask?.messages.filter((message) => message.kind === "final") || [],
-    [activeTask],
-  );
+  const finals = useMemo(() => {
+    const latest = new Map<string, MultiAgentTask["messages"][number]>();
+    for (const message of activeTask?.messages || []) {
+      if (message.kind === "final" && message.agent_id) {
+        latest.set(message.agent_id, message);
+      }
+    }
+    return Array.from(latest.values());
+  }, [activeTask]);
 
   function toggleAgent(agentId: string) {
     setSelected((current) =>
@@ -96,15 +101,20 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
     }
   }
 
-  async function resume() {
+  async function resume(extendRounds = 0) {
     if (!activeTask) return;
     setBusy(true);
-    setStatus("Resuming peer task...");
+    setStatus(
+      extendRounds > 0
+        ? "Extending collaboration..."
+        : "Resuming peer task...",
+    );
     try {
       const result = await api.runMultiAgentTask(
         activeTask.id,
         allowTerminal,
         allowDelete,
+        extendRounds,
       );
       setActiveTask(result);
       setStatus("Task status: " + result.status);
@@ -132,8 +142,10 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
         <div>
           <h2>Multi-Agent Workspace</h2>
           <p>
-            Select peer agents. Agent Man only schedules turns, shares context,
-            persists messages, and enforces permissions. No permanent coordinator.
+            Select peer agents. They keep discussing and reviewing the shared
+            work until every healthy peer confirms completion across two stable
+            rounds. Agent Man only schedules turns, shares context, persists
+            messages, and enforces permissions.
           </p>
         </div>
         <span className="connectionCount">{tasks.length} tasks</span>
@@ -159,11 +171,11 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
 
             <div className="roundField">
               <label>
-                Max rounds
+                Safety ceiling
                 <input
                   type="number"
-                  min={1}
-                  max={8}
+                  min={2}
+                  max={30}
                   value={maxRounds}
                   onChange={(event) => setMaxRounds(Number(event.target.value))}
                 />
@@ -237,7 +249,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
                 <span>
                   <b>{task.title}</b>
                   <small>
-                    round {task.current_round}/{task.max_rounds} · {task.participants.length} peers
+                    round {task.current_round}/{task.max_rounds} safety ceiling · {task.participants.length} peers
                   </small>
                 </span>
                 <em>{task.status}</em>
@@ -297,9 +309,24 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
               )}
 
               {activeTask.status === "waiting_approval" && (
-                <button className="primaryButton" disabled={busy} onClick={() => void resume()}>
+                <button
+                  className="primaryButton"
+                  disabled={busy}
+                  onClick={() => void resume()}
+                >
                   <Play size={16} />
                   Resume with current approvals
+                </button>
+              )}
+
+              {activeTask.status === "round_limit" && (
+                <button
+                  className="primaryButton"
+                  disabled={busy}
+                  onClick={() => void resume(5)}
+                >
+                  <Play size={16} />
+                  Continue collaboration +5 rounds
                 </button>
               )}
             </div>

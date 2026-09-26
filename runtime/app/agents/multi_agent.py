@@ -20,7 +20,8 @@ from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
 MAX_TOOL_STEPS_PER_TURN = 4
-MAX_TRANSCRIPT_MESSAGES = 60
+MAX_TRANSCRIPT_MESSAGES = 120
+STABLE_COMPLETION_ROUNDS = 2
 
 SYSTEM_PROMPT = """You are one peer in an Agent Man multi-agent task.
 There is no coordinator or lead agent. Work from your own configured role,
@@ -37,11 +38,21 @@ Return exactly one JSON object and no markdown.
 Use a tool:
 {{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
 
-Send a contribution to the shared peer discussion:
-{{"type":"message","content":"Your useful update, question, review, or proposal."}}
+Continue collaboration:
+{{"type":"message","content":"A useful update, question, finding, review, or requested change."}}
 
-Finish your own contribution:
-{{"type":"final","content":"Your final contribution to the task."}}
+Declare the overall task complete from your role:
+{{"type":"final","content":"Why the shared job is complete from your role and any final result."}}
+
+Important completion rule:
+- Do not return final merely because your own small part is done.
+- Review the latest peer discussion and project state.
+- If another peer still has work, raised an issue, changed the implementation,
+  or needs your review, return message and keep collaborating.
+- Return final only when you believe the shared objective is complete from your
+  role and there are no unresolved issues you can identify.
+- The runtime requires all healthy peers to independently confirm completion
+  across stable rounds before the task can finish.
 
 Do not select a winner or pretend to coordinate the other agents.
 """
@@ -51,7 +62,11 @@ def _parse_action(raw: str) -> dict[str, Any]:
     cleaned = raw.strip()
     fence = chr(96) * 3
     if cleaned.startswith(fence):
-        cleaned = cleaned.replace(fence + "json", "", 1).replace(fence, "", 1).strip()
+        cleaned = (
+            cleaned.replace(fence + "json", "", 1)
+            .replace(fence, "", 1)
+            .strip()
+        )
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
@@ -69,7 +84,10 @@ def _parse_action(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def _transcript(db: Session, task_id: str) -> list[MultiAgentMessageRecord]:
+def _transcript(
+    db: Session,
+    task_id: str,
+) -> list[MultiAgentMessageRecord]:
     return list(
         db.scalars(
             select(MultiAgentMessageRecord)
@@ -79,38 +97,97 @@ def _transcript(db: Session, task_id: str) -> list[MultiAgentMessageRecord]:
     )[-MAX_TRANSCRIPT_MESSAGES:]
 
 
-def _format_transcript(messages, agents: dict[str, AgentRecord]) -> str:
+def _format_transcript(
+    messages: list[MultiAgentMessageRecord],
+    agents: dict[str, AgentRecord],
+) -> str:
     if not messages:
         return "(No peer messages yet.)"
     lines = []
     for message in messages:
-        agent = agents.get(message.agent_id) if message.agent_id else None
+        agent = (
+            agents.get(message.agent_id)
+            if message.agent_id
+            else None
+        )
         author = agent.name if agent else "Runtime"
         lines.append(
-            f"[round {message.round_number}] {author} / {message.kind}: {message.content}"
+            f"[round {message.round_number}] "
+            f"{author} / {message.kind}: {message.content}"
         )
     return "\n".join(lines)
 
 
-def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals):
+def _round_all_final(
+    db: Session,
+    task_id: str,
+    round_number: int,
+    participant_ids: set[str],
+) -> bool:
+    if not participant_ids or round_number < 1:
+        return False
+
+    messages = db.scalars(
+        select(MultiAgentMessageRecord).where(
+            MultiAgentMessageRecord.task_id == task_id,
+            MultiAgentMessageRecord.round_number == round_number,
+            MultiAgentMessageRecord.agent_id.in_(participant_ids),
+        )
+    ).all()
+
+    latest_kind: dict[str, str] = {}
+    for message in messages:
+        if message.agent_id:
+            latest_kind[message.agent_id] = message.kind
+
+    return (
+        set(latest_kind) == participant_ids
+        and all(
+            latest_kind[agent_id] == "final"
+            for agent_id in participant_ids
+        )
+    )
+
+
+def _run_peer_turn(
+    *,
+    agent: AgentRecord,
+    project: ProjectRecord,
+    task: MultiAgentTaskRecord,
+    round_number: int,
+    db: Session,
+    agents: dict[str, AgentRecord],
+    approvals: set[str],
+) -> dict[str, Any]:
     allowed_names = allowed_tool_names(db, agent.id)
-    transcript = _format_transcript(_transcript(db, task.id), agents)
+    transcript = _format_transcript(
+        _transcript(db, task.id),
+        agents,
+    )
     peers = ", ".join(
         f"{peer.name} ({peer.role})"
         for peer in agents.values()
         if peer.id != agent.id
     )
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt(allowed_names))},
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT.format(
+                tools=catalog_for_prompt(allowed_names)
+            ),
+        },
         {
             "role": "user",
             "content": (
                 f"Shared task: {task.prompt}\n"
                 f"Your role: {agent.role}\n"
                 f"Peer agents: {peers or '(none)'}\n"
-                f"Current round: {round_number} of {task.max_rounds}\n\n"
+                f"Current collaboration round: "
+                f"{round_number} of safety ceiling "
+                f"{task.max_rounds}\n\n"
                 f"Shared discussion:\n{transcript}\n\n"
-                "Take one useful peer turn now."
+                "Take one useful peer turn now. Inspect the project "
+                "with tools when that is needed to verify the shared job."
             ),
         },
     ]
@@ -118,14 +195,28 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
     for step in range(1, MAX_TOOL_STEPS_PER_TURN + 1):
         raw = run_messages(agent, messages)
         action = _parse_action(raw)
-        action_type = str(action.get("type", "message"))
+        action_type = str(
+            action.get("type", "message")
+        ).lower()
 
         if action_type in {"message", "final"}:
-            content = str(action.get("content") or action.get("message") or raw).strip()
-            return {"type": action_type, "content": content, "tool_steps": step - 1}
+            content = str(
+                action.get("content")
+                or action.get("message")
+                or raw
+            ).strip()
+            return {
+                "type": action_type,
+                "content": content,
+                "tool_steps": step - 1,
+            }
 
         if action_type != "tool":
-            return {"type": "message", "content": raw.strip(), "tool_steps": step - 1}
+            return {
+                "type": "message",
+                "content": raw.strip(),
+                "tool_steps": step - 1,
+            }
 
         tool_name = str(action.get("tool", ""))
         arguments = action.get("args") or {}
@@ -140,7 +231,11 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
                 approvals=approvals,
                 allowed_names=allowed_names,
             )
-            tool_result = {"tool": tool_name, "status": "ok", "result": result}
+            tool_result = {
+                "tool": tool_name,
+                "status": "ok",
+                "result": result,
+            }
             events.emit(
                 "multi_agent.tool.executed",
                 task_id=task.id,
@@ -156,7 +251,11 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
                 "arguments": arguments,
             }
         except Exception as exc:
-            tool_result = {"tool": tool_name, "status": "error", "error": str(exc)}
+            tool_result = {
+                "tool": tool_name,
+                "status": "error",
+                "error": str(exc),
+            }
             events.emit(
                 "multi_agent.tool.executed",
                 task_id=task.id,
@@ -165,15 +264,23 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
                 status="error",
             )
 
-        messages.append({"role": "assistant", "content": raw})
+        messages.append(
+            {"role": "assistant", "content": raw}
+        )
         messages.append(
             {
                 "role": "user",
                 "content": (
                     "TOOL RESULT:\n"
-                    + json.dumps(tool_result, ensure_ascii=False, default=str)
-                    + "\nContinue this same peer turn. Use another tool, "
-                    "send a peer message, or finish your contribution."
+                    + json.dumps(
+                        tool_result,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\nContinue this same peer turn. "
+                    "Use another tool, send a peer message, "
+                    "or confirm final only if the shared job "
+                    "is actually complete."
                 ),
             }
         )
@@ -182,62 +289,108 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
         "type": "message",
         "content": (
             f"{agent.name} reached the per-turn tool limit and will "
-            "continue in the next round."
+            "continue in the next collaboration round."
         ),
         "tool_steps": MAX_TOOL_STEPS_PER_TURN,
     }
 
 
-def run_peer_task(*, task, db: Session, allow_terminal: bool = False, allow_delete: bool = False):
-    project = db.get(ProjectRecord, task.project_id)
+def run_peer_task(
+    *,
+    task: MultiAgentTaskRecord,
+    db: Session,
+    allow_terminal: bool = False,
+    allow_delete: bool = False,
+) -> MultiAgentTaskRecord:
+    project = db.get(
+        ProjectRecord,
+        task.project_id,
+    )
     if project is None:
         raise ValueError("Project not found")
 
     participants = list(
         db.scalars(
             select(MultiAgentParticipantRecord)
-            .where(MultiAgentParticipantRecord.task_id == task.id)
-            .order_by(MultiAgentParticipantRecord.position)
+            .where(
+                MultiAgentParticipantRecord.task_id
+                == task.id
+            )
+            .order_by(
+                MultiAgentParticipantRecord.position
+            )
         ).all()
     )
-    agents = {}
+
+    agents: dict[str, AgentRecord] = {}
     for participant in participants:
-        agent = db.get(AgentRecord, participant.agent_id)
+        agent = db.get(
+            AgentRecord,
+            participant.agent_id,
+        )
         if agent is None:
             participant.status = "failed"
             continue
         bind_agent_connection(agent, db)
         agents[agent.id] = agent
 
-    approvals = set()
+    approvals: set[str] = set()
     if allow_terminal:
-        approvals.add(Permission.TERMINAL_EXECUTE.value)
+        approvals.add(
+            Permission.TERMINAL_EXECUTE.value
+        )
     if allow_delete:
-        approvals.add(Permission.PROJECT_DELETE.value)
+        approvals.add(
+            Permission.PROJECT_DELETE.value
+        )
 
-    if task.status in {"completed", "completed_with_errors", "round_limit"}:
+    if task.status in {
+        "completed",
+        "completed_with_errors",
+        "failed",
+    }:
         return task
 
+    original_status = task.status
     task.status = "executing"
-    start_round = task.current_round or 1
+    task.completed_at = None
+    db.commit()
+
+    if (
+        original_status == "waiting_approval"
+        and task.current_round > 0
+    ):
+        start_round = task.current_round
+    elif task.current_round > 0:
+        start_round = task.current_round + 1
+    else:
+        start_round = 1
+
     events.emit(
         "multi_agent.task.started",
         task_id=task.id,
         project_id=task.project_id,
         participants=len(participants),
+        start_round=start_round,
+        max_rounds=task.max_rounds,
     )
 
-    for round_number in range(start_round, task.max_rounds + 1):
+    for round_number in range(
+        start_round,
+        task.max_rounds + 1,
+    ):
         task.current_round = round_number
         db.commit()
 
         for participant in participants:
-            if participant.status in {"completed", "failed"}:
+            if participant.status == "failed":
                 continue
             if participant.last_round >= round_number:
                 continue
 
-            agent = agents.get(participant.agent_id)
+            agent = agents.get(
+                participant.agent_id
+            )
             if agent is None:
                 participant.status = "failed"
                 participant.last_round = round_number
@@ -280,8 +433,13 @@ def run_peer_task(*, task, db: Session, allow_terminal: bool = False, allow_dele
                 )
                 continue
 
-            if result["type"] == "approval_required":
-                participant.status = "waiting_approval"
+            if (
+                result["type"]
+                == "approval_required"
+            ):
+                participant.status = (
+                    "waiting_approval"
+                )
                 agent.state = "waiting"
                 task.status = "waiting_approval"
                 db.commit()
@@ -289,25 +447,38 @@ def run_peer_task(*, task, db: Session, allow_terminal: bool = False, allow_dele
                     "multi_agent.approval_required",
                     task_id=task.id,
                     agent_id=agent.id,
-                    permission=result["permission"],
+                    permission=result[
+                        "permission"
+                    ],
                     tool=result["tool"],
                 )
                 return task
 
-            kind = "final" if result["type"] == "final" else "message"
+            kind = (
+                "final"
+                if result["type"] == "final"
+                else "message"
+            )
             db.add(
                 MultiAgentMessageRecord(
                     task_id=task.id,
                     agent_id=agent.id,
                     kind=kind,
                     round_number=round_number,
-                    content=str(result["content"]).strip(),
+                    content=str(
+                        result["content"]
+                    ).strip(),
                 )
             )
             participant.last_round = round_number
-            participant.status = "completed" if kind == "final" else "active"
+            participant.status = (
+                "ready_for_completion"
+                if kind == "final"
+                else "active"
+            )
             agent.state = "idle"
             db.commit()
+
             events.emit(
                 "multi_agent.message",
                 task_id=task.id,
@@ -316,35 +487,96 @@ def run_peer_task(*, task, db: Session, allow_terminal: bool = False, allow_dele
                 round=round_number,
             )
 
-        active = [
-            participant
+        healthy_ids = {
+            participant.agent_id
             for participant in participants
-            if participant.status not in {"completed", "failed"}
-        ]
-        if not active:
-            failed = any(p.status == "failed" for p in participants)
-            task.status = "completed_with_errors" if failed else "completed"
-            task.completed_at = datetime.now(timezone.utc)
+            if participant.status != "failed"
+        }
+
+        if not healthy_ids:
+            task.status = "failed"
+            task.completed_at = (
+                datetime.now(timezone.utc)
+            )
+            db.commit()
+            return task
+
+        current_all_final = _round_all_final(
+            db,
+            task.id,
+            round_number,
+            healthy_ids,
+        )
+        previous_all_final = _round_all_final(
+            db,
+            task.id,
+            round_number - 1,
+            healthy_ids,
+        )
+
+        if (
+            current_all_final
+            and previous_all_final
+        ):
+            failed = any(
+                participant.status == "failed"
+                for participant in participants
+            )
+            for participant in participants:
+                if participant.status != "failed":
+                    participant.status = "completed"
+            task.status = (
+                "completed_with_errors"
+                if failed
+                else "completed"
+            )
+            task.completed_at = (
+                datetime.now(timezone.utc)
+            )
             db.commit()
             events.emit(
                 "multi_agent.task.completed",
                 task_id=task.id,
                 status=task.status,
+                stable_rounds=STABLE_COMPLETION_ROUNDS,
             )
             return task
+
+        for participant in participants:
+            if (
+                participant.status
+                == "ready_for_completion"
+            ):
+                participant.status = "reviewing"
+        db.commit()
+
+        events.emit(
+            "multi_agent.round.completed",
+            task_id=task.id,
+            round=round_number,
+            all_final=current_all_final,
+            stable=(
+                current_all_final
+                and previous_all_final
+            ),
+        )
 
     task.status = "round_limit"
     task.completed_at = datetime.now(timezone.utc)
     for participant in participants:
-        if participant.status not in {"completed", "failed"}:
+        if participant.status != "failed":
             participant.status = "round_limit"
-        agent = agents.get(participant.agent_id)
+        agent = agents.get(
+            participant.agent_id
+        )
         if agent is not None:
             agent.state = "idle"
     db.commit()
+
     events.emit(
-        "multi_agent.task.completed",
+        "multi_agent.task.paused",
         task_id=task.id,
         status=task.status,
+        reason="safety_ceiling",
     )
     return task
