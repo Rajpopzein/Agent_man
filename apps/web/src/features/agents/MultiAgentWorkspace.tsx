@@ -14,6 +14,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
   const [prompt, setPrompt] = useState("");
   const [maxRounds, setMaxRounds] = useState(3);
   const [allowTerminal, setAllowTerminal] = useState(false);
+  const [allowDelete, setAllowDelete] = useState(false);
   const [tasks, setTasks] = useState<MultiAgentTask[]>([]);
   const [activeTask, setActiveTask] = useState<MultiAgentTask | null>(null);
   const [busy, setBusy] = useState(false);
@@ -80,7 +81,11 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
       });
       setActiveTask(created);
       setStatus("Agents are collaborating...");
-      const result = await api.runMultiAgentTask(created.id, allowTerminal);
+      const result = await api.runMultiAgentTask(
+        created.id,
+        allowTerminal,
+        allowDelete,
+      );
       setActiveTask(result);
       setStatus("Task finished with status: " + result.status);
       await loadTasks();
@@ -96,7 +101,11 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
     setBusy(true);
     setStatus("Resuming peer task...");
     try {
-      const result = await api.runMultiAgentTask(activeTask.id, allowTerminal);
+      const result = await api.runMultiAgentTask(
+        activeTask.id,
+        allowTerminal,
+        allowDelete,
+      );
       setActiveTask(result);
       setStatus("Task status: " + result.status);
       await loadTasks();
@@ -179,15 +188,26 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
               ))}
             </div>
 
-            <label className="approval">
-              <input
-                type="checkbox"
-                checked={allowTerminal}
-                onChange={(event) => setAllowTerminal(event.target.checked)}
-              />
-              <TerminalSquare size={16} />
-              Allow terminal tools for this run
-            </label>
+            <div className="runApprovals">
+              <label className="approval">
+                <input
+                  type="checkbox"
+                  checked={allowTerminal}
+                  onChange={(event) => setAllowTerminal(event.target.checked)}
+                />
+                <TerminalSquare size={16} />
+                Allow execute tools for this run
+              </label>
+              <label className="approval">
+                <input
+                  type="checkbox"
+                  checked={allowDelete}
+                  onChange={(event) => setAllowDelete(event.target.checked)}
+                />
+                <TerminalSquare size={16} />
+                Allow destructive file deletion
+              </label>
+            </div>
 
             <button className="primaryButton" disabled={!canLaunch}>
               <Play size={16} />

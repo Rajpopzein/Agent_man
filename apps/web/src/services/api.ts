@@ -84,6 +84,26 @@ export type MultiAgentTask = {
   messages: MultiAgentMessage[];
 };
 
+export type Tool = {
+  name: string;
+  description: string;
+  category: string;
+  risk: string;
+  version: string;
+  builtin: boolean;
+  enabled: boolean;
+};
+
+export type AgentTool = {
+  name: string;
+  description: string;
+  category: string;
+  risk: string;
+  version: string;
+  globally_enabled: boolean;
+  assigned: boolean;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -120,12 +140,14 @@ export const api = {
     prompt: string,
     allowTerminal: boolean,
     endpoint?: string | null,
+    allowDelete = false,
   ) =>
     request<AgentRun>("/api/agents/" + agentId + "/execute", {
       method: "POST",
       body: JSON.stringify({
         prompt,
         allow_terminal: allowTerminal,
+        allow_delete: allowDelete,
         endpoint: endpoint || undefined,
       }),
     }),
@@ -181,14 +203,41 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  runMultiAgentTask: (taskId: string, allowTerminal: boolean) =>
+  runMultiAgentTask: (
+    taskId: string,
+    allowTerminal: boolean,
+    allowDelete = false,
+  ) =>
     request<MultiAgentTask>(
       "/api/multi-agent/tasks/" + taskId + "/run",
       {
         method: "POST",
-        body: JSON.stringify({ allow_terminal: allowTerminal }),
+        body: JSON.stringify({
+          allow_terminal: allowTerminal,
+          allow_delete: allowDelete,
+        }),
       },
     ),
   multiAgentTask: (taskId: string) =>
     request<MultiAgentTask>("/api/multi-agent/tasks/" + taskId),
+  tools: () => request<Tool[]>("/api/tools"),
+  setToolEnabled: (toolName: string, enabled: boolean) =>
+    request<Tool>("/api/tools/" + toolName, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+  agentTools: (agentId: string) =>
+    request<AgentTool[]>("/api/tools/agents/" + agentId),
+  setAgentTool: (
+    agentId: string,
+    toolName: string,
+    enabled: boolean,
+  ) =>
+    request<AgentTool>(
+      "/api/tools/agents/" + agentId + "/" + toolName,
+      {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      },
+    ),
 };

@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.permissions import Permission, require
+from app.core.permissions import Permission, PermissionDenied, require
+from app.sandbox.development import DevelopmentTools
 from app.sandbox.filesystem import ProjectFilesystem
+from app.sandbox.git_tools import ProjectGit
 from app.sandbox.managed_processes import processes
 from app.sandbox.ports import ports
 from app.sandbox.processes import ProjectProcessRunner
@@ -12,34 +14,72 @@ from app.sandbox.processes import ProjectProcessRunner
 class ToolDefinition:
     name: str
     description: str
+    category: str
     risk: str
+    version: str
     arguments: dict[str, str]
 
 
 TOOL_DEFINITIONS = [
-    ToolDefinition("list_files", "List files and folders inside the project.", "read", {"path": "relative directory path"}),
-    ToolDefinition("read_file", "Read a UTF-8 text file inside the project.", "read", {"path": "relative file path"}),
-    ToolDefinition("write_file", "Create or replace a UTF-8 text file inside the project.", "write", {"path": "relative file path", "content": "complete file content"}),
-    ToolDefinition("run_command", "Run a shell command and wait for completion.", "execute", {"command": "shell command"}),
-    ToolDefinition("check_port", "Check whether a local TCP port is free.", "read", {"port": "port number"}),
-    ToolDefinition("allocate_port", "Reserve a free local TCP port for this runtime.", "write", {"start": "first port", "end": "last port"}),
-    ToolDefinition("list_processes", "List background processes started by Agent Man.", "read", {}),
-    ToolDefinition("start_process", "Start a background process in the project workspace.", "execute", {"command": "shell command", "port": "optional port to reserve"}),
-    ToolDefinition("read_process_output", "Read recent output from a managed process.", "read", {"process_id": "managed process id"}),
-    ToolDefinition("stop_process", "Stop a managed background process.", "execute", {"process_id": "managed process id"}),
+    ToolDefinition("list_files", "List files and folders inside the project.", "filesystem", "read", "1.0.0", {"path": "relative directory path"}),
+    ToolDefinition("read_file", "Read a UTF-8 text file inside the project.", "filesystem", "read", "1.0.0", {"path": "relative file path"}),
+    ToolDefinition("write_file", "Create or replace a UTF-8 text file inside the project.", "filesystem", "write", "1.0.0", {"path": "relative file path", "content": "complete file content"}),
+    ToolDefinition("edit_file", "Replace text inside a project file.", "filesystem", "write", "1.0.0", {"path": "relative file path", "old_text": "text to replace", "new_text": "replacement text", "replace_all": "optional boolean"}),
+    ToolDefinition("search_files", "Search project text files for a query.", "filesystem", "read", "1.0.0", {"query": "text to search", "path": "relative directory", "pattern": "filename glob such as *.py"}),
+    ToolDefinition("delete_path", "Delete a file or an empty directory inside the project.", "filesystem", "destructive", "1.0.0", {"path": "relative path"}),
+    ToolDefinition("run_command", "Run a shell command and wait for completion.", "terminal", "execute", "1.0.0", {"command": "shell command"}),
+    ToolDefinition("git_status", "Read Git working tree status.", "git", "read", "1.0.0", {}),
+    ToolDefinition("git_diff", "Read Git diff for working tree or staged changes.", "git", "read", "1.0.0", {"staged": "optional boolean"}),
+    ToolDefinition("git_commit", "Commit already tracked Git changes with a message.", "git", "execute", "1.0.0", {"message": "commit message"}),
+    ToolDefinition("run_tests", "Run the project's test command.", "development", "execute", "1.0.0", {"command": "optional explicit test command"}),
+    ToolDefinition("run_build", "Run the project's build command.", "development", "execute", "1.0.0", {"command": "optional explicit build command"}),
+    ToolDefinition("lint", "Run the project's lint command.", "development", "execute", "1.0.0", {"command": "optional explicit lint command"}),
+    ToolDefinition("check_port", "Check whether a local TCP port is free.", "runtime", "read", "1.0.0", {"port": "port number"}),
+    ToolDefinition("allocate_port", "Reserve a free local TCP port for Agent Man.", "runtime", "write", "1.0.0", {"start": "first port", "end": "last port"}),
+    ToolDefinition("list_processes", "List background processes started by Agent Man.", "runtime", "read", "1.0.0", {}),
+    ToolDefinition("start_process", "Start a background process in the project workspace.", "runtime", "execute", "1.0.0", {"command": "shell command", "port": "optional port to reserve"}),
+    ToolDefinition("read_process_output", "Read recent output from a managed process.", "runtime", "read", "1.0.0", {"process_id": "managed process id"}),
+    ToolDefinition("stop_process", "Stop a managed background process.", "runtime", "execute", "1.0.0", {"process_id": "managed process id"}),
 ]
 
 
-def catalog_for_prompt() -> str:
+def definition_map() -> dict[str, ToolDefinition]:
+    return {tool.name: tool for tool in TOOL_DEFINITIONS}
+
+
+def catalog_for_prompt(
+    allowed_names: set[str] | None = None,
+) -> str:
     lines = []
     for tool in TOOL_DEFINITIONS:
-        args = ", ".join(f"{key}: {value}" for key, value in tool.arguments.items())
-        lines.append(f"- {tool.name} [{tool.risk}]: {tool.description} Args: {args}")
+        if allowed_names is not None and tool.name not in allowed_names:
+            continue
+        args = ", ".join(
+            f"{key}: {value}"
+            for key, value in tool.arguments.items()
+        )
+        lines.append(
+            f"- {tool.name} [{tool.risk}] ({tool.category}): "
+            f"{tool.description} Args: {args}"
+        )
     return "\n".join(lines)
 
 
 class ToolRegistry:
-    def execute(self, *, name: str, arguments: dict[str, Any], workspace_path: str, approvals: set[str] | None = None) -> Any:
+    def execute(
+        self,
+        *,
+        name: str,
+        arguments: dict[str, Any],
+        workspace_path: str,
+        approvals: set[str] | None = None,
+        allowed_names: set[str] | None = None,
+    ) -> Any:
+        if allowed_names is not None and name not in allowed_names:
+            raise PermissionDenied(
+                f"Tool is disabled or not assigned to this agent: {name}"
+            )
+
         filesystem = ProjectFilesystem(workspace_path)
 
         if name == "list_files":
@@ -47,9 +87,65 @@ class ToolRegistry:
         if name == "read_file":
             return filesystem.read_file(str(arguments["path"]))
         if name == "write_file":
-            return filesystem.write_file(str(arguments["path"]), str(arguments.get("content", "")))
+            return filesystem.write_file(
+                str(arguments["path"]),
+                str(arguments.get("content", "")),
+            )
+        if name == "edit_file":
+            return filesystem.edit_file(
+                str(arguments["path"]),
+                str(arguments["old_text"]),
+                str(arguments.get("new_text", "")),
+                bool(arguments.get("replace_all", False)),
+            )
+        if name == "search_files":
+            return filesystem.search_files(
+                str(arguments["query"]),
+                str(arguments.get("path", ".")),
+                str(arguments.get("pattern", "*")),
+            )
+        if name == "delete_path":
+            return filesystem.delete_path(
+                str(arguments["path"]),
+                approvals,
+            )
         if name == "run_command":
-            return ProjectProcessRunner(workspace_path).run(str(arguments["command"]), approvals)
+            return ProjectProcessRunner(workspace_path).run(
+                str(arguments["command"]),
+                approvals,
+            )
+        if name == "git_status":
+            return ProjectGit(workspace_path).status()
+        if name == "git_diff":
+            return ProjectGit(workspace_path).diff(
+                bool(arguments.get("staged", False))
+            )
+        if name == "git_commit":
+            return ProjectGit(workspace_path).commit(
+                str(arguments["message"]),
+                approvals,
+            )
+        if name == "run_tests":
+            return DevelopmentTools(workspace_path).run_tests(
+                approvals,
+                str(arguments["command"])
+                if arguments.get("command")
+                else None,
+            )
+        if name == "run_build":
+            return DevelopmentTools(workspace_path).run_build(
+                approvals,
+                str(arguments["command"])
+                if arguments.get("command")
+                else None,
+            )
+        if name == "lint":
+            return DevelopmentTools(workspace_path).lint(
+                approvals,
+                str(arguments["command"])
+                if arguments.get("command")
+                else None,
+            )
         if name == "check_port":
             require(Permission.LOCAL_PORTS)
             port = int(arguments["port"])
@@ -67,12 +163,21 @@ class ToolRegistry:
                 command=str(arguments["command"]),
                 workspace_path=workspace_path,
                 approvals=approvals,
-                port=int(port_value) if port_value is not None else None,
+                port=int(port_value)
+                if port_value is not None
+                else None,
             )
         if name == "read_process_output":
-            return {"output": processes.read_output(str(arguments["process_id"]))}
+            return {
+                "output": processes.read_output(
+                    str(arguments["process_id"])
+                )
+            }
         if name == "stop_process":
-            return processes.stop(str(arguments["process_id"]), approvals)
+            return processes.stop(
+                str(arguments["process_id"]),
+                approvals,
+            )
         raise ValueError(f"Unknown tool: {name}")
 
 

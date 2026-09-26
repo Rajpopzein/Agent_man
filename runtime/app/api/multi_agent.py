@@ -99,7 +99,12 @@ def run_task(task_id: str, body: MultiAgentRunRequest, db: Session = Depends(get
         db.commit()
 
     try:
-        run_peer_task(task=task, db=db, allow_terminal=body.allow_terminal)
+        run_peer_task(
+            task=task,
+            db=db,
+            allow_terminal=body.allow_terminal,
+            allow_delete=body.allow_delete,
+        )
     except Exception as exc:
         task.status = "failed"
         db.commit()

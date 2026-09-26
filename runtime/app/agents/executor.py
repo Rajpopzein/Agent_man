@@ -5,6 +5,7 @@ from app.agents.runner import run_messages
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
 from app.tools.registry import catalog_for_prompt, tools
+from app.tools.service import allowed_tool_names
 
 MAX_STEPS = 8
 
@@ -48,13 +49,16 @@ def _parse_action(raw: str) -> dict[str, Any]:
     return action
 
 
-def execute_agent(*, agent, project, prompt: str, endpoint: str | None = None, allow_terminal: bool = False) -> dict[str, Any]:
+def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = None, allow_terminal: bool = False, allow_delete: bool = False) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
         approvals.add(Permission.TERMINAL_EXECUTE.value)
+    if allow_delete:
+        approvals.add(Permission.PROJECT_DELETE.value)
 
+    allowed_names = allowed_tool_names(db, agent.id)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt())},
+        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt(allowed_names))},
         {"role": "user", "content": prompt},
     ]
     trace: list[dict[str, Any]] = []
@@ -81,6 +85,7 @@ def execute_agent(*, agent, project, prompt: str, endpoint: str | None = None, a
                 arguments=arguments,
                 workspace_path=project.workspace_path,
                 approvals=approvals,
+                allowed_names=allowed_names,
             )
             step = {
                 "step": step_number,

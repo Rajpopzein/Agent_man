@@ -94,6 +94,7 @@ class AgentRunRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     endpoint: str | None = Field(default=None, max_length=512)
     allow_terminal: bool = False
+    allow_delete: bool = False
 
 
 class AgentRunReply(BaseModel):
@@ -113,6 +114,7 @@ class MultiAgentTaskCreate(BaseModel):
 
 class MultiAgentRunRequest(BaseModel):
     allow_terminal: bool = False
+    allow_delete: bool = False
 
 
 class MultiAgentParticipantView(BaseModel):
@@ -146,3 +148,27 @@ class MultiAgentTaskView(BaseModel):
     completed_at: datetime | None
     participants: list[MultiAgentParticipantView]
     messages: list[MultiAgentMessageView]
+
+
+class ToolView(BaseModel):
+    name: str
+    description: str
+    category: str
+    risk: str
+    version: str
+    builtin: bool
+    enabled: bool
+
+
+class ToolToggle(BaseModel):
+    enabled: bool
+
+
+class AgentToolView(BaseModel):
+    name: str
+    description: str
+    category: str
+    risk: str
+    version: str
+    globally_enabled: bool
+    assigned: bool

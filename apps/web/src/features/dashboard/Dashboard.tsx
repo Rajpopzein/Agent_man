@@ -6,10 +6,12 @@ import {
   Plug,
   Plus,
   TerminalSquare,
+  Wrench,
 } from "lucide-react";
 
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import AIConnections from "../settings/AIConnections";
+import ToolsPage from "../tools/ToolsPage";
 import {
   api,
   Agent,
@@ -18,7 +20,7 @@ import {
   Project,
 } from "../../services/api";
 
-type View = "dashboard" | "multi-agent" | "connections";
+type View = "dashboard" | "multi-agent" | "tools" | "connections";
 
 export default function Dashboard() {
   const [view, setView] = useState<View>("dashboard");
@@ -31,6 +33,7 @@ export default function Dashboard() {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [online, setOnline] = useState(false);
   const [allowTerminal, setAllowTerminal] = useState(false);
+  const [allowDelete, setAllowDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -159,6 +162,8 @@ export default function Dashboard() {
         agent.id,
         prompt,
         allowTerminal,
+        undefined,
+        allowDelete,
       );
       setRun(result);
     } catch (error) {
@@ -198,6 +203,12 @@ export default function Dashboard() {
             <Network /> Multi-Agent
           </button>
           <button
+            className={view === "tools" ? "active" : ""}
+            onClick={() => setView("tools")}
+          >
+            <Wrench /> Tools
+          </button>
+          <button
             className={view === "connections" ? "active" : ""}
             onClick={() => setView("connections")}
           >
@@ -223,14 +234,18 @@ export default function Dashboard() {
                 ? project?.name || "Agent Man"
                 : view === "multi-agent"
                   ? "Peer Agent Collaboration"
-                  : "Provider Configuration"}
+                  : view === "tools"
+                    ? "Agent Tool Registry"
+                    : "Provider Configuration"}
             </h2>
             <small>
               {view === "dashboard"
                 ? project?.workspace_path || "Create a project to begin"
                 : view === "multi-agent"
                   ? "Shared project context with no permanent coordinator."
-                  : "Connections are reusable across agents."}
+                  : view === "tools"
+                    ? "Control the capabilities exposed to each agent."
+                    : "Connections are reusable across agents."}
             </small>
           </div>
           <div className={online ? "healthy" : "offline"}>
@@ -245,6 +260,8 @@ export default function Dashboard() {
           />
         ) : view === "multi-agent" ? (
           <MultiAgentWorkspace project={project} agents={agents} />
+        ) : view === "tools" ? (
+          <ToolsPage agents={agents} />
         ) : (
           <>
             <section className="metrics">
@@ -313,17 +330,30 @@ export default function Dashboard() {
                   </button>
                 </form>
 
-                <label className="approval">
-                  <input
-                    type="checkbox"
-                    checked={allowTerminal}
-                    onChange={(event) =>
-                      setAllowTerminal(event.target.checked)
-                    }
-                  />
-                  <TerminalSquare size={16} />
-                  Allow terminal commands for this run
-                </label>
+                <div className="runApprovals">
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={allowTerminal}
+                      onChange={(event) =>
+                        setAllowTerminal(event.target.checked)
+                      }
+                    />
+                    <TerminalSquare size={16} />
+                    Allow execute tools for this run
+                  </label>
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={allowDelete}
+                      onChange={(event) =>
+                        setAllowDelete(event.target.checked)
+                      }
+                    />
+                    <Wrench size={16} />
+                    Allow destructive file deletion
+                  </label>
+                </div>
 
                 <div className="conversation">
                   {run?.text ||

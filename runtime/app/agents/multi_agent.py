@@ -17,6 +17,7 @@ from app.persistence.models import (
 )
 from app.providers.connections import bind_agent_connection
 from app.tools.registry import catalog_for_prompt, tools
+from app.tools.service import allowed_tool_names
 
 MAX_TOOL_STEPS_PER_TURN = 4
 MAX_TRANSCRIPT_MESSAGES = 60
@@ -92,6 +93,7 @@ def _format_transcript(messages, agents: dict[str, AgentRecord]) -> str:
 
 
 def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals):
+    allowed_names = allowed_tool_names(db, agent.id)
     transcript = _format_transcript(_transcript(db, task.id), agents)
     peers = ", ".join(
         f"{peer.name} ({peer.role})"
@@ -99,7 +101,7 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
         if peer.id != agent.id
     )
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt())},
+        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt(allowed_names))},
         {
             "role": "user",
             "content": (
@@ -136,6 +138,7 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
                 arguments=arguments,
                 workspace_path=project.workspace_path,
                 approvals=approvals,
+                allowed_names=allowed_names,
             )
             tool_result = {"tool": tool_name, "status": "ok", "result": result}
             events.emit(
@@ -185,7 +188,7 @@ def _run_peer_turn(*, agent, project, task, round_number, db, agents, approvals)
     }
 
 
-def run_peer_task(*, task, db: Session, allow_terminal: bool = False):
+def run_peer_task(*, task, db: Session, allow_terminal: bool = False, allow_delete: bool = False):
     project = db.get(ProjectRecord, task.project_id)
     if project is None:
         raise ValueError("Project not found")
@@ -209,6 +212,8 @@ def run_peer_task(*, task, db: Session, allow_terminal: bool = False):
     approvals = set()
     if allow_terminal:
         approvals.add(Permission.TERMINAL_EXECUTE.value)
+    if allow_delete:
+        approvals.add(Permission.PROJECT_DELETE.value)
 
     if task.status in {"completed", "completed_with_errors", "round_limit"}:
         return task

@@ -13,6 +13,7 @@ from app.providers.connections import bind_agent_connection
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.managed_processes import processes
 from app.sandbox.ports import ports
+from app.tools.service import ensure_agent_defaults
 
 router = APIRouter()
 
@@ -57,6 +58,8 @@ def create_agent(body: AgentCreate, db: Session = Depends(get_session)):
         cloud_fallback_allowed=llm.cloud_fallback_allowed,
     )
     db.add(row)
+    db.flush()
+    ensure_agent_defaults(db, row.id)
     db.commit()
     db.refresh(row)
     return agent_view(row)
@@ -105,8 +108,10 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
             agent=agent,
             project=project,
             prompt=body.prompt,
+            db=db,
             endpoint=body.endpoint,
             allow_terminal=body.allow_terminal,
+            allow_delete=body.allow_delete,
         )
         return AgentRunReply(agent_id=agent.id, **result)
     except Exception as exc:

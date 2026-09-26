@@ -92,3 +92,30 @@ class MultiAgentMessageRecord(Base):
     round_number: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ToolRecord(Base):
+    __tablename__ = "tools"
+
+    name: Mapped[str] = mapped_column(String(120), primary_key=True)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    risk: Mapped[str] = mapped_column(String(40), nullable=False)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AgentToolRecord(Base):
+    __tablename__ = "agent_tools"
+
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id"),
+        primary_key=True,
+    )
+    tool_name: Mapped[str] = mapped_column(
+        ForeignKey("tools.name"),
+        primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)

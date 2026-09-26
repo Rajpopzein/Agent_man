@@ -4,6 +4,7 @@ from enum import StrEnum
 class Permission(StrEnum):
     PROJECT_READ = "project.files.read"
     PROJECT_WRITE = "project.files.write"
+    PROJECT_DELETE = "project.files.delete"
     TERMINAL_EXECUTE = "terminal.execute"
     LOCAL_PORTS = "local.ports"
     OUTSIDE_WORKSPACE = "filesystem.outside_workspace"
@@ -18,6 +19,7 @@ class Decision(StrEnum):
 DEFAULT_POLICY: dict[Permission, Decision] = {
     Permission.PROJECT_READ: Decision.ALLOW,
     Permission.PROJECT_WRITE: Decision.ALLOW,
+    Permission.PROJECT_DELETE: Decision.ASK,
     Permission.TERMINAL_EXECUTE: Decision.ASK,
     Permission.LOCAL_PORTS: Decision.ALLOW,
     Permission.OUTSIDE_WORKSPACE: Decision.BLOCK,
