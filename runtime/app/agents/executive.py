@@ -63,8 +63,8 @@ Available workflows:
 
 Return exactly one JSON object and no markdown.
 
-Use a runtime tool:
-{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
+Use an assigned runtime tool:
+{{"type":"tool","tool":"TOOL_NAME","args":{{"argument":"value"}}}}
 
 Direct reply:
 {{"type":"reply","message":"..."}}
