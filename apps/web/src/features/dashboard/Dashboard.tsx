@@ -13,6 +13,7 @@ import {
   GitBranch,
   Globe2,
   Home,
+  Mic,
   Network,
   Plug,
   Plus,
@@ -123,6 +124,9 @@ export default function Dashboard() {
   const [allowDelete, setAllowDelete] = useState(false);
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [processingStartedAt, setProcessingStartedAt] =
+    useState<number | null>(null);
+  const [processingSeconds, setProcessingSeconds] = useState(0);
 
   const [projectDialog, setProjectDialog] = useState(false);
   const [projectName, setProjectName] = useState("Agent Man Dev");
@@ -150,9 +154,7 @@ export default function Dashboard() {
     onWake: async () => {
       await voice.speakAsync("Listening.", true);
     },
-    onCommand: (command) => {
-      void runDirective(command);
-    },
+    onCommand: (command) => runDirective(command),
   });
 
   async function load() {
@@ -203,15 +205,29 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (
-      run?.status === "completed" &&
-      run.text &&
-      voice.settings.enabled &&
-      voice.settings.autoSpeak
-    ) {
-      voice.speak(run.text);
+    if (wake.state === "listening" && wake.liveTranscript) {
+      setPrompt(wake.liveTranscript);
     }
-  }, [run?.status, run?.text]);
+  }, [wake.state, wake.liveTranscript]);
+
+  useEffect(() => {
+    if (processingStartedAt === null) {
+      setProcessingSeconds(0);
+      return;
+    }
+
+    const update = () => {
+      setProcessingSeconds(
+        Math.max(
+          0,
+          Math.floor((Date.now() - processingStartedAt) / 1000),
+        ),
+      );
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [processingStartedAt]);
 
   function openProjectDialog() {
     setProjectName("Agent Man Dev");
@@ -390,10 +406,13 @@ export default function Dashboard() {
     setPrompt(command);
     voice.stop();
     setBusy(true);
+    setProcessingStartedAt(Date.now());
     setRun(null);
 
+    let result: MainAgentReply | null = null;
+
     try {
-      const result = await api.chatMainAgent(
+      result = await api.chatMainAgent(
         project.id,
         command,
         allowTerminal,
@@ -409,6 +428,16 @@ export default function Dashboard() {
       });
     } finally {
       setBusy(false);
+      setProcessingStartedAt(null);
+    }
+
+    if (
+      result?.status === "completed" &&
+      result.text &&
+      voice.settings.enabled &&
+      voice.settings.autoSpeak
+    ) {
+      await voice.speakAsync(result.text);
     }
   }
 
@@ -452,6 +481,36 @@ export default function Dashboard() {
       )?.name || agent.llm.provider_id
     );
   }, [agent, connections]);
+
+  const interactionPhase =
+    voice.speaking
+      ? "speaking"
+      : busy || wake.state === "processing"
+        ? "processing"
+        : wake.state === "listening"
+          ? "listening"
+          : wake.state === "waking"
+            ? "waking"
+            : wake.state === "error"
+              ? "error"
+              : voice.settings.wakeEnabled
+                ? "standby"
+                : "ready";
+
+  const interactionLabel =
+    interactionPhase === "speaking"
+      ? "SPEAKING"
+      : interactionPhase === "processing"
+        ? "PROCESSING"
+        : interactionPhase === "listening"
+          ? "LISTENING"
+          : interactionPhase === "waking"
+            ? "WAKING"
+            : interactionPhase === "error"
+              ? "MIC ERROR"
+              : interactionPhase === "standby"
+                ? "WAKE READY"
+                : "READY";
 
   const meta = VIEW_META[view];
 
@@ -570,23 +629,17 @@ export default function Dashboard() {
                 <VolumeX size={15} />
               )}
               <span>
-                {wake.state === "listening"
-                  ? "LISTEN"
-                  : voice.settings.wakeEnabled
-                    ? "WAKE"
-                    : "VOICE"}
+                {interactionPhase === "processing"
+                  ? "PROCESS"
+                  : interactionPhase === "listening"
+                    ? "LISTEN"
+                    : interactionPhase === "speaking"
+                      ? "SPEAK"
+                      : voice.settings.wakeEnabled
+                        ? "WAKE"
+                        : "VOICE"}
               </span>
-              <i
-                className={
-                  voice.speaking
-                    ? "speaking"
-                    : wake.state === "listening"
-                      ? "listening"
-                      : wake.state === "standby"
-                        ? "armed"
-                        : ""
-                }
-              />
+              <i className={interactionPhase} />
             </button>
 
             <div
@@ -743,7 +796,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="intelligenceCore">
+              <div className={"intelligenceCore phase-" + interactionPhase}>
                 <div className="coreBackdrop" />
                 <div className="orbit orbitOne">
                   <span />
@@ -795,15 +848,13 @@ export default function Dashboard() {
                 <PanelLabel icon={<Activity />} label="MISSION CONTROL" />
                 <div className="missionStatus">
                   <span
-                    className={busy ? "statusPulse busy" : "statusPulse"}
+                    className={
+                      "statusPulse phase-" + interactionPhase
+                    }
                   />
                   <div>
                     <small>CURRENT STATE</small>
-                    <strong>
-                      {busy
-                        ? "EXECUTING"
-                        : run?.status?.toUpperCase() || "READY"}
-                    </strong>
+                    <strong>{interactionLabel}</strong>
                   </div>
                 </div>
 
@@ -882,11 +933,61 @@ export default function Dashboard() {
                     Talk to Agent Man
                   </h3>
                 </div>
-                <div className="commandStatus">
-                  <i className={busy ? "busy" : ""} />
-                  {busy ? "PROCESSING" : "AWAITING DIRECTIVE"}
+                <div className={"commandStatus phase-" + interactionPhase}>
+                  <i />
+                  {interactionLabel}
+                  {interactionPhase === "processing" &&
+                    " · " + processingSeconds + "s"}
                 </div>
               </div>
+
+              {(voice.settings.wakeEnabled ||
+                interactionPhase === "processing" ||
+                interactionPhase === "speaking") && (
+                <div
+                  className={
+                    "interactionMonitor phase-" + interactionPhase
+                  }
+                >
+                  <div className="interactionMonitorIcon">
+                    {interactionPhase === "listening" ? (
+                      <Mic size={16} />
+                    ) : (
+                      <Sparkles size={16} />
+                    )}
+                  </div>
+                  <div className="interactionMonitorBody">
+                    <small>{interactionLabel}</small>
+                    <strong>
+                      {interactionPhase === "listening"
+                        ? wake.liveTranscript ||
+                          "Listening for your command..."
+                        : interactionPhase === "processing"
+                          ? "Agent Man is processing: " +
+                            (wake.finalTranscript || prompt)
+                          : interactionPhase === "speaking"
+                            ? "Agent Man is speaking the result."
+                            : wake.errorMessage ||
+                              "Say “" +
+                                voice.settings.wakePhrase +
+                                "” to begin."}
+                    </strong>
+                  </div>
+                  {(interactionPhase === "listening" ||
+                    interactionPhase === "processing") && (
+                    <div
+                      className={
+                        "interactionBars " + interactionPhase
+                      }
+                      aria-hidden="true"
+                    >
+                      {Array.from({ length: 8 }).map((_, index) => (
+                        <i key={index} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <form className="commandComposer" onSubmit={execute}>
                 <span className="commandPrompt">&gt;</span>
@@ -1169,6 +1270,9 @@ export default function Dashboard() {
         wakeSupported={wake.supported}
         wakeState={wake.state}
         lastHeard={wake.lastHeard}
+        liveTranscript={wake.liveTranscript}
+        finalTranscript={wake.finalTranscript}
+        errorMessage={wake.errorMessage}
         onUpdate={voice.update}
         onTest={voice.testVoice}
         onStop={voice.stop}

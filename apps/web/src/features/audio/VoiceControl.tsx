@@ -10,14 +10,7 @@ import {
 
 import HudModal from "../../components/HudModal";
 import { VoiceSettings } from "./useAgentVoice";
-
-type WakeState =
-  | "unsupported"
-  | "off"
-  | "standby"
-  | "waking"
-  | "listening"
-  | "error";
+import { WakeState } from "./useWakeWord";
 
 type Props = {
   open: boolean;
@@ -29,6 +22,9 @@ type Props = {
   wakeSupported: boolean;
   wakeState: WakeState;
   lastHeard: string;
+  liveTranscript: string;
+  finalTranscript: string;
+  errorMessage: string;
   onUpdate: (patch: Partial<VoiceSettings>) => void;
   onTest: () => void;
   onStop: () => void;
@@ -46,6 +42,9 @@ export default function VoiceControl({
   wakeSupported,
   wakeState,
   lastHeard,
+  liveTranscript,
+  finalTranscript,
+  errorMessage,
   onUpdate,
   onTest,
   onStop,
@@ -57,17 +56,27 @@ export default function VoiceControl({
   );
 
   const wakeLabel =
-    wakeState === "standby"
-      ? "WAKE STANDBY"
-      : wakeState === "waking"
-        ? "ACKNOWLEDGING"
-        : wakeState === "listening"
-          ? "LISTENING"
-          : wakeState === "error"
-            ? "MIC BLOCKED"
-            : wakeState === "unsupported"
-              ? "UNSUPPORTED"
-              : "WAKE OFF";
+    speaking
+      ? "SPEAKING"
+      : wakeState === "standby"
+        ? "WAKE STANDBY"
+        : wakeState === "waking"
+          ? "ACKNOWLEDGING"
+          : wakeState === "listening"
+            ? "LISTENING"
+            : wakeState === "processing"
+              ? "PROCESSING"
+              : wakeState === "error"
+                ? "MIC ERROR"
+                : wakeState === "unsupported"
+                  ? "UNSUPPORTED"
+                  : "WAKE OFF";
+
+  const transcript =
+    liveTranscript ||
+    finalTranscript ||
+    lastHeard ||
+    "Say the wake phrase or press Listen now.";
 
   return (
     <HudModal
@@ -95,7 +104,17 @@ export default function VoiceControl({
       }
     >
       <div className="voiceIdentity">
-        <div className={speaking ? "voiceOrb speaking" : "voiceOrb"}>
+        <div
+          className={
+            speaking
+              ? "voiceOrb speaking"
+              : wakeState === "listening"
+                ? "voiceOrb listening"
+                : wakeState === "processing"
+                  ? "voiceOrb processing"
+                  : "voiceOrb"
+          }
+        >
           {settings.enabled ? <Volume2 size={28} /> : <VolumeX size={28} />}
         </div>
         <div>
@@ -154,23 +173,66 @@ export default function VoiceControl({
               : "voiceToggle"
           }
           onClick={onListenNow}
-          disabled={!wakeSupported}
+          disabled={
+            !wakeSupported ||
+            wakeState === "processing" ||
+            speaking
+          }
         >
           <Mic size={15} />
           Listen now
         </button>
       </div>
 
-      <div className="wakePanel">
+      <div className={"wakePanel phase-" + wakeState}>
         <div className="wakeStatusLine">
-          <span className={"wakeStatusDot " + wakeState} />
+          <span
+            className={
+              "wakeStatusDot " +
+              (speaking ? "speaking" : wakeState)
+            }
+          />
           <b>{wakeLabel}</b>
           <small>
-            {lastHeard
-              ? 'Last heard: "' + lastHeard + '"'
-              : "No speech captured yet"}
+            {wakeState === "listening"
+              ? "Speak naturally. Command submits after a short silence."
+              : wakeState === "processing"
+                ? "Agent Man is working on the captured directive."
+                : "Wake listener status"}
           </small>
         </div>
+
+        <div className="voiceCaptureMonitor">
+          <div
+            className={
+              "voiceWave " +
+              (wakeState === "listening"
+                ? "active"
+                : wakeState === "processing"
+                  ? "processing"
+                  : "")
+            }
+            aria-hidden="true"
+          >
+            {Array.from({ length: 12 }).map((_, index) => (
+              <i key={index} />
+            ))}
+          </div>
+          <div className="voiceTranscript">
+            <small>
+              {wakeState === "listening"
+                ? "LIVE TRANSCRIPT"
+                : wakeState === "processing"
+                  ? "CAPTURED COMMAND"
+                  : "LAST CAPTURE"}
+            </small>
+            <p>{transcript}</p>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div className="voiceCaptureError">{errorMessage}</div>
+        )}
 
         <label className="voiceField">
           Wake phrase
@@ -198,9 +260,10 @@ export default function VoiceControl({
         </label>
 
         <p className="voiceNote">
-          Wake flow: say “{settings.wakePhrase}”. Agent Man replies “Listening.”
-          Then speak the command. You can also say the wake phrase and command
-          together in one sentence.
+          Say “{settings.wakePhrase}”. Agent Man acknowledges, opens focused
+          command capture, shows the live transcript, and submits after roughly
+          one second of silence. You can still say the wake phrase and command
+          together.
         </p>
       </div>
 
@@ -244,12 +307,6 @@ export default function VoiceControl({
           onChange={(volume) => onUpdate({ volume })}
         />
       </div>
-
-      <p className="voiceNote">
-        The Signature profile gives Agent Man a consistent lower, measured
-        delivery using an installed system voice. Available voice engines vary
-        by Windows and browser.
-      </p>
     </HudModal>
   );
 }
