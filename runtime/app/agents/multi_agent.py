@@ -284,11 +284,11 @@ def _run_peer_turn(
             }
 
         if action_type != "tool":
-            return {
-                "type": "message",
-                "content": raw.strip(),
-                "tool_steps": step - 1,
-            }
+            messages.extend([
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": "Invalid action. Return one valid JSON tool, message, or final action; do not print tool-call markers."},
+            ])
+            continue
 
         tool_name = str(action.get("tool", ""))
         arguments = action.get("args") or {}

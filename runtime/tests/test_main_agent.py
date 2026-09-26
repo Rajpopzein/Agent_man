@@ -9,6 +9,46 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_native_serial_template_executes_and_returns_context(monkeypatch):
+    project, _ = _setup()
+    discoveries = []
+
+    def ports():
+        discoveries.append(True)
+        return [{"device": "COM7", "manufacturer": "Espressif"}]
+
+    answers = iter([
+        r'<|tool\_call>call:list\_serial\_ports{}\<tool\_call|>',
+        '{"type":"reply","message":"An Espressif device is detected on COM7. Serial communication is not yet verified."}',
+    ])
+    monkeypatch.setattr("app.tools.registry.serial_devices.list_ports", ports)
+    monkeypatch.setattr("app.agents.executive.run_messages", lambda *a, **k: next(answers))
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "check my esp32 connection"},
+    )
+    body = response.json()
+    assert response.status_code == 200
+    assert len(discoveries) == 2  # Safe preflight and the parsed model tool call.
+    assert body["steps"][1]["tool"] == "list_serial_ports"
+    assert body["steps"][1]["status"] == "ok"
+    assert "COM7" in body["text"]
+    assert "tool_call" not in body["text"]
+
+
+def test_native_serial_open_still_requires_permission(monkeypatch):
+    project, _ = _setup()
+    monkeypatch.setattr("app.agents.executive.run_messages", lambda *a, **k:
+        '<|tool_call>call:serial_open{"device":"COM7"}<tool_call|>')
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "check my esp32 connection", "allow_hardware": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "waiting_approval"
+    assert response.json()["steps"][-1]["permission"] == "hardware.serial"
+
+
 @pytest.mark.parametrize("recovers", [True, False])
 def test_executive_does_not_display_malformed_serial_action(monkeypatch, recovers):
     project, _ = _setup()

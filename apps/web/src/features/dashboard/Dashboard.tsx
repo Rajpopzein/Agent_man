@@ -69,6 +69,14 @@ type Notice = {
   tone?: "default" | "danger";
 };
 
+type LiveResponse = {
+  id: string;
+  agentId: string;
+  name: string;
+  text: string;
+  status: string;
+};
+
 const VIEW_META: Record<
   View,
   { label: string; eyebrow: string; description: string }
@@ -120,6 +128,8 @@ export default function Dashboard() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
   const [run, setRun] = useState<MainAgentReply | null>(null);
+  const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
+  const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
   const [allowTerminal, setAllowTerminal] = useState(false);
@@ -225,11 +235,15 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    setLiveResponses([]);
+    setStreamConnected(false);
     if (!project) return;
 
     const stream = new EventSource(
       api.runtimeEventsUrl(project.id),
     );
+    stream.onopen = () => setStreamConnected(true);
+    stream.onerror = () => setStreamConnected(false);
 
     stream.onmessage = (event) => {
       let runtimeEvent: RuntimeEvent;
@@ -237,6 +251,25 @@ export default function Dashboard() {
       try {
         runtimeEvent = JSON.parse(event.data) as RuntimeEvent;
       } catch {
+        return;
+      }
+
+      if (runtimeEvent.type.startsWith("agent.response.") &&
+          typeof runtimeEvent.response_id === "string") {
+        const responseId = runtimeEvent.response_id;
+        const response: LiveResponse = {
+          id: responseId,
+          agentId: String(runtimeEvent.agent_id || ""),
+          name: String(runtimeEvent.agent_name || "Agent"),
+          text: typeof runtimeEvent.text === "string" ? runtimeEvent.text : "",
+          status: runtimeEvent.type.split(".").pop() || "started",
+        };
+        setLiveResponses((current) => {
+          const found = current.some((item) => item.id === responseId);
+          return (found
+            ? current.map((item) => item.id === responseId ? response : item)
+            : [...current, response]).slice(-20);
+        });
         return;
       }
 
@@ -505,6 +538,7 @@ export default function Dashboard() {
     setBusy(true);
     setProcessingStartedAt(Date.now());
     setRun(null);
+    setLiveResponses([]);
 
     let result: MainAgentReply | null = null;
 
@@ -780,6 +814,23 @@ export default function Dashboard() {
             </code>
           </div>
         </div>
+
+        {liveResponses.length > 0 && (
+          <section className="liveResponses" aria-label="Live agent responses">
+            <header>
+              <strong>LIVE AGENT RESPONSES</strong>
+              <span>{streamConnected ? "Connected · previews until execution completes" : "Reconnecting… updates may be delayed"}</span>
+            </header>
+            <div className="liveResponseList" role="log" aria-live="polite" aria-relevant="additions text">
+              {liveResponses.filter((item) => item.text || item.status !== "completed").map((item) => (
+                <article key={item.id}>
+                  <div><strong>{item.name}</strong><small>{item.status === "started" || item.status === "delta" ? "Generating…" : item.status === "completed" ? "Response received" : "Interrupted"}</small></div>
+                  <p>{item.text || "Working on the next action…"}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {view === "connections" ? (
           <AIConnections
@@ -1155,6 +1206,7 @@ export default function Dashboard() {
                 </div>
                 <div className="outputBody">
                   {run?.text ||
+                    (busy && [...liveResponses].reverse().find((item) => item.agentId === "main-agent:" + project?.id)?.text) ||
                     (mainConfig
                       ? "Agent Man is standing by. Give me the objective; I will choose and coordinate the workers."
                       : "Configure Agent Man's executive model to begin.")}

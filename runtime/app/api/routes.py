@@ -241,7 +241,11 @@ async def stream_events(
     project_id: str | None = None,
 ):
     async def generate():
-        cursor = events.current_sequence()
+        try:
+            cursor = int(request.headers.get("last-event-id", ""))
+            cursor = max(0, min(cursor, events.current_sequence()))
+        except ValueError:
+            cursor = events.current_sequence()
 
         yield ": agent-man-event-stream\n\n"
 
@@ -259,7 +263,8 @@ async def stream_events(
 
             for event in batch:
                 yield (
-                    "data: "
+                    "id: " + str(event["sequence"]) + "\n"
+                    + "data: "
                     + json.dumps(
                         event,
                         ensure_ascii=False,

@@ -4,19 +4,21 @@ import re
 
 
 def special_action(raw: str) -> dict | None:
-    cleaned = raw.strip().replace(r"\_", "_")
-    if "tool_call" not in cleaned:
+    cleaned = raw.strip()
+    if "tool_call" not in cleaned.replace(r"\_", "_"):
         return None
     # Local models sometimes emit their training template instead of JSON.
     match = re.fullmatch(
-        r"<\|tool_call>\s*call:([a-zA-Z][a-zA-Z0-9_]*)\s*(\{.*\})\s*\\?<tool_call\|>",
+        r"<\|tool(?:\\)?_call>\s*call:([a-zA-Z][a-zA-Z0-9_\\]*)\s*(\{.*\})\s*\\?<tool(?:\\)?_call\|>",
         cleaned, re.DOTALL,
     )
     if match:
         try:
             arguments = json.loads(match[2])
             if isinstance(arguments, dict):
-                return {"type": "tool", "tool": match[1], "args": arguments}
+                name = match[1].replace(r"\_", "_")
+                if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", name):
+                    return {"type": "tool", "tool": name, "args": arguments}
         except json.JSONDecodeError:
             pass
     if cleaned.startswith("<") or "<|tool_call" in cleaned:
@@ -75,7 +77,7 @@ def response_preview(raw: str, *, structured: bool) -> str:
     if fields.get("type") not in {"reply", "final", "message"}:
         return ""
     text = fields.get("message", fields.get("content", ""))
-    if not isinstance(text, str) or "tool_call" in text or text.lstrip().startswith("{"):
+    if not isinstance(text, str) or "tool_call" in text or text.lstrip().startswith(("{", "<")):
         return ""
     # A surrogate may arrive before the rest of its JSON unicode pair.
     return text.encode("utf-8", errors="replace").decode("utf-8")

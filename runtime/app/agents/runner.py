@@ -104,7 +104,7 @@ def run_messages(
             now = perf_counter()
             if now - last_emitted >= 0.05:
                 text = response_preview(result, structured=structured)
-                if text != last_text:
+                if text and text != last_text:
                     events.emit("agent.response.delta", **event_context, text=text)
                     last_text = text
                     last_emitted = now
