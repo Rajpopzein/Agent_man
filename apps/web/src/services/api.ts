@@ -426,6 +426,17 @@ export const api = {
         body: JSON.stringify({ enabled }),
       },
     ),
+  setMainAgentToolAssignments: (
+    projectId: string,
+    toolNames: string[],
+  ) =>
+    request<EffectiveToolAccess>(
+      "/api/tools/main-agent/" + projectId + "/bulk/set",
+      {
+        method: "PUT",
+        body: JSON.stringify({ tool_names: toolNames }),
+      },
+    ),
   grantAllMainAgentTools: (projectId: string) =>
     request<{ updated: number; assigned: string[] }>(
       "/api/tools/main-agent/" + projectId + "/bulk/grant-all",

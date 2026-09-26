@@ -2,7 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import AgentToolView, ToolToggle, ToolView
+from app.api.schemas import (
+    AgentToolView,
+    ToolAssignmentSet,
+    ToolToggle,
+    ToolView,
+)
 from app.persistence.database import get_session
 from app.persistence.models import (
     AgentRecord,
@@ -333,6 +338,73 @@ def effective_main_agent_tools(
 ):
     if db.get(ProjectRecord, project_id) is None:
         raise HTTPException(404, "Project not found")
+    return executive_tool_access(
+        db,
+        project_id,
+    ).as_dict()
+
+
+
+@router.put("/main-agent/{project_id}/bulk/set")
+def set_main_agent_tool_assignments(
+    project_id: str,
+    body: ToolAssignmentSet,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    sync_builtin_tools(db)
+    ensure_main_agent_defaults(db, project_id)
+
+    requested = set(body.tool_names)
+    tools_by_name = {
+        row.name: row
+        for row in db.scalars(select(ToolRecord)).all()
+    }
+
+    unknown = sorted(requested - set(tools_by_name))
+    if unknown:
+        raise HTTPException(
+            400,
+            "Unknown tools: " + ", ".join(unknown),
+        )
+
+    disabled = sorted(
+        name
+        for name in requested
+        if not tools_by_name[name].enabled
+    )
+    if disabled:
+        raise HTTPException(
+            409,
+            "Runtime-disabled tools cannot be assigned: "
+            + ", ".join(disabled),
+        )
+
+    assignments = {
+        row.tool_name: row
+        for row in db.scalars(
+            select(MainAgentToolRecord).where(
+                MainAgentToolRecord.project_id == project_id
+            )
+        ).all()
+    }
+
+    for name, tool in tools_by_name.items():
+        assignment = assignments.get(name)
+        should_enable = name in requested and tool.enabled
+        if assignment is None:
+            assignment = MainAgentToolRecord(
+                project_id=project_id,
+                tool_name=name,
+                enabled=should_enable,
+            )
+            db.add(assignment)
+        else:
+            assignment.enabled = should_enable
+
+    db.commit()
     return executive_tool_access(
         db,
         project_id,

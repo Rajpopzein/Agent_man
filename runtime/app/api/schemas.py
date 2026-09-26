@@ -169,6 +169,10 @@ class ToolToggle(BaseModel):
     enabled: bool
 
 
+class ToolAssignmentSet(BaseModel):
+    tool_names: list[str] = Field(default_factory=list, max_length=200)
+
+
 class AgentToolView(BaseModel):
     name: str
     description: str

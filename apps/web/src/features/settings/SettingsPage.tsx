@@ -3,7 +3,6 @@ import {
   BrainCircuit,
   CheckCircle2,
   Cpu,
-  Power,
   RefreshCw,
   Save,
   Settings2,
@@ -39,10 +38,13 @@ export default function SettingsPage({
   const [detecting, setDetecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+
   const [executiveTools, setExecutiveTools] = useState<AgentTool[]>([]);
+  const [toolDraft, setToolDraft] = useState<Set<string>>(new Set());
   const [effectiveTools, setEffectiveTools] =
     useState<EffectiveToolAccess | null>(null);
   const [toolStatus, setToolStatus] = useState("");
+  const [toolSaving, setToolSaving] = useState(false);
   const [verifyingTools, setVerifyingTools] = useState(false);
 
   useEffect(() => {
@@ -54,24 +56,40 @@ export default function SettingsPage({
     setConnectionId(connection?.id || "");
     setModel(mainConfig?.model || connection?.default_model || "");
     setDetectedModels([]);
-  }, [project?.id, mainConfig?.connection_id, mainConfig?.model, connections]);
+  }, [
+    project?.id,
+    mainConfig?.connection_id,
+    mainConfig?.model,
+    connections,
+  ]);
 
   useEffect(() => {
     if (!project) {
       setExecutiveTools([]);
+      setToolDraft(new Set());
       setEffectiveTools(null);
       return;
     }
+
     void loadExecutiveTools(project.id);
     void verifyExecutiveTools(project.id, false);
   }, [project?.id]);
 
   async function loadExecutiveTools(projectId: string) {
     try {
-      setExecutiveTools(await api.mainAgentTools(projectId));
+      const loaded = await api.mainAgentTools(projectId);
+      setExecutiveTools(loaded);
+      setToolDraft(
+        new Set(
+          loaded
+            .filter((tool) => tool.globally_enabled && tool.assigned)
+            .map((tool) => tool.name),
+        ),
+      );
     } catch (error) {
       setToolStatus(
-        error instanceof Error ? error.message : String(error),
+        "Unable to load Executive tools: " +
+          (error instanceof Error ? error.message : String(error)),
       );
     }
   }
@@ -87,10 +105,10 @@ export default function SettingsPage({
       if (announce) {
         setToolStatus(
           effective.count > 0
-            ? "Runtime verified: Agent Man receives " +
+            ? "Runtime verified: Agent Man currently receives " +
                 effective.count +
-                " effective tools."
-            : "Runtime verified: Agent Man currently receives 0 effective tools.",
+                " tools."
+            : "Runtime verified: Agent Man currently receives 0 tools.",
         );
       }
       return effective;
@@ -122,9 +140,23 @@ export default function SettingsPage({
     return groups;
   }, [executiveTools]);
 
-  const assignedToolCount = executiveTools.filter(
-    (tool) => tool.globally_enabled && tool.assigned,
-  ).length;
+  const persistedToolNames = useMemo(
+    () =>
+      new Set(
+        executiveTools
+          .filter((tool) => tool.globally_enabled && tool.assigned)
+          .map((tool) => tool.name),
+      ),
+    [executiveTools],
+  );
+
+  const toolDraftChanged = useMemo(() => {
+    if (toolDraft.size !== persistedToolNames.size) return true;
+    for (const name of toolDraft) {
+      if (!persistedToolNames.has(name)) return true;
+    }
+    return false;
+  }, [toolDraft, persistedToolNames]);
 
   function selectConnection(id: string) {
     const connection = connections.find((item) => item.id === id);
@@ -195,103 +227,60 @@ export default function SettingsPage({
     }
   }
 
-  async function toggleExecutiveTool(tool: AgentTool) {
-    if (!project || !tool.globally_enabled) return;
+  function toggleToolDraft(tool: AgentTool) {
+    if (!tool.globally_enabled) return;
+    setToolDraft((current) => {
+      const next = new Set(current);
+      if (next.has(tool.name)) {
+        next.delete(tool.name);
+      } else {
+        next.add(tool.name);
+      }
+      return next;
+    });
+    setToolStatus("Tool selection changed. Press Apply Tool Access to save.");
+  }
 
-    setToolStatus("Updating " + tool.name + "...");
+  function selectAllEnabledTools() {
+    setToolDraft(
+      new Set(
+        executiveTools
+          .filter((tool) => tool.globally_enabled)
+          .map((tool) => tool.name),
+      ),
+    );
+    setToolStatus("All runtime-enabled tools selected. Apply to save.");
+  }
+
+  function clearToolSelection() {
+    setToolDraft(new Set());
+    setToolStatus("All Executive tools deselected. Apply to save.");
+  }
+
+  async function applyToolAccess() {
+    if (!project) return;
+
+    setToolSaving(true);
+    setToolStatus("Saving Executive tool access...");
     try {
-      const updated = await api.setMainAgentTool(
+      const effective = await api.setMainAgentToolAssignments(
         project.id,
-        tool.name,
-        !tool.assigned,
+        Array.from(toolDraft).sort(),
       );
-      setExecutiveTools((current) =>
-        current.map((item) =>
-          item.name === updated.name ? updated : item,
-        ),
-      );
-      await verifyExecutiveTools(project.id, false);
-      setToolStatus(
-        updated.name +
-          (updated.assigned
-            ? " now has Executive access."
-            : " Executive access removed."),
-      );
-    } catch (error) {
-      setToolStatus(
-        "Unable to update Executive tool access: " +
-          (error instanceof Error ? error.message : String(error)),
-      );
-    }
-  }
-
-  async function grantAllExecutiveTools() {
-    if (!project) return;
-
-    setToolStatus("Granting all enabled runtime tools to Agent Man...");
-    try {
-      const result = await api.grantAllMainAgentTools(project.id);
+      setEffectiveTools(effective);
       await loadExecutiveTools(project.id);
-      const effective = await verifyExecutiveTools(
-        project.id,
-        false,
-      );
       setToolStatus(
-        "Granted " +
-          result.updated +
-          " enabled runtime tools to Agent Man Executive. Runtime now exposes " +
-          (effective?.count ?? 0) +
-          " tools.",
+        "Saved. Runtime confirms " +
+          effective.count +
+          " effective tools for Agent Man Executive.",
       );
     } catch (error) {
       setToolStatus(
-        "Unable to grant Executive tool access: " +
+        "Unable to save Executive tool access: " +
           (error instanceof Error ? error.message : String(error)),
       );
-    }
-  }
-
-  async function revokeAllExecutiveTools() {
-    if (!project) return;
-
-    setToolStatus("Removing Executive tool assignments...");
-    try {
-      const result = await api.revokeAllMainAgentTools(project.id);
-      await loadExecutiveTools(project.id);
-      await verifyExecutiveTools(project.id, false);
-      setToolStatus(
-        "Removed " +
-          result.updated +
-          " Executive tool assignments.",
-      );
-    } catch (error) {
-      setToolStatus(
-        "Unable to remove Executive tool access: " +
-          (error instanceof Error ? error.message : String(error)),
-      );
-    }
-  }
-
-  async function repairExecutiveTools() {
-    if (!project) return;
-
-    setToolStatus("Repairing Executive runtime tool access...");
-    try {
-      await api.grantAllMainAgentTools(project.id);
-      await loadExecutiveTools(project.id);
-      const effective = await verifyExecutiveTools(project.id, false);
-      setToolStatus(
-        effective && effective.count > 0
-          ? "Executive tool access repaired. Runtime confirms " +
-              effective.count +
-              " effective tools."
-          : "Repair completed, but runtime still reports 0 effective tools.",
-      );
-    } catch (error) {
-      setToolStatus(
-        "Unable to repair Executive tool access: " +
-          (error instanceof Error ? error.message : String(error)),
-      );
+    } finally {
+      setToolSaving(false);
     }
   }
 
@@ -313,8 +302,8 @@ export default function SettingsPage({
         <div>
           <h2>Settings</h2>
           <p>
-            Configure Agent Man itself here: executive model, model discovery,
-            and the exact runtime tools exposed to the Executive.
+            Configure Agent Man Executive, discover models, and explicitly
+            choose the runtime tools it can use.
           </p>
         </div>
         <span className="connectionCount">
@@ -332,9 +321,8 @@ export default function SettingsPage({
               <small>PRIMARY AGENT</small>
               <h3>Agent Man Executive</h3>
               <p>
-                This is the model you talk to. It can use the tools assigned
-                below directly, delegate to workers, start peer collaboration,
-                or run a saved workflow.
+                This is the model you talk to. Tool access is configured
+                separately below and enforced by the runtime.
               </p>
             </div>
           </div>
@@ -384,10 +372,9 @@ export default function SettingsPage({
               />
               {detecting ? "Detecting..." : "Detect Models"}
             </button>
-
             <span>
-              Queries the selected connection directly and loads the models it
-              currently exposes.
+              Query the selected connection and load its currently available
+              models.
             </span>
           </div>
 
@@ -452,8 +439,8 @@ export default function SettingsPage({
                 (item) => item.id === mainConfig?.connection_id,
               )?.name || "—"}
             </b>
-            <span>Tools</span>
-            <b>{assignedToolCount} assigned</b>
+            <span>Effective tools</span>
+            <b>{effectiveTools?.count ?? "not verified"}</b>
           </div>
 
           {connections.length === 0 && (
@@ -476,15 +463,15 @@ export default function SettingsPage({
               <small>EXECUTIVE CAPABILITIES</small>
               <h3>Tool Access</h3>
               <p>
-                Only tools marked Assigned are included in Agent Man's system
-                prompt and accepted by the runtime. A tool must also have
-                Runtime ON in the Tools page.
+                Select the tools Agent Man should receive, then save the whole
+                assignment set in one operation.
               </p>
             </span>
           </div>
+
           <div className="executiveToolHeaderActions">
             <strong>
-              {assignedToolCount}/{executiveTools.length} assigned
+              {toolDraft.size}/{executiveTools.length} selected
             </strong>
             <button
               type="button"
@@ -501,26 +488,25 @@ export default function SettingsPage({
             <button
               type="button"
               className="secondaryButton"
-              onClick={() => void repairExecutiveTools()}
-              disabled={executiveTools.length === 0}
+              onClick={selectAllEnabledTools}
             >
-              Repair access
+              Select all enabled
             </button>
             <button
               type="button"
               className="secondaryButton"
-              onClick={() => void grantAllExecutiveTools()}
-              disabled={executiveTools.length === 0}
+              onClick={clearToolSelection}
             >
-              Grant all enabled
+              Clear selection
             </button>
             <button
               type="button"
-              className="secondaryButton dangerAction"
-              onClick={() => void revokeAllExecutiveTools()}
-              disabled={assignedToolCount === 0}
+              className="primaryButton"
+              onClick={() => void applyToolAccess()}
+              disabled={toolSaving || !toolDraftChanged}
             >
-              Remove all
+              <Save size={13} />
+              {toolSaving ? "Saving..." : "Apply Tool Access"}
             </button>
           </div>
         </div>
@@ -542,7 +528,7 @@ export default function SettingsPage({
           <p>
             {effectiveTools && effectiveTools.count > 0
               ? effectiveTools.tools.map((tool) => tool.name).join(", ")
-              : "Use Verify runtime. If this says 0, Repair access will restore all globally enabled tools."}
+              : "Select tools and press Apply Tool Access. Verify runtime confirms the exact set used by Agent Man."}
           </p>
         </div>
 
@@ -551,51 +537,59 @@ export default function SettingsPage({
             <div className="executiveToolGroup" key={category}>
               <h4>{category}</h4>
               <div className="executiveToolList">
-                {tools.map((tool) => (
-                  <button
-                    type="button"
-                    key={tool.name}
-                    className={
-                      tool.assigned && tool.globally_enabled
-                        ? "executiveToolChip assigned"
-                        : "executiveToolChip"
-                    }
-                    disabled={!tool.globally_enabled}
-                    onClick={() => void toggleExecutiveTool(tool)}
-                    title={
-                      tool.globally_enabled
-                        ? tool.description
-                        : "Enable Runtime access for this tool in Tools first."
-                    }
-                    aria-pressed={tool.assigned}
-                  >
-                    <span
+                {tools.map((tool) => {
+                  const selected = toolDraft.has(tool.name);
+                  return (
+                    <button
+                      type="button"
+                      key={tool.name}
                       className={
-                        tool.assigned
-                          ? "executiveToolCheckbox checked"
-                          : "executiveToolCheckbox"
+                        selected && tool.globally_enabled
+                          ? "executiveToolChip assigned"
+                          : "executiveToolChip"
+                      }
+                      disabled={!tool.globally_enabled}
+                      onClick={() => toggleToolDraft(tool)}
+                      aria-pressed={selected}
+                      title={
+                        tool.globally_enabled
+                          ? tool.description
+                          : "Enable Runtime access for this tool in Tools first."
                       }
                     >
-                      {tool.assigned ? "✓" : ""}
-                    </span>
-                    <span>
-                      <b>{tool.name}</b>
-                      <small>{tool.risk}</small>
-                    </span>
-                    <em>
-                      {!tool.globally_enabled
-                        ? "RUNTIME OFF"
-                        : tool.assigned
-                          ? "ACCESS ON"
-                          : "ACCESS OFF"}
-                    </em>
-                  </button>
-                ))}
+                      <span
+                        className={
+                          selected
+                            ? "executiveToolCheckbox checked"
+                            : "executiveToolCheckbox"
+                        }
+                      >
+                        {selected ? "✓" : ""}
+                      </span>
+                      <span>
+                        <b>{tool.name}</b>
+                        <small>{tool.risk}</small>
+                      </span>
+                      <em>
+                        {!tool.globally_enabled
+                          ? "RUNTIME OFF"
+                          : selected
+                            ? "SELECTED"
+                            : "NOT SELECTED"}
+                      </em>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
 
+        {toolDraftChanged && (
+          <div className="connectionStatus">
+            Unsaved tool access changes. Press Apply Tool Access.
+          </div>
+        )}
         {toolStatus && (
           <div className="connectionStatus">{toolStatus}</div>
         )}

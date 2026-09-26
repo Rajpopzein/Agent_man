@@ -532,3 +532,67 @@ def test_executive_rejects_false_no_tool_access_reply(monkeypatch):
     assert body["steps"][1]["type"] == "tool"
     assert body["steps"][1]["tool"] == "list_files"
     assert body["steps"][1]["status"] == "ok"
+
+
+
+def test_main_agent_assignment_set_is_atomic_and_exact():
+    project, _workers = _setup()
+
+    response = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/bulk/set",
+        json={
+            "tool_names": [
+                "list_files",
+                "read_file",
+                "list_serial_ports",
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 3
+    assert {
+        item["name"] for item in body["tools"]
+    } == {
+        "list_files",
+        "read_file",
+        "list_serial_ports",
+    }
+
+    listed = client.get(
+        "/api/tools/main-agent/" + project["id"]
+    )
+    assert listed.status_code == 200
+    assigned = {
+        item["name"]
+        for item in listed.json()
+        if item["assigned"] and item["globally_enabled"]
+    }
+    assert assigned == {
+        "list_files",
+        "read_file",
+        "list_serial_ports",
+    }
+
+    effective = client.get(
+        "/api/tools/main-agent/" + project["id"] + "/effective"
+    )
+    assert effective.status_code == 200
+    assert {
+        item["name"] for item in effective.json()["tools"]
+    } == assigned
+
+
+def test_main_agent_assignment_set_rejects_unknown_tool():
+    project, _workers = _setup()
+
+    response = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/bulk/set",
+        json={"tool_names": ["not_a_real_tool"]},
+    )
+    assert response.status_code == 400
+    assert "Unknown tools" in response.json()["detail"]

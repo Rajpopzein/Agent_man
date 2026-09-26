@@ -6,6 +6,7 @@ import {
   GitBranch,
   Globe2,
   Power,
+  Save,
   ShieldAlert,
   Sparkles,
   TerminalSquare,
@@ -46,6 +47,11 @@ export default function ToolsPage({
     project ? EXECUTIVE_TARGET : agents[0]?.id || "",
   );
   const [targetTools, setTargetTools] = useState<AgentTool[]>([]);
+  const [executiveDraft, setExecutiveDraft] =
+    useState<Set<string>>(new Set());
+  const [executiveEffectiveCount, setExecutiveEffectiveCount] =
+    useState<number | null>(null);
+  const [executiveSaving, setExecutiveSaving] = useState(false);
   const [status, setStatus] = useState("");
 
   const configuringExecutive =
@@ -66,9 +72,21 @@ export default function ToolsPage({
         setTargetTools([]);
         return;
       }
-      setTargetTools(
-        await api.mainAgentTools(project.id),
+      const loaded = await api.mainAgentTools(project.id);
+      setTargetTools(loaded);
+      setExecutiveDraft(
+        new Set(
+          loaded
+            .filter((tool) => tool.globally_enabled && tool.assigned)
+            .map((tool) => tool.name),
+        ),
       );
+      try {
+        const effective = await api.effectiveMainAgentTools(project.id);
+        setExecutiveEffectiveCount(effective.count);
+      } catch {
+        setExecutiveEffectiveCount(null);
+      }
       return;
     }
 
@@ -116,10 +134,31 @@ export default function ToolsPage({
     [targetTools],
   );
 
-  const assignedCount = targetTools.filter(
-    (tool) =>
-      tool.globally_enabled && tool.assigned,
-  ).length;
+  const persistedExecutiveNames = useMemo(
+    () =>
+      new Set(
+        targetTools
+          .filter((tool) => tool.globally_enabled && tool.assigned)
+          .map((tool) => tool.name),
+      ),
+    [targetTools],
+  );
+
+  const executiveDraftChanged = useMemo(() => {
+    if (!configuringExecutive) return false;
+    if (executiveDraft.size !== persistedExecutiveNames.size) return true;
+    for (const name of executiveDraft) {
+      if (!persistedExecutiveNames.has(name)) return true;
+    }
+    return false;
+  }, [configuringExecutive, executiveDraft, persistedExecutiveNames]);
+
+  const assignedCount = configuringExecutive
+    ? executiveDraft.size
+    : targetTools.filter(
+        (tool) =>
+          tool.globally_enabled && tool.assigned,
+      ).length;
 
   async function toggleGlobal(tool: Tool) {
     try {
@@ -146,39 +185,63 @@ export default function ToolsPage({
     }
   }
 
-  async function grantAllExecutiveTools() {
+  function selectAllExecutiveTools() {
+    setExecutiveDraft(
+      new Set(
+        targetTools
+          .filter((tool) => tool.globally_enabled)
+          .map((tool) => tool.name),
+      ),
+    );
+    setStatus("All enabled Executive tools selected. Apply to save.");
+  }
+
+  function clearExecutiveTools() {
+    setExecutiveDraft(new Set());
+    setStatus("Executive tool selection cleared. Apply to save.");
+  }
+
+  async function verifyExecutiveAccess() {
     if (!project) return;
     try {
-      const result = await api.grantAllMainAgentTools(project.id);
-      await loadTargetTools(EXECUTIVE_TARGET);
+      const effective = await api.effectiveMainAgentTools(project.id);
+      setExecutiveEffectiveCount(effective.count);
       setStatus(
-        "Granted " +
-          result.updated +
-          " enabled runtime tools to Agent Man Executive.",
+        "Runtime confirms " +
+          effective.count +
+          " effective Executive tools.",
       );
     } catch (error) {
       setStatus(
-        "Unable to grant Executive tool access: " +
+        "Unable to verify Executive access: " +
           (error instanceof Error ? error.message : String(error)),
       );
     }
   }
 
-  async function revokeAllExecutiveTools() {
+  async function applyExecutiveTools() {
     if (!project) return;
+    setExecutiveSaving(true);
+    setStatus("Saving Executive tool access...");
     try {
-      const result = await api.revokeAllMainAgentTools(project.id);
+      const effective = await api.setMainAgentToolAssignments(
+        project.id,
+        Array.from(executiveDraft).sort(),
+      );
+      setExecutiveEffectiveCount(effective.count);
       await loadTargetTools(EXECUTIVE_TARGET);
       setStatus(
-        "Removed " +
-          result.updated +
-          " Executive tool assignments.",
+        "Saved. Runtime confirms " +
+          effective.count +
+          " effective Executive tools.",
       );
     } catch (error) {
       setStatus(
-        "Unable to remove Executive tool access: " +
+        "Unable to save Executive tool access: " +
           (error instanceof Error ? error.message : String(error)),
       );
+    } finally {
+      setExecutiveSaving(false);
     }
   }
 
@@ -188,30 +251,35 @@ export default function ToolsPage({
     const current =
       assignmentMap[tool.name]?.assigned ?? false;
 
+    if (configuringExecutive) {
+      setExecutiveDraft((draft) => {
+        const next = new Set(draft);
+        if (next.has(tool.name)) {
+          next.delete(tool.name);
+        } else {
+          next.add(tool.name);
+        }
+        return next;
+      });
+      setStatus(
+        "Executive selection changed. Press Apply Executive Access to save.",
+      );
+      return;
+    }
+
     try {
-      if (configuringExecutive) {
-        if (!project) return;
-        await api.setMainAgentTool(
-          project.id,
-          tool.name,
-          !current,
-        );
-      } else {
-        await api.setAgentTool(
-          targetId,
-          tool.name,
-          !current,
-        );
-      }
+      await api.setAgentTool(
+        targetId,
+        tool.name,
+        !current,
+      );
 
       await loadTargetTools(targetId);
       setStatus(
         tool.name +
           " " +
           (!current ? "assigned to" : "removed from") +
-          (configuringExecutive
-            ? " Agent Man Executive."
-            : " the selected worker."),
+          " the selected worker.",
       );
     } catch (error) {
       setStatus(
@@ -255,21 +323,39 @@ export default function ToolsPage({
           </span>
         </div>
         <div className="executiveToolsActions">
-          <strong>{assignedCount} assigned</strong>
+          <strong>
+            {assignedCount} selected
+            {configuringExecutive &&
+              executiveEffectiveCount !== null &&
+              " · " + executiveEffectiveCount + " effective"}
+          </strong>
           {configuringExecutive && (
             <>
               <button
                 className="secondaryButton"
-                onClick={() => void grantAllExecutiveTools()}
+                onClick={() => void verifyExecutiveAccess()}
               >
-                Grant all enabled
+                Verify runtime
               </button>
               <button
-                className="secondaryButton dangerAction"
-                onClick={() => void revokeAllExecutiveTools()}
-                disabled={assignedCount === 0}
+                className="secondaryButton"
+                onClick={selectAllExecutiveTools}
               >
-                Remove all
+                Select all enabled
+              </button>
+              <button
+                className="secondaryButton"
+                onClick={clearExecutiveTools}
+              >
+                Clear
+              </button>
+              <button
+                className="primaryButton"
+                onClick={() => void applyExecutiveTools()}
+                disabled={executiveSaving || !executiveDraftChanged}
+              >
+                <Save size={13} />
+                {executiveSaving ? "Saving..." : "Apply Executive Access"}
               </button>
             </>
           )}
@@ -336,9 +422,9 @@ export default function ToolsPage({
               {categoryTools.map((tool) => {
                 const assignment =
                   assignmentMap[tool.name];
-                const assigned = Boolean(
-                  assignment?.assigned,
-                );
+                const assigned = configuringExecutive
+                  ? executiveDraft.has(tool.name)
+                  : Boolean(assignment?.assigned);
 
                 return (
                   <article
@@ -412,6 +498,12 @@ export default function ToolsPage({
             </div>
           </section>
         ),
+      )}
+
+      {configuringExecutive && executiveDraftChanged && (
+        <div className="connectionStatus">
+          Unsaved Executive tool selections. Press Apply Executive Access.
+        </div>
       )}
 
       {status && (
