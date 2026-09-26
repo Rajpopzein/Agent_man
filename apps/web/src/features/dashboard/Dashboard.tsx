@@ -34,6 +34,7 @@ import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
 import { useAgentVoice } from "../audio/useAgentVoice";
+import { useWakeWord } from "../audio/useWakeWord";
 import AIConnections from "../settings/AIConnections";
 import ToolsPage from "../tools/ToolsPage";
 import {
@@ -122,6 +123,17 @@ export default function Dashboard() {
   const [voiceOpen, setVoiceOpen] = useState(false);
 
   const voice = useAgentVoice();
+  const wake = useWakeWord({
+    enabled: voice.settings.enabled && voice.settings.wakeEnabled,
+    wakePhrase: voice.settings.wakePhrase,
+    language: voice.settings.wakeLanguage,
+    onWake: async () => {
+      await voice.speakAsync("Listening.", true);
+    },
+    onCommand: (command) => {
+      void runDirective(command);
+    },
+  });
 
   async function load() {
     try {
@@ -286,17 +298,43 @@ export default function Dashboard() {
     }
   }
 
-  async function execute(event: FormEvent) {
-    event.preventDefault();
-    if (!agent || !prompt.trim()) return;
+  async function runDirective(directive: string) {
+    const command = directive.trim();
+    if (!command) return;
 
+    if (!agent) {
+      setView("dashboard");
+      setPrompt(command);
+      setNotice({
+        title: "No agent selected",
+        message:
+          "Select an agent before issuing a voice directive. Agent Man keeps the command visible so you can run it after selecting one.",
+      });
+      await voice.speakAsync(
+        "No agent is selected. Select an agent and try again.",
+        true,
+      );
+      return;
+    }
+
+    if (busy) {
+      await voice.speakAsync(
+        "A mission is already running. Try again when it completes.",
+        true,
+      );
+      return;
+    }
+
+    setView("dashboard");
+    setPrompt(command);
     voice.stop();
     setBusy(true);
     setRun(null);
+
     try {
       const result = await api.runAgent(
         agent.id,
-        prompt,
+        command,
         allowTerminal,
         undefined,
         allowDelete,
@@ -313,6 +351,11 @@ export default function Dashboard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function execute(event: FormEvent) {
+    event.preventDefault();
+    await runDirective(prompt);
   }
 
   async function confirmDeleteAgent() {
@@ -455,8 +498,24 @@ export default function Dashboard() {
               ) : (
                 <VolumeX size={15} />
               )}
-              <span>VOICE</span>
-              <i className={voice.speaking ? "speaking" : ""} />
+              <span>
+                {wake.state === "listening"
+                  ? "LISTEN"
+                  : voice.settings.wakeEnabled
+                    ? "WAKE"
+                    : "VOICE"}
+              </span>
+              <i
+                className={
+                  voice.speaking
+                    ? "speaking"
+                    : wake.state === "listening"
+                      ? "listening"
+                      : wake.state === "standby"
+                        ? "armed"
+                        : ""
+                }
+              />
             </button>
 
             <div
@@ -970,10 +1029,14 @@ export default function Dashboard() {
         voices={voice.voices}
         selectedVoice={voice.selectedVoice}
         speaking={voice.speaking}
+        wakeSupported={wake.supported}
+        wakeState={wake.state}
+        lastHeard={wake.lastHeard}
         onUpdate={voice.update}
         onTest={voice.testVoice}
         onStop={voice.stop}
         onReset={voice.resetSignature}
+        onListenNow={() => void wake.listenNow()}
       />
     </div>
   );

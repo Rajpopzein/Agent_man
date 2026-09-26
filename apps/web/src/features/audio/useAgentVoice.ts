@@ -7,6 +7,9 @@ export type VoiceSettings = {
   rate: number;
   pitch: number;
   volume: number;
+  wakeEnabled: boolean;
+  wakePhrase: string;
+  wakeLanguage: string;
 };
 
 const STORAGE_KEY = "agent-man.voice.settings.v1";
@@ -27,6 +30,9 @@ const DEFAULT_SETTINGS: VoiceSettings = {
   rate: 0.92,
   pitch: 0.78,
   volume: 0.92,
+  wakeEnabled: false,
+  wakePhrase: "hey agent man",
+  wakeLanguage: "en-IN",
 };
 
 const PREFERRED_VOICE_HINTS = [
@@ -145,6 +151,47 @@ export function useAgentVoice() {
     return () => window.removeEventListener(SPEAK_EVENT, onSpeak);
   }, [speak]);
 
+  const speakAsync = useCallback(
+    (text: string, force = false) =>
+      new Promise<void>((resolve) => {
+        const cleaned = text.trim();
+        if (!cleaned) {
+          resolve();
+          return;
+        }
+        if (!force && (!settings.enabled || !settings.autoSpeak)) {
+          resolve();
+          return;
+        }
+
+        const synth = window.speechSynthesis;
+        synth.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(cleaned);
+        utterance.rate = settings.rate;
+        utterance.pitch = settings.pitch;
+        utterance.volume = settings.volume;
+        if (selectedVoice) {
+          utterance.voice = selectedVoice;
+          utterance.lang = selectedVoice.lang;
+        } else {
+          utterance.lang = "en-GB";
+        }
+
+        utterance.onstart = () => setSpeaking(true);
+        utterance.onend = () => {
+          setSpeaking(false);
+          resolve();
+        };
+        utterance.onerror = () => {
+          setSpeaking(false);
+          resolve();
+        };
+        synth.speak(utterance);
+      }),
+    [selectedVoice, settings],
+  );
+
   const testVoice = useCallback(() => {
     const synth = window.speechSynthesis;
     synth.cancel();
@@ -172,10 +219,15 @@ export function useAgentVoice() {
   }
 
   function resetSignature() {
-    setSettings({
-      ...DEFAULT_SETTINGS,
-      voiceURI: selectedVoice?.voiceURI || "",
-    });
+    setSettings((current) => ({
+      ...current,
+      enabled: true,
+      autoSpeak: true,
+      rate: DEFAULT_SETTINGS.rate,
+      pitch: DEFAULT_SETTINGS.pitch,
+      volume: DEFAULT_SETTINGS.volume,
+      voiceURI: selectedVoice?.voiceURI || current.voiceURI,
+    }));
   }
 
   return {
@@ -185,6 +237,7 @@ export function useAgentVoice() {
     speaking,
     update,
     speak,
+    speakAsync,
     stop,
     testVoice,
     resetSignature,

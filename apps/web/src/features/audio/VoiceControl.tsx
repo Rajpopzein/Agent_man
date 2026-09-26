@@ -1,4 +1,6 @@
 import {
+  Mic,
+  MicOff,
   Radio,
   RotateCcw,
   Square,
@@ -9,6 +11,14 @@ import {
 import HudModal from "../../components/HudModal";
 import { VoiceSettings } from "./useAgentVoice";
 
+type WakeState =
+  | "unsupported"
+  | "off"
+  | "standby"
+  | "waking"
+  | "listening"
+  | "error";
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -16,10 +26,14 @@ type Props = {
   voices: SpeechSynthesisVoice[];
   selectedVoice: SpeechSynthesisVoice | null;
   speaking: boolean;
+  wakeSupported: boolean;
+  wakeState: WakeState;
+  lastHeard: string;
   onUpdate: (patch: Partial<VoiceSettings>) => void;
   onTest: () => void;
   onStop: () => void;
   onReset: () => void;
+  onListenNow: () => void;
 };
 
 export default function VoiceControl({
@@ -29,14 +43,31 @@ export default function VoiceControl({
   voices,
   selectedVoice,
   speaking,
+  wakeSupported,
+  wakeState,
+  lastHeard,
   onUpdate,
   onTest,
   onStop,
   onReset,
+  onListenNow,
 }: Props) {
   const englishVoices = voices.filter((voice) =>
     voice.lang.toLowerCase().startsWith("en"),
   );
+
+  const wakeLabel =
+    wakeState === "standby"
+      ? "WAKE STANDBY"
+      : wakeState === "waking"
+        ? "ACKNOWLEDGING"
+        : wakeState === "listening"
+          ? "LISTENING"
+          : wakeState === "error"
+            ? "MIC BLOCKED"
+            : wakeState === "unsupported"
+              ? "UNSUPPORTED"
+              : "WAKE OFF";
 
   return (
     <HudModal
@@ -86,6 +117,7 @@ export default function VoiceControl({
           <Volume2 size={15} />
           Voice {settings.enabled ? "ON" : "OFF"}
         </button>
+
         <button
           className={settings.autoSpeak ? "voiceToggle active" : "voiceToggle"}
           onClick={() => onUpdate({ autoSpeak: !settings.autoSpeak })}
@@ -93,6 +125,83 @@ export default function VoiceControl({
           <Radio size={15} />
           Auto speak {settings.autoSpeak ? "ON" : "OFF"}
         </button>
+
+        <button
+          className={
+            settings.wakeEnabled && wakeSupported
+              ? "voiceToggle active"
+              : "voiceToggle"
+          }
+          onClick={() =>
+            onUpdate({
+              wakeEnabled: wakeSupported ? !settings.wakeEnabled : false,
+            })
+          }
+          disabled={!wakeSupported}
+        >
+          {settings.wakeEnabled && wakeSupported ? (
+            <Mic size={15} />
+          ) : (
+            <MicOff size={15} />
+          )}
+          Wake mode {settings.wakeEnabled ? "ON" : "OFF"}
+        </button>
+
+        <button
+          className={
+            wakeState === "listening"
+              ? "voiceToggle active"
+              : "voiceToggle"
+          }
+          onClick={onListenNow}
+          disabled={!wakeSupported}
+        >
+          <Mic size={15} />
+          Listen now
+        </button>
+      </div>
+
+      <div className="wakePanel">
+        <div className="wakeStatusLine">
+          <span className={"wakeStatusDot " + wakeState} />
+          <b>{wakeLabel}</b>
+          <small>
+            {lastHeard
+              ? 'Last heard: "' + lastHeard + '"'
+              : "No speech captured yet"}
+          </small>
+        </div>
+
+        <label className="voiceField">
+          Wake phrase
+          <input
+            value={settings.wakePhrase}
+            onChange={(event) =>
+              onUpdate({ wakePhrase: event.target.value })
+            }
+            placeholder="hey agent man"
+          />
+        </label>
+
+        <label className="voiceField">
+          Recognition language
+          <select
+            value={settings.wakeLanguage}
+            onChange={(event) =>
+              onUpdate({ wakeLanguage: event.target.value })
+            }
+          >
+            <option value="en-IN">English · India</option>
+            <option value="en-GB">English · UK</option>
+            <option value="en-US">English · US</option>
+          </select>
+        </label>
+
+        <p className="voiceNote">
+          Wake flow: say “{settings.wakePhrase}”. Agent Man replies “Listening.”
+          Then speak the command. You can also say the wake phrase and command
+          together in one sentence.
+        </p>
       </div>
 
       <label className="voiceField">
