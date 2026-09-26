@@ -643,11 +643,16 @@ def test_executive_blocks_peer_fanout_without_explicit_request(
                 ],
                 "task": "Work on the feature together.",
             })
-        assert "RUNTIME CORRECTION" in messages[-1]["content"]
+        if calls["count"] == 2:
+            assert "RUNTIME CORRECTION" in messages[-1]["content"]
+            return json.dumps({
+                "type": "delegate_agent",
+                "agent_id": workers["Developer"]["id"],
+                "task": "Implement the feature.",
+            })
         return json.dumps({
-            "type": "delegate_agent",
-            "agent_id": workers["Developer"]["id"],
-            "task": "Implement the feature.",
+            "type": "reply",
+            "message": "Developer completed the feature.",
         })
 
     def fake_peer_task(**kwargs):
