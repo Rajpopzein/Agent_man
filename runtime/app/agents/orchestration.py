@@ -16,10 +16,14 @@ from app.persistence.models import (
     WorkflowRunStepRecord,
 )
 from app.providers.connections import bind_agent_connection
+from app.tools.capabilities import (
+    detect_missing_capability,
+    resolve_capability,
+)
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
-MAX_NODE_TOOL_STEPS = 6
+MAX_NODE_TOOL_STEPS = 12
 MAX_TRANSITIONS = 25
 
 SYSTEM_PROMPT = """You are executing one stage in an Agent Man workflow.
@@ -33,6 +37,10 @@ Return exactly one JSON object and no markdown.
 Use a tool:
 {{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
 
+If the stage needs a capability such as internet access, request it instead of
+stopping:
+{{"type":"capability_request","capability":"internet","reason":"Need public documentation."}}
+
 Finish this stage:
 {{"type":"final","outcome":"success","message":"What you completed."}}
 
@@ -40,6 +48,9 @@ If the stage cannot satisfy its acceptance criteria:
 {{"type":"final","outcome":"failure","message":"Why this stage failed."}}
 
 Outcome must be either success or failure. Never choose the next workflow node.
+Do not say you lack internet/web access if an internet tool is available. Use
+the tool, or emit capability_request so the runtime can resolve the capability.
+Keep trying safe alternatives when an approach fails.
 """
 
 
@@ -113,8 +124,67 @@ def _execute_node(
     for _ in range(MAX_NODE_TOOL_STEPS):
         raw = run_messages(agent, messages)
         action = _parse(raw)
+        action_type = str(action.get("type", "message")).lower()
+        action_text = str(
+            action.get("message")
+            or action.get("content")
+            or raw
+        )
+        missing = detect_missing_capability(action_text)
+        if missing:
+            action = {
+                "type": "capability_request",
+                "capability": missing,
+                "reason": action_text,
+            }
+            action_type = "capability_request"
 
-        if action.get("type") == "final":
+        if action_type == "capability_request":
+            capability = str(
+                action.get("capability", "")
+            ).strip().lower()
+            resolved = resolve_capability(
+                db,
+                agent.id,
+                capability,
+            )
+            allowed_names = allowed_tool_names(
+                db,
+                agent.id,
+            )
+            if not resolved:
+                return {
+                    "status": "completed",
+                    "outcome": "failure",
+                    "message": (
+                        f"Required runtime capability '{capability}' "
+                        "is unavailable."
+                    ),
+                }
+            events.emit(
+                "workflow.capability.resolved",
+                run_id=run.id,
+                node_id=node.id,
+                agent_id=agent.id,
+                capability=capability,
+                tools=resolved,
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "CAPABILITY RESOLVED: "
+                        + capability
+                        + " is available through: "
+                        + ", ".join(resolved)
+                        + ". Continue this stage and use it."
+                    ),
+                }
+            )
+            continue
+
+        if action_type == "final":
             outcome = str(action.get("outcome", "failure")).lower()
             if outcome not in {"success", "failure"}:
                 outcome = "failure"
@@ -128,12 +198,19 @@ def _execute_node(
                 ).strip(),
             }
 
-        if action.get("type") != "tool":
-            return {
-                "status": "completed",
-                "outcome": "failure",
-                "message": raw.strip(),
-            }
+        if action_type != "tool":
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Continue executing this stage. Use a tool, request a "
+                        "missing capability, or return final only when the "
+                        "stage acceptance criteria are satisfied."
+                    ),
+                }
+            )
+            continue
 
         tool_name = str(action.get("tool", ""))
         arguments = action.get("args") or {}
@@ -207,6 +284,7 @@ def execute_workflow_run(
     db: Session,
     allow_terminal: bool = False,
     allow_delete: bool = False,
+    allow_network: bool = False,
 ) -> WorkflowRunRecord:
     workflow = db.get(WorkflowRecord, run.workflow_id)
     project = db.get(ProjectRecord, run.project_id)
@@ -218,6 +296,8 @@ def execute_workflow_run(
         approvals.add(Permission.TERMINAL_EXECUTE.value)
     if allow_delete:
         approvals.add(Permission.PROJECT_DELETE.value)
+    if allow_network:
+        approvals.add(Permission.NETWORK_ACCESS.value)
 
     run.status = "executing"
     db.commit()

@@ -95,6 +95,7 @@ class AgentRunRequest(BaseModel):
     endpoint: str | None = Field(default=None, max_length=512)
     allow_terminal: bool = False
     allow_delete: bool = False
+    allow_network: bool = False
 
 
 class AgentRunReply(BaseModel):
@@ -115,6 +116,7 @@ class MultiAgentTaskCreate(BaseModel):
 class MultiAgentRunRequest(BaseModel):
     allow_terminal: bool = False
     allow_delete: bool = False
+    allow_network: bool = False
     extend_rounds: int = Field(default=0, ge=0, le=20)
 
 
@@ -220,6 +222,7 @@ class WorkflowRunRequest(BaseModel):
     input_prompt: str = Field(min_length=1, max_length=30_000)
     allow_terminal: bool = False
     allow_delete: bool = False
+    allow_network: bool = False
 
 
 class WorkflowRunStepView(BaseModel):

@@ -3,6 +3,7 @@ import {
   Code2,
   FolderSearch,
   GitBranch,
+  Globe2,
   Power,
   ShieldAlert,
   TerminalSquare,
@@ -20,6 +21,7 @@ function iconFor(category: string) {
   if (category === "git") return <GitBranch size={17} />;
   if (category === "development") return <Code2 size={17} />;
   if (category === "terminal") return <TerminalSquare size={17} />;
+  if (category === "network") return <Globe2 size={17} />;
   return <Wrench size={17} />;
 }
 
@@ -142,6 +144,7 @@ export default function ToolsPage({ agents }: Props) {
           <span><i className="riskDot read" /> READ auto</span>
           <span><i className="riskDot write" /> WRITE policy</span>
           <span><i className="riskDot execute" /> EXECUTE approval</span>
+          <span><i className="riskDot network" /> NETWORK approval</span>
           <span><i className="riskDot destructive" /> DESTRUCTIVE approval</span>
         </div>
       </div>

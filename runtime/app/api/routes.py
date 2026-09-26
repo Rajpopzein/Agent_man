@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.agents.executor import execute_agent
@@ -8,7 +8,16 @@ from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply,
 from app.core.config import settings
 from app.events.bus import events
 from app.persistence.database import get_session
-from app.persistence.models import AIConnectionRecord, AgentRecord, ProjectRecord
+from app.persistence.models import (
+    AIConnectionRecord,
+    AgentRecord,
+    AgentToolRecord,
+    MultiAgentMessageRecord,
+    MultiAgentParticipantRecord,
+    ProjectRecord,
+    WorkflowNodeRecord,
+    WorkflowRunStepRecord,
+)
 from app.providers.connections import bind_agent_connection
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.managed_processes import processes
@@ -71,6 +80,61 @@ def list_agents(project_id: str, db: Session = Depends(get_session)):
     return [agent_view(row) for row in rows]
 
 
+@router.delete("/api/agents/{agent_id}")
+def delete_agent(agent_id: str, db: Session = Depends(get_session)):
+    agent = db.get(AgentRecord, agent_id)
+    if agent is None:
+        raise HTTPException(404, "Agent not found")
+
+    dependencies: list[str] = []
+    if db.scalar(
+        select(MultiAgentParticipantRecord.id)
+        .where(MultiAgentParticipantRecord.agent_id == agent_id)
+        .limit(1)
+    ):
+        dependencies.append("multi-agent task history")
+    if db.scalar(
+        select(MultiAgentMessageRecord.id)
+        .where(MultiAgentMessageRecord.agent_id == agent_id)
+        .limit(1)
+    ):
+        dependencies.append("multi-agent messages")
+    if db.scalar(
+        select(WorkflowNodeRecord.id)
+        .where(WorkflowNodeRecord.agent_id == agent_id)
+        .limit(1)
+    ):
+        dependencies.append("workflow stages")
+    if db.scalar(
+        select(WorkflowRunStepRecord.id)
+        .where(WorkflowRunStepRecord.agent_id == agent_id)
+        .limit(1)
+    ):
+        dependencies.append("workflow run history")
+
+    if dependencies:
+        raise HTTPException(
+            409,
+            "Agent cannot be deleted because it is referenced by: "
+            + ", ".join(sorted(set(dependencies)))
+            + ". Remove or replace those references first.",
+        )
+
+    db.execute(
+        delete(AgentToolRecord).where(
+            AgentToolRecord.agent_id == agent_id
+        )
+    )
+    db.delete(agent)
+    db.commit()
+    events.emit(
+        "agent.deleted",
+        agent_id=agent_id,
+        project_id=agent.project_id,
+    )
+    return {"deleted": True, "id": agent_id}
+
+
 @router.get("/api/projects/{project_id}/files")
 def list_project_files(project_id: str, path: str = ".", db: Session = Depends(get_session)):
     project = db.get(ProjectRecord, project_id)
@@ -112,6 +176,7 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
             endpoint=body.endpoint,
             allow_terminal=body.allow_terminal,
             allow_delete=body.allow_delete,
+            allow_network=body.allow_network,
         )
         return AgentRunReply(agent_id=agent.id, **result)
     except Exception as exc:

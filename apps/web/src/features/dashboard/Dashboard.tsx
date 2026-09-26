@@ -5,6 +5,7 @@ import {
   Boxes,
   CircleDot,
   GitBranch,
+  Globe2,
   Home,
   Network,
   Plug,
@@ -14,6 +15,7 @@ import {
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  Trash2,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -82,6 +84,7 @@ export default function Dashboard() {
   const [online, setOnline] = useState(false);
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
+  const [allowNetwork, setAllowNetwork] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -212,6 +215,7 @@ export default function Dashboard() {
         allowTerminal,
         undefined,
         allowDelete,
+        allowNetwork,
       );
       setRun(result);
     } catch (error) {
@@ -223,6 +227,30 @@ export default function Dashboard() {
       });
     } finally {
       setBusy(false);
+    }
+  }
+
+
+  async function deleteSelectedAgent() {
+    if (!agent) return;
+    const confirmed = window.confirm(
+      "Delete agent '" +
+        agent.name +
+        "'? This is blocked if the agent is still referenced by workflow or multi-agent history.",
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.deleteAgent(agent.id);
+      setAgent(null);
+      setRun(null);
+      await load();
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
     }
   }
 
@@ -503,11 +531,28 @@ export default function Dashboard() {
                     EXEC
                   </button>
                   <button
+                    className={allowNetwork ? "permissionChip active" : "permissionChip"}
+                    onClick={() => setAllowNetwork((value) => !value)}
+                    title="Allow public internet access for this run"
+                  >
+                    <Globe2 size={13} />
+                    NET
+                  </button>
+                  <button
                     className={allowDelete ? "permissionChip danger active" : "permissionChip danger"}
                     onClick={() => setAllowDelete((value) => !value)}
                   >
                     <Wrench size={13} />
-                    DELETE
+                    FILE DEL
+                  </button>
+                  <button
+                    className="permissionChip danger"
+                    onClick={() => void deleteSelectedAgent()}
+                    disabled={!agent || busy}
+                    title="Delete selected agent"
+                  >
+                    <Trash2 size={13} />
+                    AGENT DEL
                   </button>
                 </div>
               </div>

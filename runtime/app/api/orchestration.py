@@ -158,6 +158,7 @@ def create_run(
             db=db,
             allow_terminal=body.allow_terminal,
             allow_delete=body.allow_delete,
+            allow_network=body.allow_network,
         )
     except Exception as exc:
         run.status = "failed"
@@ -195,6 +196,7 @@ def resume_run(
         db=db,
         allow_terminal=body.allow_terminal,
         allow_delete=body.allow_delete,
+        allow_network=body.allow_network,
     )
     db.refresh(run)
     return run_view(run, db)

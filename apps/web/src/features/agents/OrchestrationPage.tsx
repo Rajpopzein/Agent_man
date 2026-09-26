@@ -3,6 +3,7 @@ import {
   ArrowDown,
   BrainCircuit,
   GitBranch,
+  Globe2,
   Play,
   Plus,
   RotateCcw,
@@ -47,6 +48,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
   const [objective, setObjective] = useState("");
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
+  const [allowNetwork, setAllowNetwork] = useState(false);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -171,6 +173,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
         objective.trim(),
         allowTerminal,
         allowDelete,
+        allowNetwork,
       );
       setActiveRun(run);
       setStatus("Run finished with status: " + run.status);
@@ -192,6 +195,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
         activeRun.input_prompt,
         allowTerminal,
         allowDelete,
+        allowNetwork,
       );
       setActiveRun(run);
       setStatus("Run status: " + run.status);
@@ -453,6 +457,17 @@ export default function OrchestrationPage({ project, agents }: Props) {
                       }
                     />
                     Allow execute tools
+                  </label>
+                  <label className="approval">
+                    <input
+                      type="checkbox"
+                      checked={allowNetwork}
+                      onChange={(event) =>
+                        setAllowNetwork(event.target.checked)
+                      }
+                    />
+                    <Globe2 size={14} />
+                    Allow public internet
                   </label>
                   <label className="approval">
                     <input

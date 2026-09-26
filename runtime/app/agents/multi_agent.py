@@ -16,6 +16,10 @@ from app.persistence.models import (
     ProjectRecord,
 )
 from app.providers.connections import bind_agent_connection
+from app.tools.capabilities import (
+    detect_missing_capability,
+    resolve_capability,
+)
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
@@ -38,6 +42,9 @@ Return exactly one JSON object and no markdown.
 Use a tool:
 {{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
 
+If you need a capability, request it instead of giving up:
+{{"type":"capability_request","capability":"internet","reason":"Need current public documentation."}}
+
 Continue collaboration:
 {{"type":"message","content":"A useful update, question, finding, review, or requested change."}}
 
@@ -53,6 +60,8 @@ Important completion rule:
   role and there are no unresolved issues you can identify.
 - The runtime requires all healthy peers to independently confirm completion
   across stable rounds before the task can finish.
+- Do not say you lack internet/web access if an internet tool is available.
+  Use it. If a capability is missing, return capability_request.
 
 Do not select a winner or pretend to coordinate the other agents.
 """
@@ -198,6 +207,65 @@ def _run_peer_turn(
         action_type = str(
             action.get("type", "message")
         ).lower()
+        action_text = str(
+            action.get("content")
+            or action.get("message")
+            or raw
+        )
+        missing = detect_missing_capability(action_text)
+        if missing:
+            action = {
+                "type": "capability_request",
+                "capability": missing,
+                "reason": action_text,
+            }
+            action_type = "capability_request"
+
+        if action_type == "capability_request":
+            capability = str(
+                action.get("capability", "")
+            ).strip().lower()
+            resolved = resolve_capability(
+                db,
+                agent.id,
+                capability,
+            )
+            allowed_names = allowed_tool_names(
+                db,
+                agent.id,
+            )
+            if not resolved:
+                return {
+                    "type": "message",
+                    "content": (
+                        f"Runtime capability '{capability}' is unavailable. "
+                        "Another peer may continue if it has a viable approach."
+                    ),
+                    "tool_steps": step - 1,
+                }
+            events.emit(
+                "multi_agent.capability.resolved",
+                task_id=task.id,
+                agent_id=agent.id,
+                capability=capability,
+                tools=resolved,
+            )
+            messages.append(
+                {"role": "assistant", "content": raw}
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "CAPABILITY RESOLVED: "
+                        + capability
+                        + " is available through: "
+                        + ", ".join(resolved)
+                        + ". Continue this peer turn and use it."
+                    ),
+                }
+            )
+            continue
 
         if action_type in {"message", "final"}:
             content = str(
@@ -301,6 +369,7 @@ def run_peer_task(
     db: Session,
     allow_terminal: bool = False,
     allow_delete: bool = False,
+    allow_network: bool = False,
 ) -> MultiAgentTaskRecord:
     project = db.get(
         ProjectRecord,
@@ -342,6 +411,10 @@ def run_peer_task(
     if allow_delete:
         approvals.add(
             Permission.PROJECT_DELETE.value
+        )
+    if allow_network:
+        approvals.add(
+            Permission.NETWORK_ACCESS.value
         )
 
     if task.status in {

@@ -6,6 +6,7 @@ from app.sandbox.development import DevelopmentTools
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.git_tools import ProjectGit
 from app.sandbox.managed_processes import processes
+from app.sandbox.network import internet
 from app.sandbox.ports import ports
 from app.sandbox.processes import ProjectProcessRunner
 
@@ -40,6 +41,7 @@ TOOL_DEFINITIONS = [
     ToolDefinition("start_process", "Start a background process in the project workspace.", "runtime", "execute", "1.0.0", {"command": "shell command", "port": "optional port to reserve"}),
     ToolDefinition("read_process_output", "Read recent output from a managed process.", "runtime", "read", "1.0.0", {"process_id": "managed process id"}),
     ToolDefinition("stop_process", "Stop a managed background process.", "runtime", "execute", "1.0.0", {"process_id": "managed process id"}),
+    ToolDefinition("http_get", "Fetch textual content from a public internet URL. Local/private network destinations are blocked.", "network", "network", "1.0.0", {"url": "public http/https URL"}),
 ]
 
 
@@ -176,6 +178,11 @@ class ToolRegistry:
         if name == "stop_process":
             return processes.stop(
                 str(arguments["process_id"]),
+                approvals,
+            )
+        if name == "http_get":
+            return internet.get(
+                str(arguments["url"]),
                 approvals,
             )
         raise ValueError(f"Unknown tool: {name}")

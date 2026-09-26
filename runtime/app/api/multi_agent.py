@@ -133,6 +133,7 @@ def run_task(task_id: str, body: MultiAgentRunRequest, db: Session = Depends(get
             db=db,
             allow_terminal=body.allow_terminal,
             allow_delete=body.allow_delete,
+            allow_network=body.allow_network,
         )
     except Exception as exc:
         task.status = "failed"

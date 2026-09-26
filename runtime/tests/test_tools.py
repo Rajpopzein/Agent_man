@@ -72,6 +72,7 @@ def test_planned_builtin_tools_are_registered():
         "start_process",
         "read_process_output",
         "stop_process",
+        "http_get",
     } <= names
 
 
@@ -114,3 +115,16 @@ def test_delete_requires_explicit_approval(tmp_path: Path):
         approvals={"project.files.delete"},
     )
     assert result["deleted"] is True
+
+
+
+def test_internet_requires_explicit_approval(tmp_path: Path):
+    with pytest.raises(ApprovalRequired) as exc:
+        tools.execute(
+            name="http_get",
+            arguments={"url": "https://example.com"},
+            workspace_path=str(tmp_path),
+            approvals=set(),
+            allowed_names={"http_get"},
+        )
+    assert exc.value.permission.value == "network.internet"

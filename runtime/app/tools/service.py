@@ -33,19 +33,22 @@ def sync_builtin_tools(db: Session) -> None:
 
 
 def ensure_agent_defaults(db: Session, agent_id: str) -> None:
-    exists = db.scalar(
-        select(AgentToolRecord.agent_id)
-        .where(AgentToolRecord.agent_id == agent_id)
-        .limit(1)
-    )
-    if exists:
-        return
-
     sync_builtin_tools(db)
+    existing = {
+        row.tool_name
+        for row in db.scalars(
+            select(AgentToolRecord).where(
+                AgentToolRecord.agent_id == agent_id
+            )
+        ).all()
+    }
     enabled_tools = db.scalars(
         select(ToolRecord).where(ToolRecord.enabled.is_(True))
     ).all()
+    changed = False
     for tool in enabled_tools:
+        if tool.name in existing:
+            continue
         db.add(
             AgentToolRecord(
                 agent_id=agent_id,
@@ -53,7 +56,9 @@ def ensure_agent_defaults(db: Session, agent_id: str) -> None:
                 enabled=True,
             )
         )
-    db.commit()
+        changed = True
+    if changed:
+        db.commit()
 
 
 def allowed_tool_names(db: Session, agent_id: str) -> set[str]:

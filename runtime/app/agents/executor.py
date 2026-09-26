@@ -4,76 +4,267 @@ from typing import Any
 from app.agents.runner import run_messages
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
+from app.tools.capabilities import (
+    detect_missing_capability,
+    resolve_capability,
+)
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
-MAX_STEPS = 8
+MAX_TURNS = 30
 
 SYSTEM_PROMPT = """You are an autonomous worker inside Agent Man.
+Your job is to keep working until the user's objective is actually complete,
+or until the runtime requires an explicit permission that has not been granted.
+
 You may only act through the tools listed below. All file paths must be relative
 to the current project workspace. Never invent tool results.
 
 Available tools:
 {tools}
 
-For each turn, return exactly one JSON object and no markdown.
+Return exactly one JSON object and no markdown.
 
-To use a tool:
+Use a tool:
 {{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
 
-To finish:
-{{"type":"final","message":"What you completed and anything the user should know."}}
+If you need a capability that is not currently usable, request it instead of
+stopping or saying you cannot do the task:
+{{"type":"capability_request","capability":"internet","reason":"Need current documentation."}}
 
-If a tool reports that approval is required, do not bypass it. Explain that
-approval is needed in your final response.
+When you believe the job is finished:
+{{"type":"final","verified":true,"message":"What was completed and how it was verified."}}
+
+Rules:
+- Do not stop just because the first approach failed. Inspect the error and try
+  another safe approach when one is available.
+- Do not say you lack internet/web access if an internet tool is available.
+  Use it. If a required capability is missing, emit capability_request.
+- Do not declare completion until you have checked the requested result.
+- A first final answer is treated as a completion candidate. The runtime will
+  ask you to review it once more before the task is accepted as complete.
+- Never bypass approval requirements.
 """
 
 
 def _parse_action(raw: str) -> dict[str, Any]:
     cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.replace("```json", "", 1).replace("```", "", 1).strip()
+    fence = chr(96) * 3
+    if cleaned.startswith(fence):
+        cleaned = (
+            cleaned.replace(fence + "json", "", 1)
+            .replace(fence, "", 1)
+            .strip()
+        )
+
     try:
         action = json.loads(cleaned)
     except json.JSONDecodeError:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
-        if start < 0 or end <= start:
-            return {"type": "final", "message": raw}
-        try:
-            action = json.loads(cleaned[start : end + 1])
-        except json.JSONDecodeError:
-            return {"type": "final", "message": raw}
+        if start >= 0 and end > start:
+            try:
+                action = json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                action = {"type": "message", "message": raw}
+        else:
+            action = {"type": "message", "message": raw}
+
     if not isinstance(action, dict):
-        return {"type": "final", "message": raw}
+        action = {"type": "message", "message": raw}
+
+    text = str(
+        action.get("message")
+        or action.get("content")
+        or raw
+    )
+    missing = detect_missing_capability(text)
+    if missing:
+        return {
+            "type": "capability_request",
+            "capability": missing,
+            "reason": text,
+        }
     return action
 
 
-def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = None, allow_terminal: bool = False, allow_delete: bool = False) -> dict[str, Any]:
+def execute_agent(
+    *,
+    agent,
+    project,
+    prompt: str,
+    db,
+    endpoint: str | None = None,
+    allow_terminal: bool = False,
+    allow_delete: bool = False,
+    allow_network: bool = False,
+) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
         approvals.add(Permission.TERMINAL_EXECUTE.value)
     if allow_delete:
         approvals.add(Permission.PROJECT_DELETE.value)
+    if allow_network:
+        approvals.add(Permission.NETWORK_ACCESS.value)
 
     allowed_names = allowed_tool_names(db, agent.id)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(tools=catalog_for_prompt(allowed_names))},
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT.format(
+                tools=catalog_for_prompt(allowed_names)
+            ),
+        },
         {"role": "user", "content": prompt},
     ]
     trace: list[dict[str, Any]] = []
+    verification_pending = False
 
-    events.emit("agent.run.started", agent_id=agent.id, project_id=project.id, prompt=prompt[:500])
+    events.emit(
+        "agent.run.started",
+        agent_id=agent.id,
+        project_id=project.id,
+        prompt=prompt[:500],
+    )
 
-    for step_number in range(1, MAX_STEPS + 1):
+    for turn_number in range(1, MAX_TURNS + 1):
         raw = run_messages(agent, messages, endpoint)
         action = _parse_action(raw)
+        action_type = str(action.get("type", "message")).lower()
 
-        if action.get("type") != "tool":
-            message = str(action.get("message") or raw)
-            events.emit("agent.run.completed", agent_id=agent.id, project_id=project.id, steps=len(trace))
-            return {"text": message, "steps": trace, "status": "completed"}
+        if action_type == "capability_request":
+            capability = str(action.get("capability", "")).strip().lower()
+            resolved = resolve_capability(
+                db,
+                agent.id,
+                capability,
+            )
+            allowed_names = allowed_tool_names(db, agent.id)
 
+            step = {
+                "turn": turn_number,
+                "type": "capability",
+                "capability": capability,
+                "status": "resolved" if resolved else "unavailable",
+                "tools": resolved,
+                "reason": str(action.get("reason", "")),
+            }
+            trace.append(step)
+
+            if not resolved:
+                events.emit(
+                    "agent.capability.unavailable",
+                    agent_id=agent.id,
+                    project_id=project.id,
+                    capability=capability,
+                )
+                return {
+                    "text": (
+                        f"No runtime capability is currently available for "
+                        f"'{capability}'."
+                    ),
+                    "steps": trace,
+                    "status": "waiting_capability",
+                }
+
+            events.emit(
+                "agent.capability.resolved",
+                agent_id=agent.id,
+                project_id=project.id,
+                capability=capability,
+                tools=resolved,
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "CAPABILITY RESOLVED: "
+                        + capability
+                        + " is available through: "
+                        + ", ".join(resolved)
+                        + ". Continue the original task. Use the capability "
+                        "instead of stopping."
+                    ),
+                }
+            )
+            continue
+
+        if action_type == "final":
+            message = str(
+                action.get("message")
+                or action.get("content")
+                or raw
+            ).strip()
+
+            if not verification_pending:
+                verification_pending = True
+                trace.append(
+                    {
+                        "turn": turn_number,
+                        "type": "completion_candidate",
+                        "status": "review_required",
+                        "message": message,
+                    }
+                )
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "COMPLETION REVIEW REQUIRED. Re-check the original "
+                            "objective, inspect or test the result where possible, "
+                            "and review any unresolved tool errors. If more work "
+                            "is needed, continue using tools. If the task is truly "
+                            "complete, return another final JSON object with "
+                            '"verified": true.'
+                        ),
+                    }
+                )
+                continue
+
+            if action.get("verified") is not True:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "The completion review is not verified yet. "
+                            "Continue checking the work or return final with "
+                            '"verified": true only after verification.'
+                        ),
+                    }
+                )
+                continue
+
+            events.emit(
+                "agent.run.completed",
+                agent_id=agent.id,
+                project_id=project.id,
+                turns=turn_number,
+                steps=len(trace),
+            )
+            return {
+                "text": message,
+                "steps": trace,
+                "status": "completed",
+            }
+
+        if action_type != "tool":
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Continue working on the original objective. "
+                        "Use tools when needed. Do not stop with a general "
+                        "explanation; finish and verify the actual job."
+                    ),
+                }
+            )
+            continue
+
+        verification_pending = False
         tool_name = str(action.get("tool", ""))
         arguments = action.get("args") or {}
         if not isinstance(arguments, dict):
@@ -88,7 +279,7 @@ def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = Non
                 allowed_names=allowed_names,
             )
             step = {
-                "step": step_number,
+                "turn": turn_number,
                 "tool": tool_name,
                 "arguments": arguments,
                 "status": "ok",
@@ -96,7 +287,7 @@ def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = Non
             }
         except ApprovalRequired as exc:
             step = {
-                "step": step_number,
+                "turn": turn_number,
                 "tool": tool_name,
                 "arguments": arguments,
                 "status": "approval_required",
@@ -111,13 +302,16 @@ def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = Non
                 permission=exc.permission.value,
             )
             return {
-                "text": f"{agent.name} needs approval for {exc.permission.value} before it can continue this task.",
+                "text": (
+                    f"{agent.name} can continue automatically after approval "
+                    f"for {exc.permission.value}."
+                ),
                 "steps": trace,
                 "status": "waiting_approval",
             }
         except Exception as exc:
             step = {
-                "step": step_number,
+                "turn": turn_number,
                 "tool": tool_name,
                 "arguments": arguments,
                 "status": "error",
@@ -133,14 +327,33 @@ def execute_agent(*, agent, project, prompt: str, db, endpoint: str | None = Non
             status=step["status"],
         )
         messages.append({"role": "assistant", "content": raw})
-        messages.append({
-            "role": "user",
-            "content": "TOOL RESULT:\n" + json.dumps(step, ensure_ascii=False, default=str) + "\nContinue with the next tool or finish.",
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "TOOL RESULT:\n"
+                    + json.dumps(
+                        step,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\nContinue the original task. If this approach failed, "
+                    "inspect the failure and try another safe approach."
+                ),
+            }
+        )
 
-    events.emit("agent.run.stopped", agent_id=agent.id, project_id=project.id, reason="step_limit")
+    events.emit(
+        "agent.run.stopped",
+        agent_id=agent.id,
+        project_id=project.id,
+        reason="turn_limit",
+    )
     return {
-        "text": f"Stopped after the V1 safety limit of {MAX_STEPS} tool steps.",
+        "text": (
+            f"Stopped at the autonomous safety ceiling of {MAX_TURNS} turns. "
+            "The task did not reach verified completion."
+        ),
         "steps": trace,
-        "status": "step_limit",
+        "status": "turn_limit",
     }

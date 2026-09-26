@@ -186,12 +186,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  deleteAgent: (agentId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/agents/" + agentId,
+      { method: "DELETE" },
+    ),
   runAgent: (
     agentId: string,
     prompt: string,
     allowTerminal: boolean,
     endpoint?: string | null,
     allowDelete = false,
+    allowNetwork = false,
   ) =>
     request<AgentRun>("/api/agents/" + agentId + "/execute", {
       method: "POST",
@@ -199,6 +205,7 @@ export const api = {
         prompt,
         allow_terminal: allowTerminal,
         allow_delete: allowDelete,
+        allow_network: allowNetwork,
         endpoint: endpoint || undefined,
       }),
     }),
@@ -259,6 +266,7 @@ export const api = {
     allowTerminal: boolean,
     allowDelete = false,
     extendRounds = 0,
+    allowNetwork = false,
   ) =>
     request<MultiAgentTask>(
       "/api/multi-agent/tasks/" + taskId + "/run",
@@ -267,6 +275,7 @@ export const api = {
         body: JSON.stringify({
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
+          allow_network: allowNetwork,
           extend_rounds: extendRounds,
         }),
       },
@@ -324,6 +333,7 @@ export const api = {
     inputPrompt: string,
     allowTerminal: boolean,
     allowDelete: boolean,
+    allowNetwork: boolean,
   ) =>
     request<WorkflowRun>(
       "/api/orchestration/workflows/" + workflowId + "/runs",
@@ -333,6 +343,7 @@ export const api = {
           input_prompt: inputPrompt,
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
+          allow_network: allowNetwork,
         }),
       },
     ),
@@ -341,6 +352,7 @@ export const api = {
     inputPrompt: string,
     allowTerminal: boolean,
     allowDelete: boolean,
+    allowNetwork: boolean,
   ) =>
     request<WorkflowRun>(
       "/api/orchestration/runs/" + runId + "/resume",
@@ -350,6 +362,7 @@ export const api = {
           input_prompt: inputPrompt,
           allow_terminal: allowTerminal,
           allow_delete: allowDelete,
+          allow_network: allowNetwork,
         }),
       },
     ),

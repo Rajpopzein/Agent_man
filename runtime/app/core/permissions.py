@@ -7,6 +7,7 @@ class Permission(StrEnum):
     PROJECT_DELETE = "project.files.delete"
     TERMINAL_EXECUTE = "terminal.execute"
     LOCAL_PORTS = "local.ports"
+    NETWORK_ACCESS = "network.internet"
     OUTSIDE_WORKSPACE = "filesystem.outside_workspace"
 
 
@@ -22,6 +23,7 @@ DEFAULT_POLICY: dict[Permission, Decision] = {
     Permission.PROJECT_DELETE: Decision.ASK,
     Permission.TERMINAL_EXECUTE: Decision.ASK,
     Permission.LOCAL_PORTS: Decision.ALLOW,
+    Permission.NETWORK_ACCESS: Decision.ASK,
     Permission.OUTSIDE_WORKSPACE: Decision.BLOCK,
 }
 

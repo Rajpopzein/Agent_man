@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Play, RefreshCw, TerminalSquare, Users } from "lucide-react";
+import { BrainCircuit, Globe2, Play, RefreshCw, TerminalSquare, Users } from "lucide-react";
 
 import { api, Agent, MultiAgentTask, Project } from "../../services/api";
 
@@ -15,6 +15,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
   const [maxRounds, setMaxRounds] = useState(12);
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
+  const [allowNetwork, setAllowNetwork] = useState(false);
   const [tasks, setTasks] = useState<MultiAgentTask[]>([]);
   const [activeTask, setActiveTask] = useState<MultiAgentTask | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,6 +91,8 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
         created.id,
         allowTerminal,
         allowDelete,
+        0,
+        allowNetwork,
       );
       setActiveTask(result);
       setStatus("Task finished with status: " + result.status);
@@ -115,6 +118,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
         allowTerminal,
         allowDelete,
         extendRounds,
+        allowNetwork,
       );
       setActiveTask(result);
       setStatus("Task status: " + result.status);
@@ -209,6 +213,15 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
                 />
                 <TerminalSquare size={16} />
                 Allow execute tools for this run
+              </label>
+              <label className="approval">
+                <input
+                  type="checkbox"
+                  checked={allowNetwork}
+                  onChange={(event) => setAllowNetwork(event.target.checked)}
+                />
+                <Globe2 size={16} />
+                Allow public internet access
               </label>
               <label className="approval">
                 <input

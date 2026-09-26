@@ -181,7 +181,7 @@ button:disabled{cursor:not-allowed}
 .missionReadout{display:grid;grid-template-columns:88px 1fr;gap:8px 10px;padding:8px 3px 15px;border-bottom:1px solid rgba(99,230,255,.08)}
 .missionReadout span{font-family:var(--mono);font-size:8px;letter-spacing:.8px;color:#517482}
 .missionReadout b{font-family:var(--mono);font-size:9px;font-weight:500;color:#a7ced9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.permissionReadout{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}
+.permissionReadout{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:auto}
 .permissionChip{border:1px solid rgba(99,230,255,.15);background:rgba(3,14,22,.58);color:#628894;padding:9px 7px;display:flex;align-items:center;justify-content:center;gap:6px;font-family:var(--mono);font-size:8px;letter-spacing:.7px}
 .permissionChip.active{color:var(--teal);border-color:rgba(79,255,195,.42);background:rgba(13,77,59,.15);box-shadow:inset 0 0 16px rgba(79,255,195,.04)}
 .permissionChip.danger.active{color:var(--red);border-color:rgba(255,100,116,.45);background:rgba(96,25,34,.15)}
@@ -275,11 +275,11 @@ label{color:#6f98a8}
 .toolControls{display:flex;justify-content:space-between;align-items:end;gap:16px;padding:12px}
 .toolControls label{display:grid;gap:5px;font-family:var(--mono);font-size:8px;letter-spacing:.7px;text-transform:uppercase;min-width:245px}
 .toolLegend{display:flex;gap:12px;flex-wrap:wrap;color:#587d8b;font-family:var(--mono);font-size:8px}.toolLegend span{display:flex;align-items:center;gap:5px}
-.riskDot{width:6px;height:6px;border-radius:50%;display:inline-block}.riskDot.read{background:var(--cyan)}.riskDot.write{background:#7fb7ff}.riskDot.execute{background:var(--amber)}.riskDot.destructive{background:var(--red)}
+.riskDot{width:6px;height:6px;border-radius:50%;display:inline-block}.riskDot.read{background:var(--cyan)}.riskDot.write{background:#7fb7ff}.riskDot.execute{background:var(--amber)}.riskDot.network{background:var(--teal)}.riskDot.destructive{background:var(--red)}
 .toolCategory{margin-top:16px}.toolCategory>h3{text-transform:uppercase;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:#739daa;margin:0 0 8px}
 .toolGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
 .toolCard{padding:12px}.toolHeader{display:flex;align-items:center;gap:9px}.toolHeader>div:nth-child(2){flex:1;min-width:0}.toolHeader h4{margin:0;font-family:var(--mono);font-size:9px;color:#c7ecf3}.toolHeader small{font-family:var(--mono);font-size:7px;color:#4f7380}.toolIcon{width:31px;height:31px;border:1px solid rgba(99,230,255,.18);display:grid;place-items:center;color:var(--cyan);background:rgba(9,45,58,.24)}
-.toolCard p{color:#648894;min-height:36px;font-size:9px;line-height:1.45}.riskBadge{font-family:var(--mono);font-size:7px;text-transform:uppercase;border:1px solid rgba(99,230,255,.13);padding:3px 5px}.riskBadge.read{color:var(--cyan)}.riskBadge.write{color:#7fb7ff}.riskBadge.execute{color:var(--amber);border-color:rgba(255,209,102,.22)}.riskBadge.destructive{color:var(--red);border-color:rgba(255,100,116,.22)}
+.toolCard p{color:#648894;min-height:36px;font-size:9px;line-height:1.45}.riskBadge{font-family:var(--mono);font-size:7px;text-transform:uppercase;border:1px solid rgba(99,230,255,.13);padding:3px 5px}.riskBadge.read{color:var(--cyan)}.riskBadge.write{color:#7fb7ff}.riskBadge.execute{color:var(--amber);border-color:rgba(255,209,102,.22)}.riskBadge.network{color:var(--teal);border-color:rgba(79,255,195,.24)}.riskBadge.destructive{color:var(--red);border-color:rgba(255,100,116,.22)}
 .toolActions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.toolToggle{border:1px solid rgba(99,230,255,.11);background:rgba(2,12,18,.66);color:#547885;padding:7px;display:flex;gap:5px;align-items:center;justify-content:center;font-family:var(--mono);font-size:7px}.toolToggle.on{border-color:rgba(79,255,195,.28);color:var(--teal);background:rgba(8,57,43,.15)}.toolToggle.assigned{border-color:rgba(99,230,255,.34);color:var(--cyan);background:rgba(8,51,68,.18)}.toolToggle:disabled{opacity:.28}
 
 .orchestrationLayout{display:grid;grid-template-columns:380px minmax(0,1fr);gap:12px}
@@ -324,3 +324,5 @@ label{color:#6f98a8}
   .commandComposer{grid-template-columns:26px 1fr}.commandComposer button{grid-column:1/-1;height:42px;border-left:0;border-top:1px solid rgba(99,230,255,.14)}
   .toolGrid{grid-template-columns:1fr}.toolControls{align-items:stretch;flex-direction:column}.connectionsList{grid-template-columns:1fr}.edgeGrid{grid-template-columns:1fr}
 }
+
+@media(max-width:520px){.permissionReadout{grid-template-columns:1fr 1fr}}
