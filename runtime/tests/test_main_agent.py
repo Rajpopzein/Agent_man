@@ -222,3 +222,62 @@ def test_main_agent_direct_tool_respects_approval(monkeypatch):
     body = response.json()
     assert body["status"] == "waiting_approval"
     assert body["steps"][0]["permission"] == "terminal.execute"
+
+
+
+def test_main_agent_tool_assignment_can_be_changed(monkeypatch):
+    project, _workers = _setup()
+
+    listed = client.get(
+        "/api/tools/main-agent/" + project["id"]
+    )
+    assert listed.status_code == 200
+    assert any(
+        item["name"] == "read_file" and item["assigned"]
+        for item in listed.json()
+    )
+
+    changed = client.put(
+        "/api/tools/main-agent/"
+        + project["id"]
+        + "/read_file",
+        json={"enabled": False},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["assigned"] is False
+
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert "read_file" not in messages[0]["content"]
+            return json.dumps({
+                "type": "tool",
+                "tool": "read_file",
+                "args": {"path": "README.md"},
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "The requested tool is not assigned to me.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Read README.",
+            "allow_terminal": False,
+            "allow_delete": False,
+            "allow_network": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["steps"][0]["type"] == "tool"
+    assert body["steps"][0]["status"] == "error"
+    assert "disabled or not assigned" in body["steps"][0]["error"]

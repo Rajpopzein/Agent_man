@@ -389,6 +389,22 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ enabled }),
     }),
+  mainAgentTools: (projectId: string) =>
+    request<AgentTool[]>(
+      "/api/tools/main-agent/" + projectId,
+    ),
+  setMainAgentTool: (
+    projectId: string,
+    toolName: string,
+    enabled: boolean,
+  ) =>
+    request<AgentTool>(
+      "/api/tools/main-agent/" + projectId + "/" + toolName,
+      {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      },
+    ),
   agentTools: (agentId: string) =>
     request<AgentTool[]>("/api/tools/agents/" + agentId),
   setAgentTool: (

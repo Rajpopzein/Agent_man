@@ -3,14 +3,17 @@ import {
   BrainCircuit,
   CheckCircle2,
   Cpu,
+  Power,
   RefreshCw,
   Save,
   Settings2,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 
 import {
   api,
+  AgentTool,
   AIConnection,
   MainAgentConfig,
   Project,
@@ -35,6 +38,8 @@ export default function SettingsPage({
   const [detecting, setDetecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+  const [executiveTools, setExecutiveTools] = useState<AgentTool[]>([]);
+  const [toolStatus, setToolStatus] = useState("");
 
   useEffect(() => {
     const connection =
@@ -47,10 +52,41 @@ export default function SettingsPage({
     setDetectedModels([]);
   }, [project?.id, mainConfig?.connection_id, mainConfig?.model, connections]);
 
+  useEffect(() => {
+    if (!project) {
+      setExecutiveTools([]);
+      return;
+    }
+    void loadExecutiveTools(project.id);
+  }, [project?.id]);
+
+  async function loadExecutiveTools(projectId: string) {
+    try {
+      setExecutiveTools(await api.mainAgentTools(projectId));
+    } catch (error) {
+      setToolStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   const selectedConnection = useMemo(
     () => connections.find((item) => item.id === connectionId) || null,
     [connections, connectionId],
   );
+
+  const groupedTools = useMemo(() => {
+    const groups: Record<string, AgentTool[]> = {};
+    for (const tool of executiveTools) {
+      if (!groups[tool.category]) groups[tool.category] = [];
+      groups[tool.category].push(tool);
+    }
+    return groups;
+  }, [executiveTools]);
+
+  const assignedToolCount = executiveTools.filter(
+    (tool) => tool.globally_enabled && tool.assigned,
+  ).length;
 
   function selectConnection(id: string) {
     const connection = connections.find((item) => item.id === id);
@@ -121,6 +157,29 @@ export default function SettingsPage({
     }
   }
 
+  async function toggleExecutiveTool(tool: AgentTool) {
+    if (!project || !tool.globally_enabled) return;
+
+    try {
+      await api.setMainAgentTool(
+        project.id,
+        tool.name,
+        !tool.assigned,
+      );
+      await loadExecutiveTools(project.id);
+      setToolStatus(
+        tool.name +
+          (tool.assigned
+            ? " removed from Agent Man Executive."
+            : " assigned to Agent Man Executive."),
+      );
+    } catch (error) {
+      setToolStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   if (!project) {
     return (
       <section className="panel settingsEmpty">
@@ -139,8 +198,8 @@ export default function SettingsPage({
         <div>
           <h2>Settings</h2>
           <p>
-            Configure Agent Man itself here. Command Core is execution-only;
-            executive model selection and discovery live in Settings.
+            Configure Agent Man itself here: executive model, model discovery,
+            and the exact runtime tools exposed to the Executive.
           </p>
         </div>
         <span className="connectionCount">
@@ -158,9 +217,9 @@ export default function SettingsPage({
               <small>PRIMARY AGENT</small>
               <h3>Agent Man Executive</h3>
               <p>
-                This is the model you talk to. It decides when to reply,
-                delegate to workers, start peer collaboration, or run a saved
-                workflow.
+                This is the model you talk to. It can use the tools assigned
+                below directly, delegate to workers, start peer collaboration,
+                or run a saved workflow.
               </p>
             </div>
           </div>
@@ -278,6 +337,8 @@ export default function SettingsPage({
                 (item) => item.id === mainConfig?.connection_id,
               )?.name || "—"}
             </b>
+            <span>Tools</span>
+            <b>{assignedToolCount} assigned</b>
           </div>
 
           {connections.length === 0 && (
@@ -291,6 +352,71 @@ export default function SettingsPage({
           )}
         </aside>
       </div>
+
+      <section className="panel executiveToolSettings">
+        <div className="executiveToolSettingsHeader">
+          <div>
+            <Wrench size={18} />
+            <span>
+              <small>EXECUTIVE CAPABILITIES</small>
+              <h3>Tool Access</h3>
+              <p>
+                Only tools marked Assigned are included in Agent Man's system
+                prompt and accepted by the runtime. A tool must also have
+                Runtime ON in the Tools page.
+              </p>
+            </span>
+          </div>
+          <strong>
+            {assignedToolCount}/{executiveTools.length} assigned
+          </strong>
+        </div>
+
+        <div className="executiveToolGroups">
+          {Object.entries(groupedTools).map(([category, tools]) => (
+            <div className="executiveToolGroup" key={category}>
+              <h4>{category}</h4>
+              <div className="executiveToolList">
+                {tools.map((tool) => (
+                  <button
+                    type="button"
+                    key={tool.name}
+                    className={
+                      tool.assigned && tool.globally_enabled
+                        ? "executiveToolChip assigned"
+                        : "executiveToolChip"
+                    }
+                    disabled={!tool.globally_enabled}
+                    onClick={() => void toggleExecutiveTool(tool)}
+                    title={
+                      tool.globally_enabled
+                        ? tool.description
+                        : "This tool is disabled globally in Tools."
+                    }
+                  >
+                    <Power size={12} />
+                    <span>
+                      <b>{tool.name}</b>
+                      <small>{tool.risk}</small>
+                    </span>
+                    <em>
+                      {!tool.globally_enabled
+                        ? "RUNTIME OFF"
+                        : tool.assigned
+                          ? "ASSIGNED"
+                          : "NOT ASSIGNED"}
+                    </em>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {toolStatus && (
+          <div className="connectionStatus">{toolStatus}</div>
+        )}
+      </section>
     </section>
   );
 }

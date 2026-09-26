@@ -967,3 +967,80 @@ label{color:#6f98a8}
 @media(max-width:760px){
   .executiveToolsNotice{align-items:flex-start;flex-direction:column}
 }
+
+.executiveToolSettings{
+  margin-top:12px;padding:16px
+}
+.executiveToolSettingsHeader{
+  display:flex;justify-content:space-between;align-items:flex-start;
+  gap:16px;padding-bottom:13px;border-bottom:1px solid rgba(99,230,255,.09)
+}
+.executiveToolSettingsHeader>div{
+  display:flex;align-items:flex-start;gap:10px;min-width:0
+}
+.executiveToolSettingsHeader>div>svg{
+  color:var(--teal);flex:none;margin-top:2px
+}
+.executiveToolSettingsHeader span{display:grid}
+.executiveToolSettingsHeader small{
+  font-family:var(--mono);font-size:7px;letter-spacing:1px;color:#527b86
+}
+.executiveToolSettingsHeader h3{
+  margin:3px 0 4px;font-size:14px;font-weight:500
+}
+.executiveToolSettingsHeader p{
+  margin:0;color:#628894;font-size:9px;line-height:1.5;max-width:760px
+}
+.executiveToolSettingsHeader>strong{
+  flex:none;border:1px solid rgba(79,255,195,.2);
+  background:rgba(7,52,40,.13);color:var(--teal);
+  padding:6px 8px;font-family:var(--mono);font-size:8px
+}
+.executiveToolGroups{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:10px;margin-top:12px
+}
+.executiveToolGroup{
+  border:1px solid rgba(99,230,255,.07);background:rgba(1,9,14,.34);
+  padding:9px
+}
+.executiveToolGroup h4{
+  margin:0 0 7px;font-family:var(--mono);font-size:7px;
+  letter-spacing:.9px;text-transform:uppercase;color:#557b87
+}
+.executiveToolList{display:grid;gap:6px}
+.executiveToolChip{
+  width:100%;display:grid;grid-template-columns:20px minmax(0,1fr) auto;
+  gap:7px;align-items:center;text-align:left;
+  border:1px solid rgba(99,230,255,.09);background:rgba(2,13,19,.65);
+  color:#597d88;padding:7px 8px
+}
+.executiveToolChip>svg{color:#4e727d}
+.executiveToolChip span{display:grid;min-width:0}
+.executiveToolChip b{
+  font-family:var(--mono);font-size:8px;font-weight:500;color:#7ca7b1
+}
+.executiveToolChip small{
+  margin-top:1px;font-family:var(--mono);font-size:6px;text-transform:uppercase;
+  color:#4d6d76
+}
+.executiveToolChip em{
+  font-family:var(--mono);font-style:normal;font-size:6px;letter-spacing:.55px;
+  color:#526f78
+}
+.executiveToolChip.assigned{
+  border-color:rgba(79,255,195,.25);background:rgba(8,58,45,.12);
+  color:var(--teal)
+}
+.executiveToolChip.assigned>svg,
+.executiveToolChip.assigned b,
+.executiveToolChip.assigned em{
+  color:var(--teal)
+}
+.executiveToolChip:disabled{
+  opacity:.32;cursor:not-allowed
+}
+@media(max-width:760px){
+  .executiveToolSettingsHeader{flex-direction:column}
+  .executiveToolGroups{grid-template-columns:1fr}
+}

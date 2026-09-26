@@ -22,11 +22,11 @@ from app.persistence.models import (
 )
 from app.providers.connections import bind_agent_connection
 from app.tools.capabilities import (
+    CAPABILITY_TOOLS,
     detect_missing_capability,
-    resolve_capability,
 )
 from app.tools.registry import catalog_for_prompt, tools
-from app.tools.service import globally_enabled_tool_names
+from app.tools.service import allowed_main_agent_tool_names
 
 MAX_EXECUTIVE_STEPS = 30
 MAX_HISTORY = 20
@@ -207,7 +207,10 @@ def run_main_agent(
     )
     worker_ids = {a.id for a in workers}
     workflow_ids = {w.id for w in workflows}
-    allowed_tools = globally_enabled_tool_names(db)
+    allowed_tools = allowed_main_agent_tool_names(
+        db,
+        project.id,
+    )
 
     approvals: set[str] = set()
     if allow_terminal:
@@ -325,16 +328,15 @@ def run_main_agent(
             capability = str(
                 action.get("capability", "")
             ).strip().lower()
-            resolved = resolve_capability(
-                db,
-                "main-agent:" + project.id,
+            candidates = CAPABILITY_TOOLS.get(
                 capability,
+                (),
             )
-
-            # The executive automatically receives all globally enabled
-            # runtime tools rather than per-worker assignments.
-            if capability in {"internet", "web"} and "http_get" in allowed_tools:
-                resolved = ["http_get"]
+            resolved = [
+                tool_name
+                for tool_name in candidates
+                if tool_name in allowed_tools
+            ]
 
             step = {
                 "type": "capability",

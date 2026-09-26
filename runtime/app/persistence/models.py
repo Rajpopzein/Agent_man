@@ -121,6 +121,20 @@ class AgentToolRecord(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class MainAgentToolRecord(Base):
+    __tablename__ = "main_agent_tools"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        primary_key=True,
+    )
+    tool_name: Mapped[str] = mapped_column(
+        ForeignKey("tools.name"),
+        primary_key=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class WorkflowRecord(Base):
     __tablename__ = "workflows"
 

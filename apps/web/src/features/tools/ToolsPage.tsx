@@ -6,13 +6,21 @@ import {
   Globe2,
   Power,
   ShieldAlert,
+  Sparkles,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
 
-import { api, Agent, AgentTool, Tool } from "../../services/api";
+import {
+  api,
+  Agent,
+  AgentTool,
+  Project,
+  Tool,
+} from "../../services/api";
 
 type Props = {
+  project: Project | null;
   agents: Agent[];
 };
 
@@ -25,22 +33,44 @@ function iconFor(category: string) {
   return <Wrench size={17} />;
 }
 
-export default function ToolsPage({ agents }: Props) {
+const EXECUTIVE_TARGET = "__agent_man_executive__";
+
+export default function ToolsPage({
+  project,
+  agents,
+}: Props) {
   const [tools, setTools] = useState<Tool[]>([]);
-  const [agentId, setAgentId] = useState(agents[0]?.id || "");
-  const [agentTools, setAgentTools] = useState<AgentTool[]>([]);
+  const [targetId, setTargetId] = useState(
+    project ? EXECUTIVE_TARGET : agents[0]?.id || "",
+  );
+  const [targetTools, setTargetTools] = useState<AgentTool[]>([]);
   const [status, setStatus] = useState("");
+
+  const configuringExecutive =
+    targetId === EXECUTIVE_TARGET;
 
   async function loadTools() {
     setTools(await api.tools());
   }
 
-  async function loadAgentTools(id: string) {
+  async function loadTargetTools(id: string) {
     if (!id) {
-      setAgentTools([]);
+      setTargetTools([]);
       return;
     }
-    setAgentTools(await api.agentTools(id));
+
+    if (id === EXECUTIVE_TARGET) {
+      if (!project) {
+        setTargetTools([]);
+        return;
+      }
+      setTargetTools(
+        await api.mainAgentTools(project.id),
+      );
+      return;
+    }
+
+    setTargetTools(await api.agentTools(id));
   }
 
   useEffect(() => {
@@ -48,19 +78,29 @@ export default function ToolsPage({ agents }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!agents.some((agent) => agent.id === agentId)) {
-      setAgentId(agents[0]?.id || "");
+    if (targetId === EXECUTIVE_TARGET && project) {
+      return;
     }
-  }, [agents, agentId]);
+
+    if (!agents.some((agent) => agent.id === targetId)) {
+      setTargetId(
+        project
+          ? EXECUTIVE_TARGET
+          : agents[0]?.id || "",
+      );
+    }
+  }, [project?.id, agents, targetId]);
 
   useEffect(() => {
-    void loadAgentTools(agentId);
-  }, [agentId]);
+    void loadTargetTools(targetId);
+  }, [targetId, project?.id]);
 
   const grouped = useMemo(() => {
     const result: Record<string, Tool[]> = {};
     for (const tool of tools) {
-      if (!result[tool.category]) result[tool.category] = [];
+      if (!result[tool.category]) {
+        result[tool.category] = [];
+      }
       result[tool.category].push(tool);
     }
     return result;
@@ -69,17 +109,25 @@ export default function ToolsPage({ agents }: Props) {
   const assignmentMap = useMemo(
     () =>
       Object.fromEntries(
-        agentTools.map((tool) => [tool.name, tool]),
+        targetTools.map((tool) => [tool.name, tool]),
       ),
-    [agentTools],
+    [targetTools],
   );
+
+  const assignedCount = targetTools.filter(
+    (tool) =>
+      tool.globally_enabled && tool.assigned,
+  ).length;
 
   async function toggleGlobal(tool: Tool) {
     try {
-      await api.setToolEnabled(tool.name, !tool.enabled);
+      await api.setToolEnabled(
+        tool.name,
+        !tool.enabled,
+      );
       await Promise.all([
         loadTools(),
-        loadAgentTools(agentId),
+        loadTargetTools(targetId),
       ]);
       setStatus(
         tool.name +
@@ -88,24 +136,51 @@ export default function ToolsPage({ agents }: Props) {
           " globally.",
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
     }
   }
 
-  async function toggleAgent(tool: Tool) {
-    if (!agentId) return;
-    const current = assignmentMap[tool.name]?.assigned ?? false;
+  async function toggleTarget(tool: Tool) {
+    if (!targetId) return;
+
+    const current =
+      assignmentMap[tool.name]?.assigned ?? false;
+
     try {
-      await api.setAgentTool(agentId, tool.name, !current);
-      await loadAgentTools(agentId);
+      if (configuringExecutive) {
+        if (!project) return;
+        await api.setMainAgentTool(
+          project.id,
+          tool.name,
+          !current,
+        );
+      } else {
+        await api.setAgentTool(
+          targetId,
+          tool.name,
+          !current,
+        );
+      }
+
+      await loadTargetTools(targetId);
       setStatus(
         tool.name +
           " " +
           (!current ? "assigned to" : "removed from") +
-          " the selected agent.",
+          (configuringExecutive
+            ? " Agent Man Executive."
+            : " the selected worker."),
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
     }
   }
 
@@ -115,114 +190,175 @@ export default function ToolsPage({ agents }: Props) {
         <div>
           <h2>Tools</h2>
           <p>
-            Built-in capabilities are registered by the trusted runtime.
-            Worker agents only see tools assigned here. Agent Man Executive
-            sees every globally enabled runtime tool.
+            Configure exactly which runtime capabilities Agent Man Executive
+            and each worker agent can see and execute.
           </p>
         </div>
         <span className="connectionCount">
-          {tools.filter((tool) => tool.enabled).length}/{tools.length} enabled
+          {tools.filter((tool) => tool.enabled).length}/{tools.length} runtime
         </span>
       </div>
 
       <div className="executiveToolsNotice panel">
         <div>
-          <Globe2 size={18} />
+          <Sparkles size={18} />
           <span>
-            <b>Agent Man Executive</b>
+            <b>
+              {configuringExecutive
+                ? "Agent Man Executive"
+                : "Worker tool assignment"}
+            </b>
             <small>
-              Automatically receives every globally enabled runtime tool.
-              EXECUTE, NETWORK, and destructive operations still require the
-              run permissions from Command Core.
+              {configuringExecutive
+                ? assignedCount +
+                  " globally enabled tools are currently exposed to the Executive model."
+                : "Worker agents only receive tools explicitly assigned to them."}
             </small>
           </span>
         </div>
-        <strong>
-          {tools.filter((tool) => tool.enabled).length}/{tools.length} tools
-        </strong>
+        <strong>{assignedCount} assigned</strong>
       </div>
 
       <div className="toolControls panel">
         <label>
-          Configure agent
+          Configure target
           <select
-            value={agentId}
-            onChange={(event) => setAgentId(event.target.value)}
+            value={targetId}
+            onChange={(event) =>
+              setTargetId(event.target.value)
+            }
           >
-            {agents.length === 0 && <option value="">No agents available</option>}
+            {project && (
+              <option value={EXECUTIVE_TARGET}>
+                Agent Man · Executive
+              </option>
+            )}
             {agents.map((agent) => (
               <option value={agent.id} key={agent.id}>
                 {agent.name} · {agent.role}
               </option>
             ))}
+            {!project && agents.length === 0 && (
+              <option value="">
+                No agent target available
+              </option>
+            )}
           </select>
         </label>
 
         <div className="toolLegend">
-          <span><i className="riskDot read" /> READ auto</span>
-          <span><i className="riskDot write" /> WRITE policy</span>
-          <span><i className="riskDot execute" /> EXECUTE approval</span>
-          <span><i className="riskDot network" /> NETWORK approval</span>
-          <span><i className="riskDot destructive" /> DESTRUCTIVE approval</span>
+          <span>
+            <i className="riskDot read" /> READ auto
+          </span>
+          <span>
+            <i className="riskDot write" /> WRITE policy
+          </span>
+          <span>
+            <i className="riskDot execute" /> EXECUTE approval
+          </span>
+          <span>
+            <i className="riskDot network" /> NETWORK approval
+          </span>
+          <span>
+            <i className="riskDot destructive" /> DESTRUCTIVE approval
+          </span>
         </div>
       </div>
 
-      {Object.entries(grouped).map(([category, categoryTools]) => (
-        <section className="toolCategory" key={category}>
-          <h3>{category}</h3>
-          <div className="toolGrid">
-            {categoryTools.map((tool) => {
-              const assignment = assignmentMap[tool.name];
-              const assigned = Boolean(assignment?.assigned);
-              return (
-                <article className="toolCard panel" key={tool.name}>
-                  <div className="toolHeader">
-                    <div className="toolIcon">{iconFor(category)}</div>
-                    <div>
-                      <h4>{tool.name}</h4>
-                      <small>v{tool.version} · built-in</small>
+      {Object.entries(grouped).map(
+        ([category, categoryTools]) => (
+          <section
+            className="toolCategory"
+            key={category}
+          >
+            <h3>{category}</h3>
+            <div className="toolGrid">
+              {categoryTools.map((tool) => {
+                const assignment =
+                  assignmentMap[tool.name];
+                const assigned = Boolean(
+                  assignment?.assigned,
+                );
+
+                return (
+                  <article
+                    className="toolCard panel"
+                    key={tool.name}
+                  >
+                    <div className="toolHeader">
+                      <div className="toolIcon">
+                        {iconFor(category)}
+                      </div>
+                      <div>
+                        <h4>{tool.name}</h4>
+                        <small>
+                          v{tool.version} · built-in
+                        </small>
+                      </div>
+                      <span
+                        className={
+                          "riskBadge " + tool.risk
+                        }
+                      >
+                        {tool.risk}
+                      </span>
                     </div>
-                    <span className={"riskBadge " + tool.risk}>
-                      {tool.risk}
-                    </span>
-                  </div>
 
-                  <p>{tool.description}</p>
+                    <p>{tool.description}</p>
 
-                  <div className="toolActions">
-                    <button
-                      className={tool.enabled ? "toolToggle on" : "toolToggle"}
-                      onClick={() => void toggleGlobal(tool)}
-                    >
-                      <Power size={14} />
-                      Runtime {tool.enabled ? "on" : "off"}
-                    </button>
+                    <div className="toolActions">
+                      <button
+                        className={
+                          tool.enabled
+                            ? "toolToggle on"
+                            : "toolToggle"
+                        }
+                        onClick={() =>
+                          void toggleGlobal(tool)
+                        }
+                      >
+                        <Power size={14} />
+                        Runtime{" "}
+                        {tool.enabled ? "on" : "off"}
+                      </button>
 
-                    <button
-                      className={
-                        assigned && tool.enabled
-                          ? "toolToggle assigned"
-                          : "toolToggle"
-                      }
-                      disabled={!agentId || !tool.enabled}
-                      onClick={() => void toggleAgent(tool)}
-                    >
-                      {tool.risk === "destructive" ? (
-                        <ShieldAlert size={14} />
-                      ) : (
-                        <Wrench size={14} />
-                      )}
-                      {assigned ? "Assigned" : "Not assigned"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                      <button
+                        className={
+                          assigned && tool.enabled
+                            ? "toolToggle assigned"
+                            : "toolToggle"
+                        }
+                        disabled={
+                          !targetId || !tool.enabled
+                        }
+                        onClick={() =>
+                          void toggleTarget(tool)
+                        }
+                      >
+                        {tool.risk ===
+                        "destructive" ? (
+                          <ShieldAlert size={14} />
+                        ) : (
+                          <Wrench size={14} />
+                        )}
+                        {assigned
+                          ? "Assigned"
+                          : "Not assigned"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ),
+      )}
 
-      {status && <div className="connectionStatus">{status}</div>}
+      {status && (
+        <div className="connectionStatus">
+          {status}
+        </div>
+      )}
     </section>
   );
 }

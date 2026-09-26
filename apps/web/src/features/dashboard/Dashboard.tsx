@@ -690,7 +690,10 @@ export default function Dashboard() {
         ) : view === "multi-agent" ? (
           <MultiAgentWorkspace project={project} agents={agents} />
         ) : view === "tools" ? (
-          <ToolsPage agents={agents} />
+          <ToolsPage
+            project={project}
+            agents={agents}
+          />
         ) : (
           <div className="commandDeck">
             <section className="telemetryStrip">
