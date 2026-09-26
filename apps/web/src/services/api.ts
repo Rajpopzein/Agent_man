@@ -155,6 +155,29 @@ export type WorkflowRun = {
   steps: WorkflowRunStep[];
 };
 
+export type MainAgentConfig = {
+  project_id: string;
+  connection_id: string;
+  provider_id: string;
+  model: string;
+  endpoint: string | null;
+  context_limit: number | null;
+  temperature: number;
+};
+
+export type MainAgentMessage = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+};
+
+export type MainAgentReply = {
+  status: string;
+  text: string;
+  steps: Array<Record<string, unknown>>;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -209,6 +232,54 @@ export const api = {
         endpoint: endpoint || undefined,
       }),
     }),
+  mainAgentConfig: (projectId: string) =>
+    request<MainAgentConfig | null>(
+      "/api/main-agent/projects/" + projectId + "/config",
+    ),
+  configureMainAgent: (
+    projectId: string,
+    payload: {
+      connection_id: string;
+      model: string;
+      context_limit?: number | null;
+      temperature?: number;
+    },
+  ) =>
+    request<MainAgentConfig>(
+      "/api/main-agent/projects/" + projectId + "/config",
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    ),
+  mainAgentMessages: (projectId: string) =>
+    request<MainAgentMessage[]>(
+      "/api/main-agent/projects/" + projectId + "/messages",
+    ),
+  clearMainAgentMessages: (projectId: string) =>
+    request<{ cleared: boolean }>(
+      "/api/main-agent/projects/" + projectId + "/messages",
+      { method: "DELETE" },
+    ),
+  chatMainAgent: (
+    projectId: string,
+    message: string,
+    allowTerminal: boolean,
+    allowDelete: boolean,
+    allowNetwork: boolean,
+  ) =>
+    request<MainAgentReply>(
+      "/api/main-agent/projects/" + projectId + "/chat",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          message,
+          allow_terminal: allowTerminal,
+          allow_delete: allowDelete,
+          allow_network: allowNetwork,
+        }),
+      },
+    ),
   aiProviders: () => request<AIProvider[]>("/api/ai/providers"),
   aiConnections: () => request<AIConnection[]>("/api/ai/connections"),
   createAIConnection: (payload: {

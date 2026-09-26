@@ -40,8 +40,9 @@ import ToolsPage from "../tools/ToolsPage";
 import {
   api,
   Agent,
-  AgentRun,
   AIConnection,
+  MainAgentConfig,
+  MainAgentReply,
   Project,
   Tool,
 } from "../../services/api";
@@ -99,7 +100,8 @@ export default function Dashboard() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [run, setRun] = useState<AgentRun | null>(null);
+  const [run, setRun] = useState<MainAgentReply | null>(null);
+  const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
   const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
@@ -121,6 +123,9 @@ export default function Dashboard() {
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [mainAgentDialog, setMainAgentDialog] = useState(false);
+  const [mainConnectionId, setMainConnectionId] = useState("");
+  const [mainModel, setMainModel] = useState("");
 
   const voice = useAgentVoice();
   const wake = useWakeWord({
@@ -153,7 +158,11 @@ export default function Dashboard() {
       setProject(currentProject);
 
       if (currentProject) {
-        const loadedAgents = await api.agents(currentProject.id);
+        const [loadedAgents, executiveConfig] = await Promise.all([
+          api.agents(currentProject.id),
+          api.mainAgentConfig(currentProject.id),
+        ]);
+        setMainConfig(executiveConfig);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -163,6 +172,7 @@ export default function Dashboard() {
       } else {
         setAgents([]);
         setAgent(null);
+        setMainConfig(null);
       }
     } catch {
       setOnline(false);
@@ -300,18 +310,19 @@ export default function Dashboard() {
 
   async function runDirective(directive: string) {
     const command = directive.trim();
-    if (!command) return;
+    if (!command || !project) return;
 
-    if (!agent) {
+    if (!mainConfig) {
       setView("dashboard");
       setPrompt(command);
-      setNotice({
-        title: "No agent selected",
-        message:
-          "Select an agent before issuing a voice directive. Agent Man keeps the command visible so you can run it after selecting one.",
-      });
+      const connection = connections[0];
+      if (connection) {
+        setMainConnectionId(connection.id);
+        setMainModel(connection.default_model || "");
+      }
+      setMainAgentDialog(true);
       await voice.speakAsync(
-        "No agent is selected. Select an agent and try again.",
+        "Configure my executive model first, then I can manage the worker agents for you.",
         true,
       );
       return;
@@ -319,7 +330,7 @@ export default function Dashboard() {
 
     if (busy) {
       await voice.speakAsync(
-        "A mission is already running. Try again when it completes.",
+        "A mission is already running. I will be ready when it completes.",
         true,
       );
       return;
@@ -332,18 +343,16 @@ export default function Dashboard() {
     setRun(null);
 
     try {
-      const result = await api.runAgent(
-        agent.id,
+      const result = await api.chatMainAgent(
+        project.id,
         command,
         allowTerminal,
-        undefined,
         allowDelete,
         allowNetwork,
       );
       setRun(result);
     } catch (error) {
       setRun({
-        agent_id: agent.id,
         status: "error",
         text: error instanceof Error ? error.message : String(error),
         steps: [],
@@ -356,6 +365,38 @@ export default function Dashboard() {
   async function execute(event: FormEvent) {
     event.preventDefault();
     await runDirective(prompt);
+  }
+
+  async function saveMainAgent(event: FormEvent) {
+    event.preventDefault();
+    if (!project || !mainConnectionId || !mainModel.trim()) return;
+    setBusy(true);
+    try {
+      const configured = await api.configureMainAgent(project.id, {
+        connection_id: mainConnectionId,
+        model: mainModel.trim(),
+        temperature: 0.2,
+      });
+      setMainConfig(configured);
+      setMainAgentDialog(false);
+      setNotice({
+        title: "Agent Man executive online",
+        message:
+          "Voice and text directives now go to Agent Man first. It can delegate to your worker agents and workflows.",
+      });
+      await voice.speakAsync(
+        "Executive core configured. I am now your primary agent.",
+        true,
+      );
+    } catch (error) {
+      setNotice({
+        title: "Executive configuration failed",
+        message: error instanceof Error ? error.message : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmDeleteAgent() {
@@ -700,14 +741,14 @@ export default function Dashboard() {
                 </div>
 
                 <div className="missionReadout">
-                  <span>SELECTED AGENT</span>
+                  <span>PRIMARY AGENT</span>
+                  <b>AGENT MAN</b>
+                  <span>EXECUTIVE MODEL</span>
+                  <b>{mainConfig?.model || "NOT CONFIGURED"}</b>
+                  <span>INSPECTED WORKER</span>
                   <b>{agent?.name || "—"}</b>
-                  <span>ROLE</span>
-                  <b>{agent?.role || "—"}</b>
-                  <span>MODEL</span>
+                  <span>WORKER MODEL</span>
                   <b>{agent?.llm.model || "—"}</b>
-                  <span>UPLINK</span>
-                  <b>{providerLabel}</b>
                 </div>
 
                 <div className="permissionReadout">
@@ -752,6 +793,22 @@ export default function Dashboard() {
                     FILE DEL
                   </button>
                   <button
+                    className={mainConfig ? "permissionChip active" : "permissionChip"}
+                    onClick={() => {
+                      const connection = connections.find(
+                        (item) => item.id === mainConfig?.connection_id,
+                      ) || connections[0];
+                      setMainConnectionId(connection?.id || "");
+                      setMainModel(mainConfig?.model || connection?.default_model || "");
+                      setMainAgentDialog(true);
+                    }}
+                    disabled={!project || connections.length === 0}
+                    title="Configure Agent Man executive model"
+                  >
+                    <Sparkles size={13} />
+                    EXEC CORE
+                  </button>
+                  <button
                     className="permissionChip danger"
                     onClick={() => setDeleteDialog(true)}
                     disabled={!agent || busy}
@@ -768,12 +825,10 @@ export default function Dashboard() {
               <div className="commandHeader">
                 <div>
                   <span className="hudEyebrow">
-                    DIRECTIVE / SINGLE AGENT
+                    DIRECTIVE / AGENT MAN EXECUTIVE
                   </span>
                   <h3>
-                    {agent
-                      ? `Task ${agent.name}`
-                      : "Awaiting agent selection"}
+                    Talk to Agent Man
                   </h3>
                 </div>
                 <div className="commandStatus">
@@ -787,9 +842,9 @@ export default function Dashboard() {
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Issue a directive to the selected agent..."
+                  placeholder="Tell Agent Man what you want accomplished..."
                 />
-                <button disabled={!agent || !prompt.trim() || busy}>
+                <button disabled={!project || !prompt.trim() || busy}>
                   <Zap size={16} />
                   {busy ? "EXECUTING" : "EXECUTE"}
                 </button>
@@ -802,7 +857,9 @@ export default function Dashboard() {
                 </div>
                 <div className="outputBody">
                   {run?.text ||
-                    "Agent Man is standing by. Select an agent and issue a directive."}
+                    (mainConfig
+                      ? "Agent Man is standing by. Give me the objective; I will choose and coordinate the workers."
+                      : "Configure Agent Man's executive model to begin.")}
                 </div>
               </div>
 
@@ -960,6 +1017,73 @@ export default function Dashboard() {
             Tools and risk permissions can be changed later in Capability
             Matrix.
           </p>
+        </form>
+      </HudModal>
+
+      <HudModal
+        open={mainAgentDialog}
+        onClose={() => setMainAgentDialog(false)}
+        title="Configure Agent Man"
+        eyebrow="EXECUTIVE / PRIMARY AGENT"
+        footer={
+          <>
+            <button
+              className="secondaryButton"
+              onClick={() => setMainAgentDialog(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primaryButton"
+              form="main-agent-config-form"
+              type="submit"
+              disabled={busy || !mainConnectionId || !mainModel.trim()}
+            >
+              <Sparkles size={14} />
+              Activate executive
+            </button>
+          </>
+        }
+      >
+        <form
+          id="main-agent-config-form"
+          className="hudDialogForm"
+          onSubmit={saveMainAgent}
+        >
+          <p className="dialogHint">
+            Agent Man is the primary conversational executive. It sees the
+            available workers and workflows, delegates the objective, reviews
+            their results, and returns one unified answer.
+          </p>
+          <label>
+            Executive AI connection
+            <select
+              value={mainConnectionId}
+              onChange={(event) => {
+                const id = event.target.value;
+                const connection = connections.find((item) => item.id === id);
+                setMainConnectionId(id);
+                if (connection?.default_model) {
+                  setMainModel(connection.default_model);
+                }
+              }}
+            >
+              <option value="">Select connection</option>
+              {connections.map((connection) => (
+                <option value={connection.id} key={connection.id}>
+                  {connection.name} · {connection.provider_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Executive model
+            <input
+              value={mainModel}
+              onChange={(event) => setMainModel(event.target.value)}
+              placeholder="Model identifier"
+            />
+          </label>
         </form>
       </HudModal>
 

@@ -174,3 +174,34 @@ class WorkflowRunStepRecord(Base):
     outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
     output_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MainAgentConfigRecord(Base):
+    __tablename__ = "main_agent_configs"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        primary_key=True,
+    )
+    connection_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    endpoint: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    context_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temperature_milli: Mapped[int] = mapped_column(Integer, default=200)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        onupdate=_now,
+    )
+
+
+class MainAgentMessageRecord(Base):
+    __tablename__ = "main_agent_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

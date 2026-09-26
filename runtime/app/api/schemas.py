@@ -250,3 +250,40 @@ class WorkflowRunView(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     steps: list[WorkflowRunStepView]
+
+
+class MainAgentConfigInput(BaseModel):
+    connection_id: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=160)
+    context_limit: int | None = Field(default=None, ge=256)
+    temperature: float = Field(default=0.2, ge=0, le=2)
+
+
+class MainAgentConfigView(BaseModel):
+    project_id: str
+    connection_id: str
+    provider_id: str
+    model: str
+    endpoint: str | None
+    context_limit: int | None
+    temperature: float
+
+
+class MainAgentChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=30_000)
+    allow_terminal: bool = False
+    allow_delete: bool = False
+    allow_network: bool = False
+
+
+class MainAgentMessageView(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: datetime
+
+
+class MainAgentChatReply(BaseModel):
+    status: str
+    text: str
+    steps: list[dict[str, Any]]
