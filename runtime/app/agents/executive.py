@@ -48,7 +48,7 @@ You can:
 1. use any runtime tool listed below directly;
 2. reply directly for simple conversational questions;
 3. delegate a task to one specialist worker;
-4. delegate to multiple peers;
+4. delegate to multiple peers only when the user explicitly asks for parallel or multi-agent work;
 5. run a saved workflow.
 
 You are responsible for the overall objective. Use direct tools when you can
@@ -121,6 +121,10 @@ Rules:
 - If a tool requires approval, call it anyway; the runtime will return the
   required permission and pause safely.
 - Do not ask the user to manually choose Developer/Tester when you can select them.
+- Default to one worker at a time. Never use delegate_peers unless the user
+  explicitly asks for parallel, multi-agent, peer, swarm, simultaneous, or
+  all-agent execution. Sequential handoffs such as Developer then Tester are
+  allowed after the current worker returns.
 - Only reply with the final user-facing result when the overall objective is complete,
   or when a required runtime permission/capability genuinely prevents progress.
 """
@@ -179,6 +183,24 @@ def _request_requires_tool(text: str) -> bool:
         "com port",
         "esp32",
         "hardware",
+    )
+    return any(phrase in lowered for phrase in phrases)
+
+
+def _explicit_parallel_requested(text: str) -> bool:
+    lowered = text.lower()
+    phrases = (
+        "parallel",
+        "in parallel",
+        "multiple agents",
+        "multi agent",
+        "multi-agent",
+        "peer agents",
+        "peer collaboration",
+        "swarm",
+        "simultaneously",
+        "at the same time",
+        "all agents",
     )
     return any(phrase in lowered for phrase in phrases)
 
@@ -751,6 +773,42 @@ def run_main_agent(
             )
 
         elif kind == "delegate_peers":
+            if not _explicit_parallel_requested(message):
+                guard_step = {
+                    "type": "runtime_guard",
+                    "step": step_number,
+                    "status": "retry",
+                    "reason": "parallel_not_requested",
+                }
+                steps.append(guard_step)
+                events.emit(
+                    "executive.activity",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    phase="delegation",
+                    status="blocked",
+                    label="peer_fanout",
+                    message=(
+                        "Parallel delegation blocked; selecting one worker"
+                    ),
+                )
+                messages.append(
+                    {"role": "assistant", "content": raw}
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME CORRECTION: The user did not request "
+                            "parallel or multi-agent execution. Choose at "
+                            "most one worker with delegate_agent, use a "
+                            "direct tool, or reply if complete."
+                        ),
+                    }
+                )
+                continue
+
             agent_ids = [
                 str(item)
                 for item in action.get("agent_ids", [])
