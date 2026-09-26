@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -229,6 +233,50 @@ def release_runtime_port(port: int):
 @router.get("/api/events")
 def recent_events(limit: int = 100):
     return events.recent(max(1, min(limit, 500)))
+
+
+@router.get("/api/events/stream")
+async def stream_events(
+    request: Request,
+    project_id: str | None = None,
+):
+    async def generate():
+        cursor = events.current_sequence()
+
+        yield ": agent-man-event-stream\n\n"
+
+        while not await request.is_disconnected():
+            cursor, batch = await asyncio.to_thread(
+                events.wait_since,
+                cursor,
+                15.0,
+                project_id,
+            )
+
+            if not batch:
+                yield ": keepalive\n\n"
+                continue
+
+            for event in batch:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        event,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\n\n"
+                )
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def agent_view(row: AgentRecord) -> AgentView:
