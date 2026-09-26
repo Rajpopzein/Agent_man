@@ -47,6 +47,7 @@ import {
   api,
   Agent,
   AIConnection,
+  EffectiveToolAccess,
   MainAgentConfig,
   MainAgentReply,
   Project,
@@ -135,6 +136,8 @@ export default function Dashboard() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [connections, setConnections] = useState<AIConnection[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
+  const [executiveAccess, setExecutiveAccess] =
+    useState<EffectiveToolAccess | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
   const [run, setRun] = useState<MainAgentReply | null>(null);
@@ -199,11 +202,17 @@ export default function Dashboard() {
       setProject(currentProject);
 
       if (currentProject) {
-        const [loadedAgents, executiveConfig] = await Promise.all([
+        const [
+          loadedAgents,
+          executiveConfig,
+          effectiveAccess,
+        ] = await Promise.all([
           api.agents(currentProject.id),
           api.mainAgentConfig(currentProject.id),
+          api.effectiveMainAgentTools(currentProject.id),
         ]);
         setMainConfig(executiveConfig);
+        setExecutiveAccess(effectiveAccess);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -214,6 +223,7 @@ export default function Dashboard() {
         setAgents([]);
         setAgent(null);
         setMainConfig(null);
+        setExecutiveAccess(null);
       }
     } catch {
       setOnline(false);
@@ -222,6 +232,24 @@ export default function Dashboard() {
 
   async function reloadConnections() {
     setConnections(await api.aiConnections());
+  }
+
+  async function refreshExecutiveAccess(
+    projectId?: string,
+  ) {
+    const id = projectId || project?.id;
+    if (!id) {
+      setExecutiveAccess(null);
+      return;
+    }
+
+    try {
+      setExecutiveAccess(
+        await api.effectiveMainAgentTools(id),
+      );
+    } catch {
+      setExecutiveAccess(null);
+    }
   }
 
   async function refreshWorkers(projectId?: string) {
@@ -244,6 +272,12 @@ export default function Dashboard() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (view === "dashboard" && project?.id) {
+      void refreshExecutiveAccess(project.id);
+    }
+  }, [view, project?.id]);
 
   useEffect(() => {
     setLiveResponses([]);
@@ -641,7 +675,32 @@ export default function Dashboard() {
     }
   }
 
-  const activeTools = tools.filter((tool) => tool.enabled).length;
+  const globallyEnabledTools =
+    tools.filter((tool) => tool.enabled).length;
+  const activeTools = executiveAccess?.count ?? 0;
+  const executiveGateCounts = {
+    exec:
+      executiveAccess?.tools.filter(
+        (tool) => tool.approval_gate === "exec",
+      ).length ?? 0,
+    net:
+      executiveAccess?.tools.filter(
+        (tool) => tool.approval_gate === "net",
+      ).length ?? 0,
+    hw:
+      executiveAccess?.tools.filter(
+        (tool) => tool.approval_gate === "hw",
+      ).length ?? 0,
+    delete:
+      executiveAccess?.tools.filter(
+        (tool) => tool.approval_gate === "delete",
+      ).length ?? 0,
+  };
+  const safeToolCount =
+    executiveAccess?.tools.filter(
+      (tool) => !tool.approval_gate,
+    ).length ?? 0;
+
   const providerLabel = useMemo(() => {
     if (!agent) return "NO AGENT";
     return (
@@ -923,7 +982,7 @@ export default function Dashboard() {
                 icon={<Wrench />}
                 label="Tools"
                 value={activeTools}
-                detail={`${tools.length} REGISTERED`}
+                detail={`${globallyEnabledTools} RUNTIME ENABLED`}
               />
               <Telemetry
                 icon={<ShieldCheck />}
@@ -1076,6 +1135,17 @@ export default function Dashboard() {
                   <b>AGENT MAN</b>
                   <span>EXECUTIVE STATUS</span>
                   <b>{mainConfig ? "ONLINE" : "SETUP REQUIRED"}</b>
+                  <span>EXECUTIVE TOOLS</span>
+                  <b>
+                    {executiveAccess
+                      ? executiveAccess.count +
+                        " EFFECTIVE / " +
+                        globallyEnabledTools +
+                        " ENABLED"
+                      : "VERIFYING..."}
+                  </b>
+                  <span>SAFE AUTO TOOLS</span>
+                  <b>{safeToolCount} READY WITHOUT RUN APPROVAL</b>
                   <span>ACTIVE WORKER</span>
                   <b>
                     {activeWorker
@@ -1094,69 +1164,147 @@ export default function Dashboard() {
                   </b>
                 </div>
 
+                <div className="missionGateLegend">
+                  <span>
+                    Tool assignment controls what Agent Man can see.
+                  </span>
+                  <span>
+                    Run approval arms risky actions for this mission.
+                  </span>
+                </div>
+
                 <div className="permissionReadout">
                   <button
                     className={
-                      allowTerminal
-                        ? "permissionChip active"
-                        : "permissionChip"
+                      "permissionChip " +
+                      (executiveGateCounts.exec > 0
+                        ? "available "
+                        : "") +
+                      (allowTerminal ? "active" : "")
                     }
                     onClick={() =>
                       setAllowTerminal((value) => !value)
                     }
+                    disabled={
+                      busy ||
+                      executiveGateCounts.exec === 0
+                    }
+                    title={
+                      executiveGateCounts.exec +
+                      " assigned Executive tools require terminal.execute approval"
+                    }
                   >
                     <TerminalSquare size={13} />
-                    EXEC
+                    <span>
+                      EXEC
+                      <small>
+                        {executiveGateCounts.exec} TOOL
+                        {executiveGateCounts.exec === 1 ? "" : "S"} ·{" "}
+                        {allowTerminal ? "ARMED" : "ASK"}
+                      </small>
+                    </span>
                   </button>
                   <button
                     className={
-                      allowNetwork
-                        ? "permissionChip active"
-                        : "permissionChip"
+                      "permissionChip " +
+                      (executiveGateCounts.net > 0
+                        ? "available "
+                        : "") +
+                      (allowNetwork ? "active" : "")
                     }
                     onClick={() =>
                       setAllowNetwork((value) => !value)
                     }
-                    title="Allow public internet access for this run"
+                    disabled={
+                      busy ||
+                      executiveGateCounts.net === 0
+                    }
+                    title={
+                      executiveGateCounts.net +
+                      " assigned Executive tools require network.internet approval"
+                    }
                   >
                     <Globe2 size={13} />
-                    NET
+                    <span>
+                      NET
+                      <small>
+                        {executiveGateCounts.net} TOOL
+                        {executiveGateCounts.net === 1 ? "" : "S"} ·{" "}
+                        {allowNetwork ? "ARMED" : "ASK"}
+                      </small>
+                    </span>
                   </button>
                   <button
                     className={
-                      allowHardware
-                        ? "permissionChip active"
-                        : "permissionChip"
+                      "permissionChip " +
+                      (executiveGateCounts.hw > 0
+                        ? "available "
+                        : "") +
+                      (allowHardware ? "active" : "")
                     }
                     onClick={() =>
                       setAllowHardware((value) => !value)
                     }
-                    title="Allow serial/COM hardware access for this run"
+                    disabled={
+                      busy ||
+                      executiveGateCounts.hw === 0
+                    }
+                    title={
+                      executiveGateCounts.hw +
+                      " assigned Executive tools require hardware.serial approval"
+                    }
                   >
                     <Cpu size={13} />
-                    HW
+                    <span>
+                      HW
+                      <small>
+                        {executiveGateCounts.hw} TOOL
+                        {executiveGateCounts.hw === 1 ? "" : "S"} ·{" "}
+                        {allowHardware ? "ARMED" : "ASK"}
+                      </small>
+                    </span>
                   </button>
                   <button
                     className={
-                      allowDelete
-                        ? "permissionChip danger active"
-                        : "permissionChip danger"
+                      "permissionChip danger " +
+                      (executiveGateCounts.delete > 0
+                        ? "available "
+                        : "") +
+                      (allowDelete ? "active" : "")
                     }
                     onClick={() =>
                       setAllowDelete((value) => !value)
                     }
+                    disabled={
+                      busy ||
+                      executiveGateCounts.delete === 0
+                    }
+                    title={
+                      executiveGateCounts.delete +
+                      " assigned Executive tools require project.files.delete approval"
+                    }
                   >
                     <Wrench size={13} />
-                    FILE DEL
+                    <span>
+                      FILE DEL
+                      <small>
+                        {executiveGateCounts.delete} TOOL
+                        {executiveGateCounts.delete === 1 ? "" : "S"} ·{" "}
+                        {allowDelete ? "ARMED" : "ASK"}
+                      </small>
+                    </span>
                   </button>
                   <button
                     className="permissionChip danger"
                     onClick={() => setDeleteDialog(true)}
                     disabled={!agent || busy}
-                    title="Delete selected agent"
+                    title="Delete selected worker agent"
                   >
                     <Trash2 size={13} />
-                    AGENT DEL
+                    <span>
+                      AGENT DEL
+                      <small>WORKER MANAGEMENT</small>
+                    </span>
                   </button>
                 </div>
               </div>

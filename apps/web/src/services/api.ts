@@ -129,6 +129,8 @@ export type EffectiveToolAccess = {
     category: string;
     risk: string;
     description: string;
+    approval_gate: "exec" | "net" | "hw" | "delete" | null;
+    permission: string | null;
   }>;
 };
 

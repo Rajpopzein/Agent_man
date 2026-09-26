@@ -689,9 +689,10 @@ def test_health_reports_current_runtime_revision():
     assert response.status_code == 200
     body = response.json()
     assert body["runtime"] == "agent-man"
-    assert body["api_revision"] == "voice-elevenlabs-v1"
+    assert body["api_revision"] == "mission-control-v2"
     assert body["features"]["executive_tool_assignment_set"] is True
     assert body["features"]["elevenlabs_voice"] is True
+    assert body["features"]["mission_control_effective_access"] is True
 
 
 def test_exact_bulk_set_route_is_registered():
@@ -995,3 +996,44 @@ def test_executive_emits_live_tool_activity(monkeypatch):
         "completed",
     ]
     assert activity[0]["message"] == "Running list_files"
+
+
+
+def test_effective_executive_tools_report_mission_control_gates():
+    project, _workers = _setup()
+
+    response = client.get(
+        "/api/tools/main-agent/" + project["id"] + "/effective"
+    )
+    assert response.status_code == 200
+    tools = {
+        item["name"]: item
+        for item in response.json()["tools"]
+    }
+
+    assert tools["read_file"]["approval_gate"] is None
+    assert tools["read_file"]["permission"] is None
+
+    assert tools["run_command"]["approval_gate"] == "exec"
+    assert (
+        tools["run_command"]["permission"]
+        == "terminal.execute"
+    )
+
+    assert tools["http_get"]["approval_gate"] == "net"
+    assert (
+        tools["http_get"]["permission"]
+        == "network.internet"
+    )
+
+    assert tools["serial_open"]["approval_gate"] == "hw"
+    assert (
+        tools["serial_open"]["permission"]
+        == "hardware.serial"
+    )
+
+    assert tools["delete_path"]["approval_gate"] == "delete"
+    assert (
+        tools["delete_path"]["permission"]
+        == "project.files.delete"
+    )

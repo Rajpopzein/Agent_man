@@ -43,6 +43,7 @@ def health():
             "executive_effective_tools": True,
             "serial_device_broker": True,
             "elevenlabs_voice": True,
+            "mission_control_effective_access": True,
         },
     }
 

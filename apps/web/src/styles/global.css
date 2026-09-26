@@ -185,6 +185,46 @@ button:disabled{cursor:not-allowed}
 .permissionChip{border:1px solid rgba(99,230,255,.15);background:rgba(3,14,22,.58);color:#628894;padding:9px 7px;display:flex;align-items:center;justify-content:center;gap:6px;font-family:var(--mono);font-size:8px;letter-spacing:.7px}
 .permissionChip.active{color:var(--teal);border-color:rgba(79,255,195,.42);background:rgba(13,77,59,.15);box-shadow:inset 0 0 16px rgba(79,255,195,.04)}
 .permissionChip.danger.active{color:var(--red);border-color:rgba(255,100,116,.45);background:rgba(96,25,34,.15)}
+.permissionChip.available:not(.active){
+  color:#86adba;
+  border-color:rgba(99,230,255,.28);
+  background:rgba(7,34,45,.38)
+}
+.permissionChip:disabled{
+  opacity:.34;
+  cursor:not-allowed
+}
+.permissionChip>span{
+  display:grid;
+  gap:2px;
+  text-align:left
+}
+.permissionChip>span>small{
+  display:block;
+  font-size:5px;
+  letter-spacing:.45px;
+  color:#557984;
+  white-space:nowrap
+}
+.permissionChip.active>span>small{
+  color:#77bda9
+}
+.permissionChip.danger.active>span>small{
+  color:#c97d88
+}
+.missionGateLegend{
+  display:grid;
+  gap:3px;
+  padding:8px 3px 9px;
+  font-family:var(--mono);
+  font-size:6px;
+  line-height:1.45;
+  letter-spacing:.45px;
+  color:#4d727e
+}
+.missionGateLegend span:first-child{
+  color:#739ba6
+}
 
 .hudCommandPanel{position:relative;border:1px solid rgba(99,230,255,.14);background:linear-gradient(180deg,rgba(5,22,32,.78),rgba(2,10,16,.9));padding:14px;clip-path:polygon(13px 0,100% 0,100% calc(100% - 13px),calc(100% - 13px) 100%,0 100%,0 13px)}
 .hudCommandPanel:before{content:"";position:absolute;left:13px;top:0;width:85px;height:1px;background:var(--cyan);box-shadow:0 0 9px var(--cyan)}
