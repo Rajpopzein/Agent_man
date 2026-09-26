@@ -367,6 +367,21 @@ export default function Dashboard() {
     await runDirective(prompt);
   }
 
+  function openMainAgentDialog() {
+    const connection =
+      connections.find(
+        (item) => item.id === mainConfig?.connection_id,
+      ) || connections[0];
+
+    setMainConnectionId(connection?.id || "");
+    setMainModel(
+      mainConfig?.model ||
+        connection?.default_model ||
+        "",
+    );
+    setMainAgentDialog(true);
+  }
+
   async function saveMainAgent(event: FormEvent) {
     event.preventDefault();
     if (!project || !mainConnectionId || !mainModel.trim()) return;
@@ -604,10 +619,10 @@ export default function Dashboard() {
             <section className="telemetryStrip">
               <Telemetry
                 icon={<Bot />}
-                label="Agents"
+                label="Workers"
                 value={agents.length}
                 detail={
-                  agents.length ? "READY FOR TASKING" : "NONE CONFIGURED"
+                  agents.length ? "READY FOR DELEGATION" : "NONE CONFIGURED"
                 }
               />
               <Telemetry
@@ -633,12 +648,64 @@ export default function Dashboard() {
             <section className="coreGrid">
               <div className="hudPanel agentMatrix">
                 <PanelLabel icon={<Boxes />} label="AGENT MATRIX" />
+
+                <div className="executiveAgentCard">
+                  <div className="executiveAgentIdentity">
+                    <span className="executiveCoreGlyph">
+                      <Sparkles size={18} />
+                    </span>
+                    <div>
+                      <small>PRIMARY / EXECUTIVE</small>
+                      <strong>AGENT MAN</strong>
+                      <span>
+                        {mainConfig
+                          ? "Executive core online"
+                          : "Executive model not configured"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="executiveAgentMeta">
+                    <span>
+                      <small>PROVIDER</small>
+                      <b>
+                        {mainConfig
+                          ? connections.find(
+                              (item) =>
+                                item.id === mainConfig.connection_id,
+                            )?.name || mainConfig.provider_id
+                          : "—"}
+                      </b>
+                    </span>
+                    <span>
+                      <small>MODEL</small>
+                      <b>{mainConfig?.model || "—"}</b>
+                    </span>
+                  </div>
+
+                  <button
+                    className="executiveConfigureButton"
+                    onClick={openMainAgentDialog}
+                    disabled={!project || connections.length === 0}
+                  >
+                    <Sparkles size={14} />
+                    {mainConfig
+                      ? "Configure Executive"
+                      : "Set Executive Model"}
+                  </button>
+                </div>
+
+                <div className="workerDivider">
+                  <span>WORKER AGENTS</span>
+                  <i />
+                </div>
+
                 <div className="agentMatrixList">
                   {agents.length === 0 && (
                     <div className="hudEmpty">
                       <Bot />
-                      <strong>NO AGENTS ONLINE</strong>
-                      <span>Create an AI connection and deploy an agent.</span>
+                      <strong>NO WORKERS ONLINE</strong>
+                      <span>Create an AI connection and deploy a worker agent.</span>
                     </div>
                   )}
                   {agents.map((item, index) => {
@@ -791,22 +858,6 @@ export default function Dashboard() {
                   >
                     <Wrench size={13} />
                     FILE DEL
-                  </button>
-                  <button
-                    className={mainConfig ? "permissionChip active" : "permissionChip"}
-                    onClick={() => {
-                      const connection = connections.find(
-                        (item) => item.id === mainConfig?.connection_id,
-                      ) || connections[0];
-                      setMainConnectionId(connection?.id || "");
-                      setMainModel(mainConfig?.model || connection?.default_model || "");
-                      setMainAgentDialog(true);
-                    }}
-                    disabled={!project || connections.length === 0}
-                    title="Configure Agent Man executive model"
-                  >
-                    <Sparkles size={13} />
-                    EXEC CORE
                   </button>
                   <button
                     className="permissionChip danger"
