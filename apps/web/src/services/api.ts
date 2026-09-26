@@ -238,6 +238,63 @@ export type LLMLog = {
   created_at: string;
 };
 
+function legacyApprovalMetadata(
+  toolName: string,
+): {
+  approval_gate: "exec" | "net" | "hw" | "delete" | null;
+  permission: string | null;
+} {
+  if (toolName === "delete_path") {
+    return {
+      approval_gate: "delete",
+      permission: "project.files.delete",
+    };
+  }
+
+  if (
+    [
+      "run_command",
+      "git_commit",
+      "run_tests",
+      "run_build",
+      "lint",
+      "start_process",
+      "stop_process",
+    ].includes(toolName)
+  ) {
+    return {
+      approval_gate: "exec",
+      permission: "terminal.execute",
+    };
+  }
+
+  if (toolName === "http_get") {
+    return {
+      approval_gate: "net",
+      permission: "network.internet",
+    };
+  }
+
+  if (
+    [
+      "serial_open",
+      "serial_read",
+      "serial_write",
+    ].includes(toolName)
+  ) {
+    return {
+      approval_gate: "hw",
+      permission: "hardware.serial",
+    };
+  }
+
+  return {
+    approval_gate: null,
+    permission: null,
+  };
+}
+
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -569,6 +626,7 @@ export const api = {
           category: tool.category,
           risk: tool.risk,
           description: tool.description,
+          ...legacyApprovalMetadata(tool.name),
         }));
 
       return {
