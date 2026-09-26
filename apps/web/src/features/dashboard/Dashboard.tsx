@@ -253,7 +253,7 @@ export default function Dashboard() {
           ),
         );
         setAgent((current) =>
-          current?.id === runtimeEvent.agent_id
+          current && current.id === runtimeEvent.agent_id
             ? { ...current, state: runtimeEvent.state as string }
             : current,
         );
@@ -272,7 +272,7 @@ export default function Dashboard() {
           ),
         );
         setAgent((current) =>
-          current?.id === runtimeEvent.agent_id
+          current && current.id === runtimeEvent.agent_id
             ? { ...current, state: "assigned" }
             : current,
         );
