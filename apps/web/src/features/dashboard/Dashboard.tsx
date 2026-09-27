@@ -907,9 +907,11 @@ export default function Dashboard() {
             ? "waking"
             : wake.state === "error"
               ? "error"
-              : voice.settings.wakeEnabled
-                ? "standby"
-                : "ready";
+              : wake.state === "off"
+                ? "off"
+                : voice.settings.wakeEnabled
+                  ? "standby"
+                  : "ready";
 
   const interactionLabel =
     interactionPhase === "speaking"
@@ -922,9 +924,11 @@ export default function Dashboard() {
             ? "WAKING"
             : interactionPhase === "error"
               ? "MIC ERROR"
-              : interactionPhase === "standby"
-                ? "WAKE READY"
-                : "READY";
+              : interactionPhase === "off"
+                ? "MIC OFF"
+                : interactionPhase === "standby"
+                  ? "WAKE READY"
+                  : "READY";
 
   const latestLiveResponse =
     [...liveResponses]
@@ -1578,10 +1582,13 @@ export default function Dashboard() {
                               (wake.finalTranscript || prompt)
                           : interactionPhase === "speaking"
                             ? "Agent Man is speaking the result."
-                            : wake.errorMessage ||
-                              "Say “" +
-                                voice.settings.wakePhrase +
-                                "” to begin."}
+                            : interactionPhase === "off"
+                              ? wake.errorMessage ||
+                                "Microphone is off. Use Listen Now or re-enable Wake Mode."
+                              : wake.errorMessage ||
+                                "Say “" +
+                                  voice.settings.wakePhrase +
+                                  "” to begin."}
                     </strong>
                   </div>
                   {(interactionPhase === "listening" ||

@@ -89,3 +89,36 @@ def test_voice_conversation_hands_turn_back_to_user_after_agent_reply():
     assert 'scheduleStart("command", 220);' in command_completion
     assert 'scheduleStart("standby")' not in command_completion
 
+def test_voice_conversation_turn_times_out_and_turns_microphone_off():
+    root = Path(__file__).resolve().parents[2]
+    wake = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "audio"
+        / "useWakeWord.ts"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "CONVERSATION_IDLE_MS = 30_000" in wake
+    assert "armConversationIdleTimer()" in wake
+    assert "clearConversationIdleTimer()" in wake
+    assert "No response for 30 seconds. Microphone turned off." in wake
+    assert 'modeRef.current = "off";' in wake
+    assert 'setState("off");' in wake
+
+    # The UI must reflect the real recognition state after idle expiry.
+    assert 'wake.state === "off"' in dashboard
+    assert '"MIC OFF"' in dashboard
+    assert "Microphone is off. Use Listen Now or re-enable Wake Mode." in dashboard
+

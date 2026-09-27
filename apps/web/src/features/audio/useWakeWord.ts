@@ -54,6 +54,7 @@ type Props = {
 };
 
 const COMMAND_SILENCE_MS = 1250;
+const CONVERSATION_IDLE_MS = 30_000;
 const RESTART_DELAY_MS = 650;
 const MIN_RESTART_GAP_MS = 500;
 
@@ -246,6 +247,7 @@ export function useWakeWord({
   const commandFinalPartsRef = useRef<string[]>([]);
   const commandInterimRef = useRef("");
   const silenceTimerRef = useRef<number | null>(null);
+  const conversationIdleTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const commandSubmittedRef = useRef(false);
   const lastStartAtRef = useRef(0);
@@ -302,6 +304,44 @@ export function useWakeWord({
     }
   }, []);
 
+  const clearConversationIdleTimer = useCallback(() => {
+    if (conversationIdleTimerRef.current !== null) {
+      window.clearTimeout(conversationIdleTimerRef.current);
+      conversationIdleTimerRef.current = null;
+    }
+  }, []);
+
+  const armConversationIdleTimer = useCallback(() => {
+    if (
+      conversationIdleTimerRef.current !== null ||
+      !enabledRef.current
+    ) {
+      return;
+    }
+
+    conversationIdleTimerRef.current = window.setTimeout(() => {
+      conversationIdleTimerRef.current = null;
+
+      if (
+        !enabledRef.current ||
+        modeRef.current !== "command" ||
+        commandSubmittedRef.current
+      ) {
+        return;
+      }
+
+      modeRef.current = "off";
+      commandFinalPartsRef.current = [];
+      commandInterimRef.current = "";
+      setLiveTranscript("");
+      setErrorMessage(
+        "No response for 30 seconds. Microphone turned off.",
+      );
+      setState("off");
+      invalidateRecognition();
+    }, CONVERSATION_IDLE_MS);
+  }, [invalidateRecognition]);
+
   const scheduleStart = useCallback(
     (
       mode: "standby" | "command",
@@ -343,6 +383,7 @@ export function useWakeWord({
 
       commandSubmittedRef.current = true;
       clearTimers();
+      clearConversationIdleTimer();
       setFinalTranscript(command);
       setLiveTranscript("");
       setLastHeard(command);
@@ -367,6 +408,7 @@ export function useWakeWord({
         });
     },
     [
+      clearConversationIdleTimer,
       clearTimers,
       invalidateRecognition,
       scheduleStart,
@@ -423,6 +465,9 @@ export function useWakeWord({
         setState(
           mode === "command" ? "listening" : "standby",
         );
+        if (mode === "command") {
+          armConversationIdleTimer();
+        }
       };
 
       recognition.onresult = (event) => {
@@ -505,6 +550,7 @@ export function useWakeWord({
         ]);
 
         if (combined) {
+          clearConversationIdleTimer();
           setLiveTranscript(combined);
           setLastHeard(combined);
           armSilenceTimer();
@@ -589,7 +635,9 @@ export function useWakeWord({
       }
     },
     [
+      armConversationIdleTimer,
       armSilenceTimer,
+      clearConversationIdleTimer,
       clearTimers,
       invalidateRecognition,
       scheduleStart,
@@ -605,6 +653,7 @@ export function useWakeWord({
     enabledRef.current = false;
     modeRef.current = "off";
     clearTimers();
+    clearConversationIdleTimer();
     invalidateRecognition();
     commandFinalPartsRef.current = [];
     commandInterimRef.current = "";
@@ -612,6 +661,7 @@ export function useWakeWord({
     setLiveTranscript("");
     setState(supported ? "off" : "unsupported");
   }, [
+    clearConversationIdleTimer,
     clearTimers,
     invalidateRecognition,
     supported,
@@ -622,6 +672,7 @@ export function useWakeWord({
 
     enabledRef.current = true;
     clearTimers();
+    clearConversationIdleTimer();
     invalidateRecognition();
     modeRef.current = "off";
     setState("waking");
@@ -636,6 +687,7 @@ export function useWakeWord({
     if (!enabledRef.current) return;
     scheduleStart("command", 220);
   }, [
+    clearConversationIdleTimer,
     clearTimers,
     invalidateRecognition,
     scheduleStart,
@@ -658,6 +710,7 @@ export function useWakeWord({
 
     return () => {
       clearTimers();
+      clearConversationIdleTimer();
       invalidateRecognition();
     };
   }, [
@@ -667,6 +720,7 @@ export function useWakeWord({
     supported,
     scheduleStart,
     stop,
+    clearConversationIdleTimer,
     clearTimers,
     invalidateRecognition,
   ]);
