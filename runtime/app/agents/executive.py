@@ -9,6 +9,15 @@ from app.agents.multi_agent import run_peer_task
 from app.agents.orchestration import execute_workflow_run
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
+from app.agents.self_improvement import (
+    UPGRADE_MUTATING_TOOLS,
+    UPGRADE_VALIDATION_TOOLS,
+    find_upgrade,
+    is_self_upgrade_intent,
+    normalize_text_list,
+    parse_upgrade_command,
+    upgrade_context,
+)
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
 from app.persistence.models import (
@@ -19,6 +28,7 @@ from app.persistence.models import (
     MultiAgentParticipantRecord,
     MultiAgentTaskRecord,
     ProjectRecord,
+    SelfUpgradeProposalRecord,
     WorkflowRecord,
     WorkflowRunRecord,
 )
@@ -84,6 +94,21 @@ Available workers:
 Available workflows:
 {workflows}
 
+SELF-IMPROVEMENT STATE:
+{upgrades}
+
+Self-correction is runtime controlled. When a tool fails, inspect only the
+observable failure and recovery guidance, choose a safer revised action, and
+do not repeat an identical failing action indefinitely.
+
+If the user explicitly asks Agent Man to improve or upgrade itself, first
+produce an upgrade proposal instead of silently editing runtime code:
+{{"type":"propose_upgrade","title":"Short title","reason":"Observed limitation","changes":["Scoped change"],"validation":["Test or build"]}}
+
+Only an upgrade already approved by the user may be applied. After making the
+approved changes and successfully validating them, mark that proposal applied:
+{{"type":"mark_upgrade_applied","proposal_id":"..."}}
+
 Return exactly one JSON object and no markdown.
 
 Use an assigned runtime tool:
@@ -110,7 +135,11 @@ Rules:
   browse, inspect Git, inspect processes, inspect ports, or access serial/COM
   hardware, use a relevant runtime tool before replying.
 - If a tool attempt fails, inspect the failure and follow runtime recovery
-  guidance before giving up.
+  guidance before giving up. Prefer a different safe approach when the same
+  action has already failed.
+- Never approve your own self-upgrade proposal. Approval belongs to the user.
+- Never mark an upgrade applied until an actual scoped change and validation
+  have both succeeded.
 - Never invent a COM port, file path, process id, session id, URL, or other
   runtime identifier when a discovery/inspection tool can obtain it first.
 - Tool actions are internal instructions, never a user-facing answer. Final
@@ -318,6 +347,117 @@ def run_main_agent(
     )
     db.commit()
 
+    upgrade_command = parse_upgrade_command(message)
+    active_upgrade = None
+
+    if upgrade_command and upgrade_command[0] in {"approve", "reject"}:
+        decision, token = upgrade_command
+        proposal = find_upgrade(db, project.id, token)
+        if proposal is None:
+            text = (
+                "I could not find a unique upgrade proposal matching "
+                + token
+                + "."
+            )
+            _store_assistant_message(db, project.id, text)
+            return {"status": "error", "text": text, "steps": []}
+
+        if decision == "approve":
+            if proposal.status not in {"proposed", "approved"}:
+                text = (
+                    "Upgrade "
+                    + proposal.id
+                    + " cannot be approved from status "
+                    + proposal.status
+                    + "."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {"status": "error", "text": text, "steps": []}
+            proposal.status = "approved"
+            verb = "approved"
+        else:
+            if proposal.status == "applied":
+                text = "An applied upgrade cannot be rejected."
+                _store_assistant_message(db, project.id, text)
+                return {"status": "error", "text": text, "steps": []}
+            proposal.status = "rejected"
+            verb = "rejected"
+
+        db.commit()
+        events.emit(
+            "self_upgrade.status_changed",
+            project_id=project.id,
+            proposal_id=proposal.id,
+            status=proposal.status,
+        )
+        text = (
+            "Upgrade "
+            + proposal.id
+            + " is "
+            + verb
+            + "."
+            + (
+                " Say 'apply upgrade "
+                + proposal.id
+                + "' when you want Agent Man to execute it."
+                if proposal.status == "approved"
+                else ""
+            )
+        )
+        _store_assistant_message(db, project.id, text)
+        return {
+            "status": "completed",
+            "text": text,
+            "steps": [
+                {
+                    "type": "self_upgrade",
+                    "proposal_id": proposal.id,
+                    "status": proposal.status,
+                }
+            ],
+        }
+
+    if upgrade_command and upgrade_command[0] == "apply":
+        proposal = find_upgrade(
+            db,
+            project.id,
+            upgrade_command[1],
+        )
+        if proposal is None:
+            text = (
+                "I could not find a unique upgrade proposal matching "
+                + upgrade_command[1]
+                + "."
+            )
+            _store_assistant_message(db, project.id, text)
+            return {"status": "error", "text": text, "steps": []}
+        if proposal.status != "approved":
+            text = (
+                "Upgrade "
+                + proposal.id
+                + " is "
+                + proposal.status
+                + ", not approved. Approve it before applying it."
+            )
+            _store_assistant_message(db, project.id, text)
+            return {
+                "status": "waiting_upgrade_approval",
+                "text": text,
+                "steps": [
+                    {
+                        "type": "self_upgrade",
+                        "proposal_id": proposal.id,
+                        "status": proposal.status,
+                    }
+                ],
+            }
+        active_upgrade = proposal
+
+    upgrade_intent = (
+        is_self_upgrade_intent(message)
+        or active_upgrade is not None
+    )
+
     history = list(
         db.scalars(
             select(MainAgentMessageRecord)
@@ -362,6 +502,7 @@ def run_main_agent(
                 tool_plan=tool_plan.prompt_text(),
                 workers=worker_text,
                 workflows=workflow_text,
+                upgrades=upgrade_context(db, project.id),
             ),
         }
     ]
@@ -373,6 +514,12 @@ def run_main_agent(
     steps: list[dict] = []
     tool_corrections = 0
     format_corrections = 0
+    correction_count = 0
+    active_correction: dict | None = None
+    last_failure_signature = ""
+    repeated_failure_count = 0
+    upgrade_changed = False
+    upgrade_validated = False
 
     discovery_tool = preflight_tool(
         tool_plan,
@@ -471,6 +618,46 @@ def run_main_agent(
 
         if kind == "reply":
             text = str(action.get("message", raw)).strip()
+
+            if active_upgrade is not None and active_upgrade.status == "approved":
+                steps.append(
+                    {
+                        "type": "runtime_guard",
+                        "step": step_number,
+                        "status": "retry",
+                        "reason": "approved_upgrade_not_finalized",
+                        "proposal_id": active_upgrade.id,
+                        "change_succeeded": upgrade_changed,
+                        "validation_succeeded": upgrade_validated,
+                    }
+                )
+                messages.append({"role": "assistant", "content": raw})
+                if not upgrade_changed:
+                    instruction = (
+                        "The approved upgrade has not changed anything yet. "
+                        "Apply only the scoped approved changes using assigned tools."
+                    )
+                elif not upgrade_validated:
+                    instruction = (
+                        "The approved upgrade has changed files but is not validated. "
+                        "Run an assigned validation tool such as run_tests, run_build, "
+                        "or lint before completion."
+                    )
+                else:
+                    instruction = (
+                        "The approved upgrade is changed and validated. "
+                        "Return mark_upgrade_applied for proposal "
+                        + active_upgrade.id
+                        + " before the final reply."
+                    )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "RUNTIME UPGRADE GATE: " + instruction,
+                    }
+                )
+                continue
+
             should_force_tool = (
                 bool(allowed_tools)
                 and tool_corrections < MAX_TOOL_CORRECTIONS
@@ -533,6 +720,39 @@ def run_main_agent(
             if not isinstance(arguments, dict):
                 arguments = {}
 
+            if (
+                upgrade_intent
+                and active_upgrade is None
+                and tool_name in UPGRADE_MUTATING_TOOLS
+            ):
+                guard_step = {
+                    "type": "runtime_guard",
+                    "step": step_number,
+                    "status": "blocked",
+                    "reason": "self_upgrade_requires_approval",
+                    "tool": tool_name,
+                }
+                steps.append(guard_step)
+                events.emit(
+                    "self_upgrade.blocked",
+                    project_id=project.id,
+                    tool=tool_name,
+                    reason="approval_required",
+                )
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME UPGRADE GATE: Self-upgrade mutations are "
+                            "blocked until the user approves a proposal. Inspect "
+                            "with read-only tools if needed, then return "
+                            "propose_upgrade with scoped changes and validation."
+                        ),
+                    }
+                )
+                continue
+
             events.emit(
                 "executive.activity",
                 project_id=project.id,
@@ -570,6 +790,33 @@ def run_main_agent(
                     label=tool_name,
                     message=tool_name + " completed",
                 )
+                if active_upgrade is not None:
+                    if tool_name in UPGRADE_MUTATING_TOOLS:
+                        upgrade_changed = True
+                    if tool_name in UPGRADE_VALIDATION_TOOLS:
+                        upgrade_validated = True
+
+                if active_correction is not None:
+                    recovery_step = {
+                        "type": "self_correction",
+                        "step": step_number,
+                        "status": "recovered",
+                        "failed_tool": active_correction["failed_tool"],
+                        "recovery_tool": tool_name,
+                    }
+                    steps.append(recovery_step)
+                    events.emit(
+                        "agent.self_correction",
+                        project_id=project.id,
+                        agent_id="main-agent:" + project.id,
+                        agent_name="Agent Man",
+                        status="recovered",
+                        failed_tool=active_correction["failed_tool"],
+                        recovery_tool=tool_name,
+                    )
+                    active_correction = None
+                    last_failure_signature = ""
+                    repeated_failure_count = 0
             except ApprovalRequired as exc:
                 step = {
                     "type": "tool",
@@ -635,7 +882,53 @@ def run_main_agent(
                     message=tool_name + " failed: " + str(exc)[:240],
                 )
 
-            steps.append(step)
+                failure_signature = (
+                    tool_name
+                    + ":"
+                    + json.dumps(
+                        arguments,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                )
+                if failure_signature == last_failure_signature:
+                    repeated_failure_count += 1
+                else:
+                    last_failure_signature = failure_signature
+                    repeated_failure_count = 1
+
+                correction_count += 1
+                active_correction = {
+                    "failed_tool": tool_name,
+                    "error": str(exc),
+                    "recovery_tools": list(recovery),
+                }
+                correction_step = {
+                    "type": "self_correction",
+                    "step": step_number,
+                    "status": "replanning",
+                    "failed_tool": tool_name,
+                    "error": str(exc),
+                    "recovery_tools": list(recovery),
+                    "correction_number": correction_count,
+                    "repeated_identical_failure": repeated_failure_count,
+                }
+                steps.append(step)
+                steps.append(correction_step)
+                events.emit(
+                    "agent.self_correction",
+                    project_id=project.id,
+                    agent_id="main-agent:" + project.id,
+                    agent_name="Agent Man",
+                    status="replanning",
+                    failed_tool=tool_name,
+                    recovery_tools=list(recovery),
+                    correction_number=correction_count,
+                )
+
+            if step.get("status") != "error":
+                steps.append(step)
             messages.append({"role": "assistant", "content": raw})
             recovery_text = ""
             if step.get("status") == "error":
@@ -658,9 +951,165 @@ def run_main_agent(
                             default=str,
                         )
                         + recovery_text
+                        + (
+                            "\nSELF-CORRECTION CHECKPOINT: Do not repeat the "
+                            "identical failing action unchanged again. Choose "
+                            "a recovery prerequisite or a different safe plan."
+                            if (
+                                step.get("status") == "error"
+                                and repeated_failure_count >= 2
+                            )
+                            else ""
+                        )
                         + "\nContinue the overall objective. If the tool "
-                        "failed, inspect the error and try another safe "
+                        "failed, inspect the observable error and revise the "
                         "approach when possible."
+                    ),
+                }
+            )
+            continue
+
+        if kind == "propose_upgrade":
+            changes = normalize_text_list(action.get("changes"))
+            validation = normalize_text_list(action.get("validation"))
+            title = " ".join(str(action.get("title", "")).split())[:200]
+            reason = " ".join(str(action.get("reason", "")).split())[:4000]
+
+            if not title or not reason or not changes or not validation:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME CORRECTION: An upgrade proposal requires "
+                            "a title, reason, at least one scoped change, and at "
+                            "least one validation step."
+                        ),
+                    }
+                )
+                continue
+
+            if not upgrade_intent and correction_count < 2:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME UPGRADE GATE: Finish the user's current "
+                            "objective. A self-upgrade proposal is allowed only "
+                            "when the user asked for it or repeated runtime "
+                            "failures show a concrete limitation."
+                        ),
+                    }
+                )
+                continue
+
+            proposal = SelfUpgradeProposalRecord(
+                project_id=project.id,
+                title=title,
+                reason=reason,
+                changes_json=json.dumps(changes, ensure_ascii=False),
+                validation_json=json.dumps(validation, ensure_ascii=False),
+                status="proposed",
+            )
+            db.add(proposal)
+            db.commit()
+            db.refresh(proposal)
+            proposal_step = {
+                "type": "self_upgrade",
+                "step": step_number,
+                "proposal_id": proposal.id,
+                "status": "proposed",
+                "title": proposal.title,
+                "reason": proposal.reason,
+                "changes": changes,
+                "validation": validation,
+            }
+            steps.append(proposal_step)
+            events.emit(
+                "self_upgrade.proposed",
+                project_id=project.id,
+                proposal_id=proposal.id,
+                title=proposal.title,
+                status="proposed",
+            )
+            text = (
+                "I created self-upgrade proposal "
+                + proposal.id
+                + ": "
+                + proposal.title
+                + ". Review it, then say 'approve upgrade "
+                + proposal.id
+                + "' or 'reject upgrade "
+                + proposal.id
+                + "'. I will not modify myself until it is approved."
+            )
+            _store_assistant_message(db, project.id, text)
+            return {
+                "status": "waiting_upgrade_approval",
+                "text": text,
+                "steps": steps,
+            }
+
+        if kind == "mark_upgrade_applied":
+            proposal_id = str(action.get("proposal_id", "")).strip()
+            proposal = find_upgrade(db, project.id, proposal_id)
+            if (
+                active_upgrade is None
+                or proposal is None
+                or proposal.id != active_upgrade.id
+                or proposal.status != "approved"
+            ):
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME UPGRADE GATE: Only the active user-approved "
+                            "upgrade may be marked applied."
+                        ),
+                    }
+                )
+                continue
+            if not upgrade_changed or not upgrade_validated:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME UPGRADE GATE: Do not mark this upgrade "
+                            "applied until a scoped change and a validation tool "
+                            "have both succeeded."
+                        ),
+                    }
+                )
+                continue
+
+            proposal.status = "applied"
+            db.commit()
+            active_upgrade = proposal
+            applied_step = {
+                "type": "self_upgrade",
+                "step": step_number,
+                "proposal_id": proposal.id,
+                "status": "applied",
+            }
+            steps.append(applied_step)
+            events.emit(
+                "self_upgrade.status_changed",
+                project_id=project.id,
+                proposal_id=proposal.id,
+                status="applied",
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "UPGRADE STATE: Proposal "
+                        + proposal.id
+                        + " is now APPLIED after successful change and validation. "
+                        "Return a concise final summary."
                     ),
                 }
             )
