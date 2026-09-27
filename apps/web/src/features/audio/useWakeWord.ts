@@ -356,8 +356,14 @@ export function useWakeWord({
         .catch(() => undefined)
         .finally(() => {
           if (!enabledRef.current) return;
-          modeRef.current = "standby";
-          scheduleStart("standby");
+
+          // Keep the microphone off while the agent is processing and
+          // speaking. Once the full agent turn completes, hand control
+          // straight back to the user without requiring the wake phrase
+          // again. Wake standby is only the entry point into a conversation.
+          modeRef.current = "command";
+          setState("waking");
+          scheduleStart("command", 220);
         });
     },
     [

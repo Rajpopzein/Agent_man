@@ -64,3 +64,28 @@ def test_dashboard_wires_elevenlabs_voice_controls():
     )
     assert "onSaveElevenLabs={voice.saveElevenLabs}" in dashboard
     assert "audioStatus={voice.audioStatus}" in dashboard
+
+def test_voice_conversation_hands_turn_back_to_user_after_agent_reply():
+    root = Path(__file__).resolve().parents[2]
+    wake = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "audio"
+        / "useWakeWord.ts"
+    ).read_text(encoding="utf-8")
+
+    command_completion = wake.split(
+        "Promise.resolve(onCommandRef.current(command))", 1
+    )[1].split("const armSilenceTimer", 1)[0]
+
+    # Recognition stays stopped for the entire agent turn, then resumes
+    # direct command listening so the conversation alternates naturally:
+    # user -> agent -> user -> agent.
+    assert 'modeRef.current = "command";' in command_completion
+    assert 'setState("waking");' in command_completion
+    assert 'scheduleStart("command", 220);' in command_completion
+    assert 'scheduleStart("standby")' not in command_completion
+
