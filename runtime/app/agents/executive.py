@@ -4,8 +4,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.executor import execute_agent
-from app.agents.multi_agent import run_peer_task
+from app.agents.background_jobs import background_jobs
 from app.agents.orchestration import execute_workflow_run
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
@@ -55,11 +54,13 @@ The user talks to you, not directly to worker agents.
 You are both an executive coordinator and a direct tool-using agent.
 
 You can:
-1. use any runtime tool listed below directly;
-2. reply directly for simple conversational questions;
-3. delegate a task to one specialist worker;
-4. delegate to multiple peers only when the user explicitly asks for parallel or multi-agent work;
-5. run a saved workflow.
+1. use quick runtime tools directly;
+2. reply to the user at any time, including while workers are still running;
+3. delegate long-running work to one background specialist worker;
+4. delegate independent responsibilities to multiple background workers in parallel;
+5. report current worker status and explain what is happening now;
+6. open, close, or toggle the user's live Command Console;
+7. run a saved workflow.
 
 You are responsible for the overall objective. Use direct tools when you can
 efficiently inspect, modify, validate, or operate the project yourself. Delegate
@@ -94,6 +95,9 @@ Available workers:
 Available workflows:
 {workflows}
 
+BACKGROUND EXECUTION STATE:
+{background_jobs}
+
 SELF-IMPROVEMENT STATE:
 {upgrades}
 
@@ -117,11 +121,19 @@ Use an assigned runtime tool:
 Direct reply:
 {{"type":"reply","message":"..."}}
 
-Delegate one worker:
+Delegate one worker in the background:
 {{"type":"delegate_agent","agent_id":"...","task":"..."}}
 
-Delegate peers:
+Delegate independent work in parallel:
+{{"type":"delegate_parallel","assignments":[{{"agent_id":"...","task":"..."}},{{"agent_id":"...","task":"..."}}]}}
+
+Backward-compatible same-task parallel delegation:
 {{"type":"delegate_peers","agent_ids":["...","..."],"task":"..."}}
+
+Control the live Command Console:
+{{"type":"command_console","action":"open"}}
+{{"type":"command_console","action":"close"}}
+{{"type":"command_console","action":"toggle"}}
 
 Run workflow:
 {{"type":"run_workflow","workflow_id":"...","task":"..."}}
@@ -150,12 +162,22 @@ Rules:
 - If a tool requires approval, call it anyway; the runtime will return the
   required permission and pause safely.
 - Do not ask the user to manually choose Developer/Tester when you can select them.
-- Default to one worker at a time. Never use delegate_peers unless the user
-  explicitly asks for parallel, multi-agent, peer, swarm, simultaneous, or
-  all-agent execution. Sequential handoffs such as Developer then Tester are
-  allowed after the current worker returns.
-- Only reply with the final user-facing result when the overall objective is complete,
-  or when a required runtime permission/capability genuinely prevents progress.
+- Keep the Executive responsive. Delegate implementation, testing, builds, and
+  other long-running work to background workers instead of waiting inside the
+  Executive request.
+- Parallelize only work that is meaningfully independent. Do not intentionally
+  assign two workers to edit the same files at the same time.
+- After launching background work, do not wait for completion. Tell the user
+  what started, what each worker is doing, and that they can ask for status or
+  give another instruction immediately.
+- When the user asks for status, explain the current process using BACKGROUND
+  EXECUTION STATE and worker states. Distinguish queued, running, completed,
+  waiting approval, and failed work.
+- You may open the Command Console when the user asks to see logs/terminal
+  activity or when live execution evidence would materially help. Never expose
+  hidden reasoning; the console contains runtime events and tool/process output.
+- A background objective may still be in progress when you reply. Do not claim
+  it is complete until the relevant background jobs actually completed.
 """
 
 
@@ -294,7 +316,7 @@ def _context(project_id: str, db: Session):
     ).all()
     worker_text = "\n".join(
         (
-            f"- {a.id}: {a.name} ({a.role}) model={a.model}; "
+            f"- {a.id}: {a.name} ({a.role}) state={a.state} model={a.model}; "
             + "context="
             + (
                 " ".join(
@@ -502,6 +524,7 @@ def run_main_agent(
                 tool_plan=tool_plan.prompt_text(),
                 workers=worker_text,
                 workflows=workflow_text,
+                background_jobs=background_jobs.context_text(project.id),
                 upgrades=upgrade_context(db, project.id),
             ),
         }
@@ -790,6 +813,27 @@ def run_main_agent(
                     label=tool_name,
                     message=tool_name + " completed",
                 )
+                if tool_name in {
+                    "run_command",
+                    "run_tests",
+                    "run_build",
+                    "lint",
+                    "read_process_output",
+                }:
+                    events.emit(
+                        "runtime.console",
+                        project_id=project.id,
+                        agent_id="main-agent:" + project.id,
+                        agent_name="Agent Man",
+                        source=tool_name,
+                        status="ok",
+                        message=json.dumps(
+                            result,
+                            ensure_ascii=False,
+                            default=str,
+                        )[-8000:],
+                    )
+
                 if active_upgrade is not None:
                     if tool_name in UPGRADE_MUTATING_TOOLS:
                         upgrade_changed = True
@@ -1115,6 +1159,41 @@ def run_main_agent(
             )
             continue
 
+        if kind == "command_console":
+            console_action = str(
+                action.get("action", "toggle")
+            ).strip().lower()
+            if console_action not in {"open", "close", "toggle"}:
+                console_action = "toggle"
+            step = {
+                "type": "command_console",
+                "step": step_number,
+                "action": console_action,
+                "status": "ok",
+            }
+            steps.append(step)
+            events.emit(
+                "ui.command_console",
+                project_id=project.id,
+                agent_id="main-agent:" + project.id,
+                agent_name="Agent Man",
+                action=console_action,
+                message="Command Console " + console_action,
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "UI RESULT: Command Console action '"
+                        + console_action
+                        + "' was sent to the interface. Continue with a "
+                        "normal user-facing response or the next task action."
+                    ),
+                }
+            )
+            continue
+
         if kind == "capability_request":
             capability = str(
                 action.get("capability", "")
@@ -1169,6 +1248,8 @@ def run_main_agent(
 
         if kind == "delegate_agent":
             agent_id = str(action.get("agent_id", ""))
+            task_text = str(action.get("task", message)).strip()
+
             if agent_id not in worker_ids:
                 result = {
                     "status": "error",
@@ -1194,20 +1275,26 @@ def run_main_agent(
                     agent_name=agent.name,
                     agent_role=agent.role,
                     project_id=project.id,
-                    task=str(action.get("task", message))[:500],
+                    task=task_text[:500],
                     state="assigned",
                 )
-                bind_agent_connection(agent, db)
-                result = execute_agent(
-                    agent=agent,
-                    project=project,
-                    prompt=str(action.get("task", message)),
-                    db=db,
-                    allow_terminal=allow_terminal,
-                    allow_delete=allow_delete,
-                    allow_network=allow_network,
-                    allow_hardware=allow_hardware,
-                )
+                try:
+                    result = background_jobs.start_agent(
+                        project_id=project.id,
+                        agent_id=agent.id,
+                        agent_name=agent.name,
+                        agent_role=agent.role,
+                        task=task_text,
+                        allow_terminal=allow_terminal,
+                        allow_delete=allow_delete,
+                        allow_network=allow_network,
+                        allow_hardware=allow_hardware,
+                    )
+                except ValueError as exc:
+                    result = {
+                        "status": "error",
+                        "error": str(exc),
+                    }
 
             step = {
                 "type": kind,
@@ -1222,120 +1309,116 @@ def run_main_agent(
                 agent_id="main-agent:" + project.id,
                 agent_name="Agent Man",
                 phase="delegation",
-                status=str(result.get("status", "completed")),
+                status=str(result.get("status", "queued")),
                 label=(agent.name if agent_id in worker_ids else "worker"),
                 message=(
                     (agent.name if agent_id in worker_ids else "Worker")
-                    + " returned to Agent Man"
+                    + (
+                        " is running in background"
+                        if result.get("status") in {"queued", "running"}
+                        else " could not be started"
+                    )
                 ),
             )
 
-        elif kind == "delegate_peers":
-            if not _explicit_parallel_requested(message):
-                guard_step = {
-                    "type": "runtime_guard",
-                    "step": step_number,
-                    "status": "retry",
-                    "reason": "parallel_not_requested",
-                }
-                steps.append(guard_step)
-                events.emit(
-                    "executive.activity",
-                    project_id=project.id,
-                    agent_id="main-agent:" + project.id,
-                    agent_name="Agent Man",
-                    phase="delegation",
-                    status="blocked",
-                    label="peer_fanout",
-                    message=(
-                        "Parallel delegation blocked; selecting one worker"
-                    ),
-                )
-                messages.append(
-                    {"role": "assistant", "content": raw}
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "RUNTIME CORRECTION: The user did not request "
-                            "parallel or multi-agent execution. Choose at "
-                            "most one worker with delegate_agent, use a "
-                            "direct tool, or reply if complete."
-                        ),
-                    }
-                )
-                continue
-
-            agent_ids = [
-                str(item)
-                for item in action.get("agent_ids", [])
-                if str(item) in worker_ids
-            ]
-
-            if len(set(agent_ids)) < 2:
-                result = {
-                    "status": "error",
-                    "error": "At least two valid peers required",
-                }
+        elif kind in {"delegate_parallel", "delegate_peers"}:
+            assignments: list[tuple[str, str]] = []
+            if kind == "delegate_parallel":
+                raw_assignments = action.get("assignments") or []
+                if isinstance(raw_assignments, list):
+                    for item in raw_assignments:
+                        if not isinstance(item, dict):
+                            continue
+                        agent_id = str(item.get("agent_id", ""))
+                        task_text = str(item.get("task", "")).strip()
+                        if agent_id in worker_ids and task_text:
+                            assignments.append((agent_id, task_text))
             else:
-                task = MultiAgentTaskRecord(
-                    project_id=project.id,
-                    title="Agent Man delegated peer task",
-                    prompt=str(action.get("task", message)),
-                    status="created",
-                    max_rounds=12,
-                    current_round=0,
-                )
-                db.add(task)
-                db.flush()
+                task_text = str(action.get("task", message)).strip()
+                for item in action.get("agent_ids", []):
+                    agent_id = str(item)
+                    if agent_id in worker_ids:
+                        assignments.append((agent_id, task_text))
 
-                for position, agent_id in enumerate(
-                    dict.fromkeys(agent_ids)
-                ):
-                    db.add(
-                        MultiAgentParticipantRecord(
-                            task_id=task.id,
-                            agent_id=agent_id,
-                            position=position,
-                            status="ready",
-                            last_round=0,
+            unique: list[tuple[str, str]] = []
+            seen_agents: set[str] = set()
+            for agent_id, task_text in assignments:
+                if agent_id in seen_agents:
+                    continue
+                seen_agents.add(agent_id)
+                unique.append((agent_id, task_text))
+
+            jobs: list[dict] = []
+            errors: list[dict] = []
+            if len(unique) < 2:
+                errors.append({
+                    "error": "At least two valid independent worker assignments are required."
+                })
+            else:
+                for agent_id, task_text in unique:
+                    agent = db.get(AgentRecord, agent_id)
+                    agent.state = "assigned"
+                    db.commit()
+                    events.emit(
+                        "agent.delegated",
+                        agent_id=agent.id,
+                        agent_name=agent.name,
+                        agent_role=agent.role,
+                        project_id=project.id,
+                        task=task_text[:500],
+                        state="assigned",
+                    )
+                    try:
+                        jobs.append(
+                            background_jobs.start_agent(
+                                project_id=project.id,
+                                agent_id=agent.id,
+                                agent_name=agent.name,
+                                agent_role=agent.role,
+                                task=task_text,
+                                allow_terminal=allow_terminal,
+                                allow_delete=allow_delete,
+                                allow_network=allow_network,
+                                allow_hardware=allow_hardware,
+                            )
                         )
-                    )
-                db.commit()
+                    except ValueError as exc:
+                        errors.append({
+                            "agent_id": agent_id,
+                            "error": str(exc),
+                        })
 
-                run_peer_task(
-                    task=task,
-                    db=db,
-                    allow_terminal=allow_terminal,
-                    allow_delete=allow_delete,
-                    allow_network=allow_network,
-                    allow_hardware=allow_hardware,
-                )
-
-                finals = db.scalars(
-                    select(MultiAgentMessageRecord)
-                    .where(
-                        MultiAgentMessageRecord.task_id == task.id,
-                        MultiAgentMessageRecord.kind == "final",
-                    )
-                    .order_by(MultiAgentMessageRecord.created_at)
-                ).all()
-                result = {
-                    "status": task.status,
-                    "messages": [
-                        item.content
-                        for item in finals[-6:]
-                    ],
-                }
-
+            result = {
+                "status": (
+                    "queued"
+                    if jobs and not errors
+                    else "partial"
+                    if jobs
+                    else "error"
+                ),
+                "jobs": jobs,
+                "errors": errors,
+            }
             step = {
                 "type": kind,
                 "step": step_number,
-                "agent_ids": agent_ids,
+                "agent_ids": [item[0] for item in unique],
                 "result": result,
             }
             steps.append(step)
+            events.emit(
+                "executive.activity",
+                project_id=project.id,
+                agent_id="main-agent:" + project.id,
+                agent_name="Agent Man",
+                phase="delegation",
+                status=result["status"],
+                label="parallel_workers",
+                message=(
+                    str(len(jobs))
+                    + " workers launched in parallel; Executive remains available."
+                ),
+            )
 
         elif kind == "run_workflow":
             workflow_id = str(action.get("workflow_id", ""))
@@ -1404,9 +1487,23 @@ def run_main_agent(
                         ensure_ascii=False,
                         default=str,
                     )
-                    + "\nReassess the overall objective. Use direct tools, "
-                    "delegate again, or reply only when the objective is "
-                    "complete."
+                    + (
+                        "\nBACKGROUND DISPATCH COMPLETE. Do not wait for the "
+                        "worker result. Reply to the user now with which work "
+                        "started, the current process, and that the Executive "
+                        "remains available for status questions or new commands."
+                        if step.get("type") in {
+                            "delegate_agent",
+                            "delegate_parallel",
+                            "delegate_peers",
+                        }
+                        and str(
+                            (step.get("result") or {}).get("status", "")
+                        ) in {"queued", "running", "partial"}
+                        else
+                        "\nReassess the overall objective. Use direct tools, "
+                        "delegate again, or reply when appropriate."
+                    )
                 ),
             }
         )
