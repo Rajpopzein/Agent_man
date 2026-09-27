@@ -385,6 +385,27 @@ def execute_agent(
                 "status": "ok",
                 "result": result,
             }
+            if tool_name in {
+                "run_command",
+                "run_tests",
+                "run_build",
+                "lint",
+                "read_process_output",
+            }:
+                events.emit(
+                    "runtime.console",
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                    agent_role=agent.role,
+                    project_id=project.id,
+                    source=tool_name,
+                    status="ok",
+                    message=json.dumps(
+                        result,
+                        ensure_ascii=False,
+                        default=str,
+                    )[-8000:],
+                )
         except ApprovalRequired as exc:
             step = {
                 "turn": turn_number,
