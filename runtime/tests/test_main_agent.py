@@ -1700,3 +1700,90 @@ def test_executive_rejects_planning_only_json_instead_of_showing_it_to_user():
 
     assert action == {"type": "invalid_action"}
 
+def test_background_worker_live_progress_is_available_to_executive(monkeypatch):
+    from threading import Event
+
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    progress_ready = Event()
+    release_worker = Event()
+
+    def fake_execute_agent(*, agent, progress=None, **kwargs):
+        assert progress is not None
+        progress({
+            "phase": "tool",
+            "action": "Reading the MCP configuration.",
+            "tool": "search_files",
+            "detail": '{"query":"mcp","path":"."}',
+            "status": "running",
+        })
+        progress_ready.set()
+        assert release_worker.wait(timeout=4)
+        return {
+            "status": "completed",
+            "text": "MCP configuration inspected.",
+            "steps": [],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Inspect the MCP setup.",
+    )
+
+    assert progress_ready.wait(timeout=4)
+
+    snapshot = background_jobs.get(job["id"])
+    assert snapshot is not None
+    assert snapshot["current_phase"] == "tool"
+    assert snapshot["current_action"] == "Reading the MCP configuration."
+    assert snapshot["current_tool"] == "search_files"
+    assert '"query":"mcp"' in snapshot["current_detail"]
+
+    context = background_jobs.context_text(project["id"])
+    assert "Reading the MCP configuration." in context
+    assert "tool=search_files" in context
+    assert "phase=tool" in context
+
+    listed = client.get(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs"
+    )
+    assert listed.status_code == 200
+    item = next(
+        row for row in listed.json()
+        if row["id"] == job["id"]
+    )
+    assert item["current_action"] == "Reading the MCP configuration."
+    assert item["current_tool"] == "search_files"
+    assert item["updated_at"]
+
+    release_worker.set()
+    finished = background_jobs.wait(job["id"], timeout=5)
+    assert finished["status"] == "completed"
+
+
+def test_executive_prompt_uses_live_worker_snapshot_as_status_source():
+    root = Path(__file__).resolve().parents[2]
+    executive = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "executive.py"
+    ).read_text(encoding="utf-8")
+
+    assert "current phase, current action, current tool" in executive
+    assert "source of truth for what the worker is doing now" in executive
+    assert "instead of only repeating the original delegated task" in executive
+
