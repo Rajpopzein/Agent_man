@@ -103,6 +103,13 @@ Available workflows:
 BACKGROUND EXECUTION STATE:
 {background_jobs}
 
+For every active background worker, this state includes the original task,
+current phase, current action, current tool, latest safe runtime detail, and
+last update time. Treat this as the source of truth for what the worker is
+doing now. When the user asks what a worker is doing, answer from this live
+snapshot instead of only repeating the original delegated task. Do not invent
+progress that is not present here.
+
 SELF-IMPROVEMENT STATE:
 {upgrades}
 
