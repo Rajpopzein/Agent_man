@@ -209,6 +209,23 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type BackgroundJob = {
+  id: string;
+  project_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_role: string;
+  task: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  result_text: string;
+  step_count: number;
+  error: string;
+};
+
+
 export type RuntimeEvent = {
   id: string;
   sequence: number;
@@ -391,6 +408,12 @@ export const api = {
   mainAgentMessages: (projectId: string) =>
     request<MainAgentMessage[]>(
       "/api/main-agent/projects/" + projectId + "/messages",
+    ),
+  backgroundJobs: (projectId: string) =>
+    request<BackgroundJob[]>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/background-jobs",
     ),
   clearMainAgentMessages: (projectId: string) =>
     request<{ cleared: boolean }>(
