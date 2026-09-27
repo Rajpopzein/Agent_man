@@ -1688,3 +1688,108 @@ label{color:#6f98a8}
     max-height:230px
   }
 }
+
+/* Draggable runtime command console */
+.consoleCoreButton{
+  height:34px;border:1px solid rgba(99,230,255,.16);
+  background:rgba(4,19,28,.56);color:#648b99;
+  display:flex;align-items:center;gap:7px;padding:0 9px;
+  font-family:var(--mono);font-size:8px;letter-spacing:.8px;
+  clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)
+}
+.consoleCoreButton:hover,.consoleCoreButton.active{
+  color:var(--cyan);border-color:rgba(99,230,255,.42);
+  background:rgba(8,45,58,.48)
+}
+.consoleCoreButton b{
+  min-width:16px;height:16px;padding:0 4px;display:grid;place-items:center;
+  border:1px solid rgba(99,230,255,.2);font-size:7px;font-weight:500;
+  color:var(--teal);background:rgba(6,42,42,.32)
+}
+
+.commandConsole{
+  position:fixed;z-index:90;right:24px;top:88px;
+  width:min(720px,calc(100vw - 32px));height:min(460px,calc(100vh - 112px));
+  min-width:420px;min-height:260px;resize:both;overflow:hidden;
+  display:grid;grid-template-rows:38px minmax(0,1fr);
+  border:1px solid rgba(99,230,255,.34);
+  background:rgba(1,8,13,.97);
+  box-shadow:0 24px 80px rgba(0,0,0,.55),0 0 35px rgba(35,207,255,.08);
+  clip-path:polygon(9px 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%,0 9px)
+}
+.commandConsoleHeader{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:0 8px 0 10px;border-bottom:1px solid rgba(99,230,255,.14);
+  background:linear-gradient(90deg,rgba(11,66,82,.42),rgba(3,20,29,.82));
+  cursor:move;user-select:none;touch-action:none
+}
+.commandConsoleHeader>div:first-child{
+  display:flex;align-items:center;gap:7px;min-width:0;color:var(--cyan)
+}
+.commandConsoleHeader span{
+  font-family:var(--mono);font-size:8px;letter-spacing:1px;color:#b9edf5
+}
+.commandConsoleHeader small{
+  font-family:var(--mono);font-size:6px;letter-spacing:.8px;color:#4f7c88
+}
+.commandConsoleActions{display:flex;gap:5px}
+.commandConsoleActions button{
+  width:27px;height:26px;display:grid;place-items:center;
+  border:1px solid rgba(99,230,255,.12);background:rgba(2,13,19,.62);
+  color:#648d99
+}
+.commandConsoleActions button:hover{
+  color:#e6fbff;border-color:rgba(99,230,255,.35)
+}
+.commandConsoleBody{
+  overflow:auto;padding:7px 8px 11px;
+  font-family:var(--mono);background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(99,230,255,.012) 0,
+      rgba(99,230,255,.012) 1px,
+      transparent 1px,
+      transparent 22px
+    ),
+    rgba(0,6,10,.92)
+}
+.commandConsoleLine{
+  display:grid;grid-template-columns:74px 132px minmax(0,1fr);
+  gap:8px;align-items:start;padding:5px 3px;
+  border-bottom:1px solid rgba(99,230,255,.045);
+  font-size:7px;line-height:1.45;color:#80a6b0
+}
+.commandConsoleLine time{color:#466d79;white-space:nowrap}
+.commandConsoleLine b{
+  font-weight:500;color:#65cde3;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis
+}
+.commandConsoleLine pre{
+  margin:0;white-space:pre-wrap;overflow-wrap:anywhere;
+  font:inherit;color:#91b7c0
+}
+.commandConsoleLine.status-error b,
+.commandConsoleLine.status-failed b{color:var(--red)}
+.commandConsoleLine.status-running b,
+.commandConsoleLine.status-queued b{color:var(--amber)}
+.commandConsoleLine.status-completed b,
+.commandConsoleLine.status-success b,
+.commandConsoleLine.status-ok b{color:var(--teal)}
+.commandConsoleEmpty{
+  height:100%;display:grid;place-items:center;align-content:center;gap:8px;
+  color:#436c78;text-align:center;font-family:var(--mono);font-size:8px
+}
+.commandConsoleEmpty svg{color:#4f8491}
+
+@media(max-width:760px){
+  .consoleCoreButton span{display:none}
+  .commandConsole{
+    left:8px!important;right:8px!important;top:72px!important;
+    width:auto;min-width:0;height:min(430px,calc(100vh - 88px));
+    resize:none
+  }
+  .commandConsoleLine{
+    grid-template-columns:62px 100px minmax(0,1fr)
+  }
+}
+
