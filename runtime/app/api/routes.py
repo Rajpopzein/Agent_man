@@ -49,6 +49,9 @@ def health():
             "command_server_log": True,
             "self_correction": True,
             "self_upgrade_proposals": True,
+            "background_worker_supervisor": True,
+            "parallel_worker_execution": True,
+            "command_console": True,
         },
     }
 
