@@ -292,6 +292,22 @@ class MainAgentChatRequest(BaseModel):
     allow_hardware: bool = False
 
 
+class BackgroundJobView(BaseModel):
+    id: str
+    project_id: str
+    agent_id: str
+    agent_name: str
+    agent_role: str
+    task: str
+    status: str
+    created_at: str
+    started_at: str | None
+    completed_at: str | None
+    result_text: str
+    step_count: int
+    error: str
+
+
 class MainAgentMessageView(BaseModel):
     id: str
     role: str
