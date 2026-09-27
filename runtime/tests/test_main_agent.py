@@ -199,7 +199,7 @@ def test_main_agent_delegates_without_blocking_executive(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
+    assert body["status"] == "background"
     assert "background" in body["text"].lower()
     assert "remain available" in body["text"].lower()
     assert len(calls["jobs"]) == 1
@@ -795,7 +795,7 @@ def test_executive_can_launch_parallel_workers_without_blocking(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
+    assert body["status"] == "background"
     assert len(calls["jobs"]) == 2
     assert body["steps"][0]["type"] == "delegate_parallel"
     assert body["steps"][0]["result"]["status"] == "queued"
@@ -858,6 +858,7 @@ def test_delegate_peers_remains_backward_compatible_parallel_dispatch(monkeypatc
         },
     )
     assert response.status_code == 200
+    assert response.json()["status"] == "background"
     assert len(jobs) == 2
     assert response.json()["steps"][0]["type"] == "delegate_peers"
 
@@ -1536,4 +1537,106 @@ def test_approved_self_upgrade_requires_change_and_validation(monkeypatch):
     ).json()
     saved = next(item for item in listed if item["id"] == proposal_id)
     assert saved["status"] == "applied"
+
+def test_command_console_can_be_controlled_by_executive(monkeypatch):
+    from app.events.bus import events
+
+    project, _workers = _setup()
+    answers = iter([
+        json.dumps({
+            "type": "command_console",
+            "action": "open",
+        }),
+        json.dumps({
+            "type": "reply",
+            "message": "I opened the live Command Console.",
+        }),
+    ])
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: next(answers),
+    )
+
+    cursor = events.current_sequence()
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Open the command console so I can see logs."},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+    _, emitted = events.wait_since(
+        cursor,
+        timeout=0,
+        project_id=project["id"],
+    )
+    console = [
+        event
+        for event in emitted
+        if event["type"] == "ui.command_console"
+    ]
+    assert console
+    assert console[-1]["action"] == "open"
+
+
+def test_background_supervisor_runs_independent_workers_concurrently(monkeypatch):
+    from threading import Barrier
+
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    barrier = Barrier(2, timeout=4)
+    entered = []
+
+    def fake_execute_agent(*, agent, **kwargs):
+        entered.append(agent.id)
+        barrier.wait()
+        return {
+            "status": "completed",
+            "text": agent.name + " complete",
+            "steps": [],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    developer = workers["Developer"]
+    tester = workers["Tester"]
+
+    job_one = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Implement an independent module.",
+    )
+    job_two = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=tester["id"],
+        agent_name=tester["name"],
+        agent_role=tester["role"],
+        task="Prepare independent validation.",
+    )
+
+    first = background_jobs.wait(job_one["id"], timeout=5)
+    second = background_jobs.wait(job_two["id"], timeout=5)
+
+    assert set(entered) == {
+        developer["id"],
+        tester["id"],
+    }
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+
+    listed = client.get(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs"
+    )
+    assert listed.status_code == 200
+    listed_ids = {item["id"] for item in listed.json()}
+    assert job_one["id"] in listed_ids
+    assert job_two["id"] in listed_ids
 
