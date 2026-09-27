@@ -5,7 +5,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
-from app.agents.orchestration import execute_workflow_run
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
 from app.agents.self_improvement import (
@@ -60,7 +59,7 @@ You can:
 4. delegate independent responsibilities to multiple background workers in parallel;
 5. report current worker status and explain what is happening now;
 6. open, close, or toggle the user's live Command Console;
-7. run a saved workflow.
+7. run a saved workflow in the background.
 
 You are responsible for the overall objective. Use direct tools when you can
 efficiently inspect, modify, validate, or operate the project yourself. Delegate
@@ -1422,6 +1421,7 @@ def run_main_agent(
 
         elif kind == "run_workflow":
             workflow_id = str(action.get("workflow_id", ""))
+            task_text = str(action.get("task", message)).strip()
 
             if workflow_id not in workflow_ids:
                 result = {
@@ -1430,31 +1430,16 @@ def run_main_agent(
                 }
             else:
                 workflow = db.get(WorkflowRecord, workflow_id)
-                run = WorkflowRunRecord(
-                    workflow_id=workflow.id,
+                result = background_jobs.start_workflow(
                     project_id=project.id,
-                    status="created",
-                    current_node_id=workflow.start_node_id,
-                    input_prompt=str(action.get("task", message)),
-                    last_output="",
-                    step_count=0,
-                )
-                db.add(run)
-                db.commit()
-
-                execute_workflow_run(
-                    run=run,
-                    db=db,
+                    workflow_id=workflow.id,
+                    workflow_name=workflow.name,
+                    task=task_text,
                     allow_terminal=allow_terminal,
                     allow_delete=allow_delete,
                     allow_network=allow_network,
                     allow_hardware=allow_hardware,
                 )
-                result = {
-                    "status": run.status,
-                    "output": run.last_output,
-                    "steps": run.step_count,
-                }
 
             step = {
                 "type": kind,
@@ -1463,6 +1448,7 @@ def run_main_agent(
                 "result": result,
             }
             steps.append(step)
+
 
         else:
             step = {
@@ -1496,6 +1482,7 @@ def run_main_agent(
                             "delegate_agent",
                             "delegate_parallel",
                             "delegate_peers",
+                            "run_workflow",
                         }
                         and str(
                             (step.get("result") or {}).get("status", "")
