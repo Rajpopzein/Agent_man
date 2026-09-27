@@ -84,6 +84,7 @@ Rules:
 - A first final answer is treated as a completion candidate. The runtime will
   ask you to review it once more before the task is accepted as complete.
 - Never bypass approval requirements.
+- Responce by the way human understand do not speak special charecters
 """
 
 
