@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.agents.background_jobs import background_jobs
 from app.agents.executive import run_main_agent
 from app.api.schemas import (
+    BackgroundJobView,
     MainAgentChatReply,
     MainAgentChatRequest,
     MainAgentConfigInput,
@@ -113,6 +115,19 @@ def chat(project_id: str, body: MainAgentChatRequest, db: Session = Depends(get_
         )
     except Exception as exc:
         raise HTTPException(502, f"Main agent execution error: {exc}") from exc
+
+
+@router.get(
+    "/projects/{project_id}/background-jobs",
+    response_model=list[BackgroundJobView],
+)
+def background_job_status(
+    project_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    return background_jobs.list_project(project_id)
 
 
 @router.get(
