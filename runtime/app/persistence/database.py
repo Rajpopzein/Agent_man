@@ -12,7 +12,13 @@ def _database_url() -> str:
     path: Path = settings.data_dir / "agent-man.db"
     return f"sqlite:///{path.as_posix()}"
 
-engine = create_engine(_database_url(), connect_args={"check_same_thread": False})
+engine = create_engine(
+    _database_url(),
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30,
+    },
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 def get_session() -> Generator[Session, None, None]:
