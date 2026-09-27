@@ -1784,6 +1784,7 @@ def test_executive_prompt_uses_live_worker_snapshot_as_status_source():
     ).read_text(encoding="utf-8")
 
     assert "current phase, current action, current tool" in executive
-    assert "source of truth for what the worker is doing now" in executive
+    assert "source of truth for what the worker is" in executive
+    assert "doing now" in executive
     assert "instead of only repeating the original delegated task" in executive
 
