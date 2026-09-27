@@ -47,6 +47,8 @@ def health():
             "agent_context": True,
             "audio_output_recovery": True,
             "command_server_log": True,
+            "self_correction": True,
+            "self_upgrade_proposals": True,
         },
     }
 

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from app.api.schemas import (
     MainAgentConfigInput,
     MainAgentConfigView,
     MainAgentMessageView,
+    SelfUpgradeProposalView,
 )
 from app.persistence.database import get_session
 from app.persistence.models import (
@@ -16,9 +19,33 @@ from app.persistence.models import (
     MainAgentConfigRecord,
     MainAgentMessageRecord,
     ProjectRecord,
+    SelfUpgradeProposalRecord,
 )
 
 router = APIRouter(prefix="/api/main-agent", tags=["main-agent"])
+
+
+def _upgrade_view(row: SelfUpgradeProposalRecord) -> SelfUpgradeProposalView:
+    def decode(raw: str) -> list[str]:
+        try:
+            value = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value]
+
+    return SelfUpgradeProposalView(
+        id=row.id,
+        project_id=row.project_id,
+        title=row.title,
+        reason=row.reason,
+        changes=decode(row.changes_json),
+        validation=decode(row.validation_json),
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 @router.get("/projects/{project_id}/config")
@@ -86,6 +113,64 @@ def chat(project_id: str, body: MainAgentChatRequest, db: Session = Depends(get_
         )
     except Exception as exc:
         raise HTTPException(502, f"Main agent execution error: {exc}") from exc
+
+
+@router.get(
+    "/projects/{project_id}/upgrades",
+    response_model=list[SelfUpgradeProposalView],
+)
+def upgrades(project_id: str, db: Session = Depends(get_session)):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    rows = db.scalars(
+        select(SelfUpgradeProposalRecord)
+        .where(SelfUpgradeProposalRecord.project_id == project_id)
+        .order_by(SelfUpgradeProposalRecord.created_at.desc())
+    ).all()
+    return [_upgrade_view(row) for row in rows]
+
+
+@router.post(
+    "/projects/{project_id}/upgrades/{proposal_id}/approve",
+    response_model=SelfUpgradeProposalView,
+)
+def approve_upgrade(
+    project_id: str,
+    proposal_id: str,
+    db: Session = Depends(get_session),
+):
+    row = db.get(SelfUpgradeProposalRecord, proposal_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(404, "Upgrade proposal not found")
+    if row.status not in {"proposed", "approved"}:
+        raise HTTPException(
+            409,
+            "Only a proposed upgrade can be approved.",
+        )
+    row.status = "approved"
+    db.commit()
+    db.refresh(row)
+    return _upgrade_view(row)
+
+
+@router.post(
+    "/projects/{project_id}/upgrades/{proposal_id}/reject",
+    response_model=SelfUpgradeProposalView,
+)
+def reject_upgrade(
+    project_id: str,
+    proposal_id: str,
+    db: Session = Depends(get_session),
+):
+    row = db.get(SelfUpgradeProposalRecord, proposal_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(404, "Upgrade proposal not found")
+    if row.status == "applied":
+        raise HTTPException(409, "An applied upgrade cannot be rejected.")
+    row.status = "rejected"
+    db.commit()
+    db.refresh(row)
+    return _upgrade_view(row)
 
 
 def config_view(row):

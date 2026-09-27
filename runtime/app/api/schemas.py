@@ -305,6 +305,18 @@ class MainAgentChatReply(BaseModel):
     steps: list[dict[str, Any]]
 
 
+class SelfUpgradeProposalView(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    reason: str
+    changes: list[str]
+    validation: list[str]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class LLMLogView(BaseModel):
     id: str
     project_id: str | None
