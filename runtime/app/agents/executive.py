@@ -120,6 +120,8 @@ approved changes and successfully validating them, mark that proposal applied:
 
 Return exactly one JSON object and no markdown.
 
+Every action object must include a valid "type" field. Planning metadata may be included as extra fields, but it never replaces "type" and must never be shown as the user-facing reply.
+
 Use an assigned runtime tool:
 {{"type":"tool","tool":"TOOL_NAME","args":{{"argument":"value"}}}}
 
@@ -297,6 +299,20 @@ def _parse(raw: str):
 
     if not isinstance(action, dict):
         action = {"type": "invalid_action"}
+
+    if not str(action.get("type", "")).strip():
+        if isinstance(action.get("tool"), str) and str(action.get("tool", "")).strip():
+            action["type"] = "tool"
+        elif isinstance(action.get("assignments"), list) and action.get("assignments"):
+            action["type"] = "delegate_parallel"
+        elif isinstance(action.get("agent_id"), str) and str(action.get("task", "")).strip():
+            action["type"] = "delegate_agent"
+        elif isinstance(action.get("workflow_id"), str) and str(action.get("task", "")).strip():
+            action["type"] = "run_workflow"
+        elif isinstance(action.get("message"), str) or isinstance(action.get("content"), str):
+            action["type"] = "reply"
+        else:
+            action = {"type": "invalid_action"}
 
     text = str(
         action.get("message")
