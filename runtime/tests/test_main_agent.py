@@ -1640,3 +1640,19 @@ def test_background_supervisor_runs_independent_workers_concurrently(monkeypatch
     assert job_one["id"] in listed_ids
     assert job_two["id"] in listed_ids
 
+def test_executive_requires_simple_user_facing_language():
+    root = Path(__file__).resolve().parents[2]
+    executive = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "executive.py"
+    ).read_text(encoding="utf-8")
+
+    assert "SIMPLE LANGUAGE RULE" in executive
+    assert "short sentences and common everyday words" in executive
+    assert "Do not expose or narrate the plan" in executive
+    assert "Those fields are for runtime orchestration only." in executive
+    assert "Usually answer in 1 to 4 short sentences" in executive
+
