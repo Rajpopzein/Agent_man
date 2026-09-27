@@ -306,6 +306,11 @@ class BackgroundJobView(BaseModel):
     result_text: str
     step_count: int
     error: str
+    current_phase: str
+    current_action: str
+    current_tool: str
+    current_detail: str
+    updated_at: str
 
 
 class MainAgentMessageView(BaseModel):
