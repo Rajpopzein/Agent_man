@@ -72,6 +72,11 @@ class BackgroundJobSupervisor:
                 "result_text": "",
                 "step_count": 0,
                 "error": "",
+                "current_phase": "queued",
+                "current_action": "Waiting to start.",
+                "current_tool": "",
+                "current_detail": "",
+                "updated_at": _now(),
             }
             self._jobs[job_id] = job
             self._futures[job_id] = self._executor.submit(
@@ -129,6 +134,11 @@ class BackgroundJobSupervisor:
             "result_text": "",
             "step_count": 0,
             "error": "",
+            "current_phase": "queued",
+            "current_action": "Waiting to start.",
+            "current_tool": "",
+            "current_detail": "",
+            "updated_at": _now(),
         }
         with self._lock:
             self._jobs[job_id] = job
@@ -252,6 +262,9 @@ class BackgroundJobSupervisor:
                 status="error",
                 completed_at=_now(),
                 error=str(exc)[:2000],
+                current_phase="error",
+                current_action="Worker failed.",
+                current_detail=str(exc)[:2000],
             )
             events.emit(
                 "background_job.error",
@@ -272,8 +285,36 @@ class BackgroundJobSupervisor:
     ) -> dict[str, object]:
         with self._lock:
             job = self._jobs[job_id]
+            changes.setdefault("updated_at", _now())
             job.update(changes)
             return dict(job)
+
+    def _progress_callback(self, job_id: str):
+        def update_progress(payload: dict[str, object]) -> None:
+            updated = self._update(
+                job_id,
+                current_phase=str(payload.get("phase") or "working"),
+                current_action=str(payload.get("action") or "")[:500],
+                current_tool=str(payload.get("tool") or "")[:160],
+                current_detail=str(payload.get("detail") or "")[:2000],
+            )
+            events.emit(
+                "background_job.progress",
+                project_id=updated["project_id"],
+                job_id=updated["id"],
+                agent_id=updated["agent_id"],
+                agent_name=updated["agent_name"],
+                agent_role=updated["agent_role"],
+                status=updated["status"],
+                current_phase=updated["current_phase"],
+                current_action=updated["current_action"],
+                current_tool=updated["current_tool"],
+                current_detail=updated["current_detail"],
+                updated_at=updated["updated_at"],
+                message=updated["current_action"],
+            )
+
+        return update_progress
 
     def _run_agent(
         self,
@@ -322,6 +363,7 @@ class BackgroundJobSupervisor:
                     allow_delete=allow_delete,
                     allow_network=allow_network,
                     allow_hardware=allow_hardware,
+                    progress=self._progress_callback(job_id),
                 )
 
             status = str(result.get("status", "completed"))
@@ -341,6 +383,13 @@ class BackgroundJobSupervisor:
                 completed_at=_now(),
                 result_text=str(result.get("text", ""))[:12000],
                 step_count=len(result.get("steps", [])),
+                current_phase=terminal_status,
+                current_action=(
+                    "Finished the assigned task."
+                    if terminal_status == "completed"
+                    else "Worker stopped with status " + terminal_status + "."
+                ),
+                current_detail=str(result.get("text", ""))[:2000],
             )
             events.emit(
                 "background_job.completed",
@@ -420,12 +469,19 @@ class BackgroundJobSupervisor:
         lines: list[str] = []
         for job in jobs:
             detail = str(
-                job["result_text"]
+                job.get("current_detail")
+                or job["result_text"]
                 or job["error"]
                 or ""
             )
             if detail:
-                detail = " ".join(detail.split())[:500]
+                detail = " ".join(detail.split())[:700]
+            current_action = " ".join(
+                str(job.get("current_action") or "").split()
+            )[:500]
+            current_tool = str(
+                job.get("current_tool") or ""
+            )[:160]
             lines.append(
                 "- "
                 + str(job["id"])
@@ -437,7 +493,13 @@ class BackgroundJobSupervisor:
                 + str(job["status"])
                 + "] task="
                 + str(job["task"])[:500]
-                + (f"; latest={detail}" if detail else "")
+                + "; phase="
+                + str(job.get("current_phase") or job["status"])
+                + (f"; action={current_action}" if current_action else "")
+                + (f"; tool={current_tool}" if current_tool else "")
+                + (f"; detail={detail}" if detail else "")
+                + "; updated="
+                + str(job.get("updated_at") or job["created_at"])
             )
         return "\n".join(lines)
 
