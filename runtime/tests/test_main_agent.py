@@ -1657,3 +1657,46 @@ def test_executive_requires_simple_user_facing_language():
     assert "Those fields are for runtime orchestration only." in executive
     assert "Usually answer in 1 to 4 short sentences" in executive
 
+def test_executive_infers_tool_type_from_planning_metadata_without_leaking_json():
+    from app.agents.executive import _parse
+
+    action = _parse(
+        json.dumps({
+            "plan": ["Search the project for MCP configuration."],
+            "risk_assessment": {
+                "mitigation": "Inspect the project first.",
+            },
+            "hypothesis": "There is likely a central MCP config.",
+            "observation": "The config location is not known yet.",
+            "correction": "Search the project.",
+            "tool": "search_files",
+            "args": {
+                "query": "mcp",
+                "path": ".",
+            },
+        })
+    )
+
+    assert action["type"] == "tool"
+    assert action["tool"] == "search_files"
+    assert action["args"] == {
+        "query": "mcp",
+        "path": ".",
+    }
+
+
+def test_executive_rejects_planning_only_json_instead_of_showing_it_to_user():
+    from app.agents.executive import _parse
+
+    action = _parse(
+        json.dumps({
+            "plan": ["Inspect the project."],
+            "risk_assessment": {
+                "mitigation": "Read before changing.",
+            },
+            "hypothesis": "A config probably exists.",
+        })
+    )
+
+    assert action == {"type": "invalid_action"}
+
