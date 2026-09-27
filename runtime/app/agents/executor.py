@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Callable
 
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
@@ -41,6 +41,28 @@ def _set_agent_state(
         project_id=project_id,
         state=state,
         **payload,
+    )
+
+
+def _report_progress(
+    callback: Callable[[dict[str, Any]], None] | None,
+    *,
+    phase: str,
+    action: str,
+    tool: str = "",
+    detail: str = "",
+    status: str = "running",
+) -> None:
+    if callback is None:
+        return
+    callback(
+        {
+            "phase": phase,
+            "action": action[:500],
+            "tool": tool[:160],
+            "detail": detail[:2000],
+            "status": status,
+        }
     )
 
 
@@ -143,6 +165,7 @@ def execute_agent(
     allow_delete: bool = False,
     allow_network: bool = False,
     allow_hardware: bool = False,
+    progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
@@ -187,8 +210,20 @@ def execute_agent(
         project_id=project.id,
         prompt=prompt[:500],
     )
+    _report_progress(
+        progress,
+        phase="starting",
+        action="Started the assigned task.",
+        detail=prompt,
+    )
 
     for turn_number in range(1, MAX_TURNS + 1):
+        _report_progress(
+            progress,
+            phase="thinking",
+            action="Reviewing the next step.",
+            detail=f"Turn {turn_number}",
+        )
         try:
             raw = run_messages(agent, messages, endpoint)
         except Exception:
@@ -205,6 +240,12 @@ def execute_agent(
 
         if action_type == "capability_request":
             capability = str(action.get("capability", "")).strip().lower()
+            _report_progress(
+                progress,
+                phase="capability",
+                action="Checking a required capability.",
+                detail=capability,
+            )
             resolved = resolve_capability(
                 db,
                 agent.id,
@@ -230,6 +271,13 @@ def execute_agent(
                     state="waiting_capability",
                     source="capability",
                     capability=capability,
+                )
+                _report_progress(
+                    progress,
+                    phase="waiting_capability",
+                    action="Waiting for a required capability.",
+                    detail=capability,
+                    status="waiting_capability",
                 )
                 events.emit(
                     "agent.capability.unavailable",
@@ -278,6 +326,12 @@ def execute_agent(
 
             if not verification_pending:
                 verification_pending = True
+                _report_progress(
+                    progress,
+                    phase="verifying",
+                    action="Checking the completed work before finishing.",
+                    detail=message,
+                )
                 _set_agent_state(
                     agent=agent,
                     db=db,
@@ -337,6 +391,13 @@ def execute_agent(
                 turns=turn_number,
                 steps=len(trace),
             )
+            _report_progress(
+                progress,
+                phase="completed",
+                action="Finished and verified the assigned task.",
+                detail=message,
+                status="completed",
+            )
             return {
                 "text": message,
                 "steps": trace,
@@ -371,6 +432,18 @@ def execute_agent(
         if not isinstance(arguments, dict):
             arguments = {}
 
+        _report_progress(
+            progress,
+            phase="tool",
+            action="Using " + tool_name + ".",
+            tool=tool_name,
+            detail=json.dumps(
+                arguments,
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
         try:
             result = tools.execute(
                 name=tool_name,
@@ -386,6 +459,17 @@ def execute_agent(
                 "status": "ok",
                 "result": result,
             }
+            _report_progress(
+                progress,
+                phase="tool_result",
+                action=tool_name + " completed.",
+                tool=tool_name,
+                detail=json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
             if tool_name in {
                 "run_command",
                 "run_tests",
@@ -416,6 +500,14 @@ def execute_agent(
                 "permission": exc.permission.value,
             }
             trace.append(step)
+            _report_progress(
+                progress,
+                phase="waiting_approval",
+                action=tool_name + " needs approval.",
+                tool=tool_name,
+                detail=exc.permission.value,
+                status="waiting_approval",
+            )
             _set_agent_state(
                 agent=agent,
                 db=db,
@@ -457,6 +549,14 @@ def execute_agent(
         trace.append(step)
 
         if step["status"] == "error":
+            _report_progress(
+                progress,
+                phase="recovering",
+                action=tool_name + " failed. Trying a safer next step.",
+                tool=tool_name,
+                detail=str(step.get("error", "")),
+                status="error",
+            )
             correction_count += 1
             active_correction = {
                 "failed_tool": tool_name,
@@ -546,6 +646,13 @@ def execute_agent(
         agent_id=agent.id,
         project_id=project.id,
         reason="turn_limit",
+    )
+    _report_progress(
+        progress,
+        phase="attention",
+        action="Stopped at the worker safety limit.",
+        detail="The task needs another execution turn.",
+        status="attention",
     )
     return {
         "text": (
