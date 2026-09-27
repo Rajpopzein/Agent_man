@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path "$PSScriptRoot\.."
 $RuntimePort = 8765
-$ExpectedRevision = "self-improvement-v1"
+$ExpectedRevision = "parallel-executive-v1"
 $RuntimePidFile = Join-Path $Root ".agent-man-runtime.pid"
 
 function Get-AgentManListener {
