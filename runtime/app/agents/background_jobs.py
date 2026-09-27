@@ -240,6 +240,13 @@ class BackgroundJobSupervisor:
                 completed_at=_now(),
                 result_text=result_text[:12000],
                 step_count=step_count,
+                current_phase=terminal_status,
+                current_action=(
+                    "Workflow finished."
+                    if terminal_status == "completed"
+                    else "Workflow stopped with status " + terminal_status + "."
+                ),
+                current_detail=result_text[:2000],
             )
             events.emit(
                 "background_job.completed",
@@ -411,6 +418,9 @@ class BackgroundJobSupervisor:
                 status="error",
                 completed_at=_now(),
                 error=str(exc)[:2000],
+                current_phase="error",
+                current_action="Worker failed.",
+                current_detail=str(exc)[:2000],
             )
             try:
                 with SessionLocal() as db:
