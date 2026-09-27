@@ -4,9 +4,15 @@ from threading import RLock
 from uuid import uuid4
 
 from app.agents.executor import execute_agent
+from app.agents.orchestration import execute_workflow_run
 from app.events.bus import events
 from app.persistence.database import SessionLocal
-from app.persistence.models import AgentRecord, ProjectRecord
+from app.persistence.models import (
+    AgentRecord,
+    ProjectRecord,
+    WorkflowRecord,
+    WorkflowRunRecord,
+)
 from app.providers.connections import bind_agent_connection
 
 
@@ -92,6 +98,172 @@ class BackgroundJobSupervisor:
             message=f"{agent_name} queued in background.",
         )
         return self.get(job_id) or dict(job)
+
+
+
+    def start_workflow(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str,
+        workflow_name: str,
+        task: str,
+        allow_terminal: bool = False,
+        allow_delete: bool = False,
+        allow_network: bool = False,
+        allow_hardware: bool = False,
+    ) -> dict[str, object]:
+        job_id = str(uuid4())
+        agent_id = "workflow:" + workflow_id
+        job = {
+            "id": job_id,
+            "project_id": project_id,
+            "agent_id": agent_id,
+            "agent_name": workflow_name,
+            "agent_role": "Workflow",
+            "task": " ".join(task.split())[:4000],
+            "status": "queued",
+            "created_at": _now(),
+            "started_at": None,
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
+        }
+        with self._lock:
+            self._jobs[job_id] = job
+            self._futures[job_id] = self._executor.submit(
+                self._run_workflow,
+                job_id,
+                project_id,
+                workflow_id,
+                task,
+                allow_terminal,
+                allow_delete,
+                allow_network,
+                allow_hardware,
+            )
+
+        events.emit(
+            "background_job.queued",
+            project_id=project_id,
+            job_id=job_id,
+            agent_id=agent_id,
+            agent_name=workflow_name,
+            agent_role="Workflow",
+            status="queued",
+            task=job["task"],
+            message=f"{workflow_name} workflow queued in background.",
+        )
+        return self.get(job_id) or dict(job)
+
+    def _run_workflow(
+        self,
+        job_id: str,
+        project_id: str,
+        workflow_id: str,
+        task: str,
+        allow_terminal: bool,
+        allow_delete: bool,
+        allow_network: bool,
+        allow_hardware: bool,
+    ) -> None:
+        job = self._update(
+            job_id,
+            status="running",
+            started_at=_now(),
+        )
+        events.emit(
+            "background_job.started",
+            project_id=project_id,
+            job_id=job_id,
+            agent_id=job["agent_id"],
+            agent_name=job["agent_name"],
+            agent_role="Workflow",
+            status="running",
+            task=job["task"],
+            message=f"{job['agent_name']} workflow is running in background.",
+        )
+
+        try:
+            with SessionLocal() as db:
+                workflow = db.get(WorkflowRecord, workflow_id)
+                if workflow is None or workflow.project_id != project_id:
+                    raise ValueError("Workflow not found")
+
+                run = WorkflowRunRecord(
+                    workflow_id=workflow.id,
+                    project_id=project_id,
+                    status="created",
+                    current_node_id=workflow.start_node_id,
+                    input_prompt=task,
+                    last_output="",
+                    step_count=0,
+                )
+                db.add(run)
+                db.commit()
+
+                execute_workflow_run(
+                    run=run,
+                    db=db,
+                    allow_terminal=allow_terminal,
+                    allow_delete=allow_delete,
+                    allow_network=allow_network,
+                    allow_hardware=allow_hardware,
+                )
+
+                status = str(run.status)
+                result_text = str(run.last_output or "")
+                step_count = int(run.step_count or 0)
+
+            terminal_status = (
+                "completed"
+                if status in {
+                    "completed",
+                    "completed_with_errors",
+                }
+                else status
+            )
+            updated = self._update(
+                job_id,
+                status=terminal_status,
+                completed_at=_now(),
+                result_text=result_text[:12000],
+                step_count=step_count,
+            )
+            events.emit(
+                "background_job.completed",
+                project_id=project_id,
+                job_id=job_id,
+                agent_id=updated["agent_id"],
+                agent_name=updated["agent_name"],
+                agent_role="Workflow",
+                status=terminal_status,
+                result_text=updated["result_text"],
+                step_count=updated["step_count"],
+                message=(
+                    f"{updated['agent_name']} workflow finished: "
+                    f"{terminal_status}."
+                ),
+            )
+        except Exception as exc:
+            updated = self._update(
+                job_id,
+                status="error",
+                completed_at=_now(),
+                error=str(exc)[:2000],
+            )
+            events.emit(
+                "background_job.error",
+                project_id=project_id,
+                job_id=job_id,
+                agent_id=updated["agent_id"],
+                agent_name=updated["agent_name"],
+                agent_role="Workflow",
+                status="error",
+                error=updated["error"],
+                message=f"{updated['agent_name']} workflow failed.",
+            )
 
     def _update(
         self,
