@@ -118,3 +118,31 @@ def test_voice_conversation_turn_times_out_to_wake_word_standby():
     assert 'modeRef.current = "off";' not in idle_handler
     assert 'setState("off");' not in idle_handler
 
+def test_voice_sanitizes_markdown_json_and_special_characters_before_tts():
+    root = Path(__file__).resolve().parents[2]
+    hook = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "audio"
+        / "useAgentVoice.ts"
+    ).read_text(encoding="utf-8")
+    executive = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "executive.py"
+    ).read_text(encoding="utf-8")
+
+    assert "export function sanitizeForSpeech" in hook
+    assert "Technical details are shown on screen." in hook
+    assert 'value.replaceAll("_", " ")' in hook
+    assert '/[*_~]/g' in hook
+    assert 'const cleaned = sanitizeForSpeech(text);' in hook
+    assert "Do not narrate internal action names" in executive
+    assert "propose_upgrade" in executive
+    assert "natural conversational" in executive
+

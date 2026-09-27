@@ -69,6 +69,59 @@ const PREFERRED_VOICE_HINTS = [
   "English (United Kingdom)",
 ];
 
+
+export function sanitizeForSpeech(text: string): string {
+  let spoken = text;
+
+  // Do not read code/JSON payloads aloud. They remain visible in the UI.
+  spoken = spoken.replace(
+    /```[\s\S]*?```/g,
+    " Technical details are shown on screen. ",
+  );
+
+  // Markdown links keep the human-readable label, while raw URLs are
+  // summarized instead of spelling punctuation-heavy addresses.
+  spoken = spoken.replace(
+    /\[([^\]]+)\]\((?:https?:\/\/|mailto:)[^)]+\)/g,
+    "$1",
+  );
+  spoken = spoken.replace(
+    /(?:https?:\/\/|www\.)\S+/gi,
+    "the link shown on screen",
+  );
+
+  // Inline code should sound like normal words rather than punctuation.
+  spoken = spoken.replace(/`([^\n`]+)`/g, "$1");
+
+  // Convert snake_case identifiers into natural speech.
+  spoken = spoken.replace(
+    /\b([A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)\b/g,
+    (value) => value.replaceAll("_", " "),
+  );
+
+  // Strip Markdown structure while preserving its readable content.
+  spoken = spoken
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/^\s*[-+*]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/[*_~]/g, "");
+
+  // JSON/action punctuation and other symbols should never be pronounced.
+  spoken = spoken
+    .replace(/[{}\[\]<>|\\^]/g, " ")
+    .replace(/["“”]/g, "")
+    .replace(/\s*[:=]\s*/g, ": ")
+    .replace(/\s*\/\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return spoken;
+}
+
 function loadSettings(): VoiceSettings {
   try {
     const raw =
@@ -514,7 +567,7 @@ export function useAgentVoice() {
 
   const speakAsync = useCallback(
     async (text: string, force = false) => {
-      const cleaned = text.trim();
+      const cleaned = sanitizeForSpeech(text);
       if (!cleaned) return;
 
       if (
