@@ -138,29 +138,45 @@ def _setup():
     return project.json(), workers
 
 
-def test_main_agent_delegates_and_returns_unified_answer(monkeypatch):
+
+def test_main_agent_delegates_without_blocking_executive(monkeypatch):
     project, workers = _setup()
-    calls = {"count": 0}
+    developer = workers["Developer"]
+    calls = {"llm": 0, "jobs": []}
 
     def fake_run_messages(agent, messages, endpoint=None):
-        calls["count"] += 1
-        if calls["count"] == 1:
+        calls["llm"] += 1
+        if calls["llm"] == 1:
             return json.dumps({
                 "type": "delegate_agent",
-                "agent_id": workers["Developer"]["id"],
+                "agent_id": developer["id"],
                 "task": "Implement the requested feature and verify it.",
             })
+        assert "BACKGROUND DISPATCH COMPLETE" in messages[-1]["content"]
         return json.dumps({
             "type": "reply",
-            "message": "I delegated implementation to Developer, reviewed the result, and the feature is complete.",
+            "message": (
+                "Developer is implementing the feature in the background. "
+                "I remain available while it runs."
+            ),
         })
 
-    def fake_execute_agent(**kwargs):
-        assert kwargs["agent"].id == workers["Developer"]["id"]
+    def fake_start_agent(**kwargs):
+        calls["jobs"].append(kwargs)
         return {
-            "status": "completed",
-            "text": "Feature implemented. Tests passed.",
-            "steps": [{"tool": "run_tests", "status": "ok"}],
+            "id": "job-dev",
+            "project_id": project["id"],
+            "agent_id": developer["id"],
+            "agent_name": developer["name"],
+            "agent_role": developer["role"],
+            "task": kwargs["task"],
+            "status": "queued",
+            "created_at": "now",
+            "started_at": None,
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
         }
 
     monkeypatch.setattr(
@@ -168,8 +184,8 @@ def test_main_agent_delegates_and_returns_unified_answer(monkeypatch):
         fake_run_messages,
     )
     monkeypatch.setattr(
-        "app.agents.executive.execute_agent",
-        fake_execute_agent,
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
     )
 
     response = client.post(
@@ -184,19 +200,11 @@ def test_main_agent_delegates_and_returns_unified_answer(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
-    assert "Developer" in body["text"]
-    assert len(body["steps"]) == 1
+    assert "background" in body["text"].lower()
+    assert "remain available" in body["text"].lower()
+    assert len(calls["jobs"]) == 1
     assert body["steps"][0]["type"] == "delegate_agent"
-
-    messages = client.get(
-        "/api/main-agent/projects/" + project["id"] + "/messages"
-    )
-    assert messages.status_code == 200
-    assert [item["role"] for item in messages.json()][-2:] == [
-        "user",
-        "assistant",
-    ]
-
+    assert body["steps"][0]["result"]["status"] == "queued"
 
 def test_main_agent_can_reply_without_delegating(monkeypatch):
     project, _workers = _setup()
@@ -689,7 +697,7 @@ def test_health_reports_current_runtime_revision():
     assert response.status_code == 200
     body = response.json()
     assert body["runtime"] == "agent-man"
-    assert body["api_revision"] == "self-improvement-v1"
+    assert body["api_revision"] == "parallel-executive-v1"
     assert body["features"]["executive_tool_assignment_set"] is True
     assert body["features"]["elevenlabs_voice"] is True
     assert body["features"]["mission_control_effective_access"] is True
@@ -698,6 +706,9 @@ def test_health_reports_current_runtime_revision():
     assert body["features"]["command_server_log"] is True
     assert body["features"]["self_correction"] is True
     assert body["features"]["self_upgrade_proposals"] is True
+    assert body["features"]["background_worker_supervisor"] is True
+    assert body["features"]["parallel_worker_execution"] is True
+    assert body["features"]["command_console"] is True
 
 
 def test_exact_bulk_set_route_is_registered():
@@ -718,44 +729,49 @@ def test_exact_bulk_set_route_is_registered():
     } == {"list_files", "read_file"}
 
 
-def test_executive_blocks_peer_fanout_without_explicit_request(
-    monkeypatch,
-):
+
+def test_executive_can_launch_parallel_workers_without_blocking(monkeypatch):
     project, workers = _setup()
-    calls = {"count": 0, "peer_called": False}
+    calls = {"llm": 0, "jobs": []}
 
     def fake_run_messages(agent, messages, endpoint=None):
-        calls["count"] += 1
-        if calls["count"] == 1:
+        calls["llm"] += 1
+        if calls["llm"] == 1:
             return json.dumps({
-                "type": "delegate_peers",
-                "agent_ids": [
-                    workers["Developer"]["id"],
-                    workers["Tester"]["id"],
+                "type": "delegate_parallel",
+                "assignments": [
+                    {
+                        "agent_id": workers["Developer"]["id"],
+                        "task": "Implement the feature.",
+                    },
+                    {
+                        "agent_id": workers["Tester"]["id"],
+                        "task": "Prepare independent validation cases.",
+                    },
                 ],
-                "task": "Work on the feature together.",
             })
-        if calls["count"] == 2:
-            assert "RUNTIME CORRECTION" in messages[-1]["content"]
-            return json.dumps({
-                "type": "delegate_agent",
-                "agent_id": workers["Developer"]["id"],
-                "task": "Implement the feature.",
-            })
+        assert "BACKGROUND DISPATCH COMPLETE" in messages[-1]["content"]
         return json.dumps({
             "type": "reply",
-            "message": "Developer completed the feature.",
+            "message": "Developer and Tester are running in parallel.",
         })
 
-    def fake_peer_task(**kwargs):
-        calls["peer_called"] = True
-        raise AssertionError("peer fan-out should be blocked")
-
-    def fake_execute_agent(**kwargs):
+    def fake_start_agent(**kwargs):
+        calls["jobs"].append(kwargs)
         return {
-            "status": "completed",
-            "text": "Implemented.",
-            "steps": [],
+            "id": "job-" + kwargs["agent_id"],
+            "project_id": project["id"],
+            "agent_id": kwargs["agent_id"],
+            "agent_name": kwargs["agent_name"],
+            "agent_role": kwargs["agent_role"],
+            "task": kwargs["task"],
+            "status": "queued",
+            "created_at": "now",
+            "started_at": None,
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
         }
 
     monkeypatch.setattr(
@@ -763,12 +779,8 @@ def test_executive_blocks_peer_fanout_without_explicit_request(
         fake_run_messages,
     )
     monkeypatch.setattr(
-        "app.agents.executive.run_peer_task",
-        fake_peer_task,
-    )
-    monkeypatch.setattr(
-        "app.agents.executive.execute_agent",
-        fake_execute_agent,
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
     )
 
     response = client.post(
@@ -783,45 +795,56 @@ def test_executive_blocks_peer_fanout_without_explicit_request(
     )
     assert response.status_code == 200
     body = response.json()
-    assert calls["peer_called"] is False
-    assert body["steps"][0]["type"] == "runtime_guard"
-    assert body["steps"][0]["reason"] == "parallel_not_requested"
-    assert body["steps"][1]["type"] == "delegate_agent"
+    assert body["status"] == "completed"
+    assert len(calls["jobs"]) == 2
+    assert body["steps"][0]["type"] == "delegate_parallel"
+    assert body["steps"][0]["result"]["status"] == "queued"
 
 
-def test_executive_allows_peer_fanout_when_explicitly_requested(
-    monkeypatch,
-):
+def test_delegate_peers_remains_backward_compatible_parallel_dispatch(monkeypatch):
     project, workers = _setup()
-    calls = {"count": 0, "peer_called": False}
-
-    def fake_run_messages(agent, messages, endpoint=None):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            return json.dumps({
-                "type": "delegate_peers",
-                "agent_ids": [
-                    workers["Developer"]["id"],
-                    workers["Tester"]["id"],
-                ],
-                "task": "Work in parallel.",
-            })
-        return json.dumps({
+    jobs = []
+    answers = iter([
+        json.dumps({
+            "type": "delegate_peers",
+            "agent_ids": [
+                workers["Developer"]["id"],
+                workers["Tester"]["id"],
+            ],
+            "task": "Inspect the feature in parallel.",
+        }),
+        json.dumps({
             "type": "reply",
-            "message": "Parallel work completed.",
-        })
-
-    def fake_peer_task(*, task, **kwargs):
-        calls["peer_called"] = True
-        task.status = "completed"
+            "message": "Both workers are running in background.",
+        }),
+    ])
 
     monkeypatch.setattr(
         "app.agents.executive.run_messages",
-        fake_run_messages,
+        lambda *args, **kwargs: next(answers),
     )
+
+    def fake_start_agent(**kwargs):
+        jobs.append(kwargs)
+        return {
+            "id": "job-" + kwargs["agent_id"],
+            "project_id": project["id"],
+            "agent_id": kwargs["agent_id"],
+            "agent_name": kwargs["agent_name"],
+            "agent_role": kwargs["agent_role"],
+            "task": kwargs["task"],
+            "status": "queued",
+            "created_at": "now",
+            "started_at": None,
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
+        }
+
     monkeypatch.setattr(
-        "app.agents.executive.run_peer_task",
-        fake_peer_task,
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
     )
 
     response = client.post(
@@ -835,9 +858,8 @@ def test_executive_allows_peer_fanout_when_explicitly_requested(
         },
     )
     assert response.status_code == 200
-    assert calls["peer_called"] is True
-
-
+    assert len(jobs) == 2
+    assert response.json()["steps"][0]["type"] == "delegate_peers"
 
 def test_executive_intelligently_discovers_esp32_before_opening(monkeypatch):
     project, _workers = _setup()
@@ -1045,48 +1067,62 @@ def test_effective_executive_tools_report_mission_control_gates():
 
 
 
-def test_executive_delegation_emits_connecting_then_worker_working(monkeypatch):
+
+def test_executive_delegation_emits_connecting_assigned_and_background_queue(
+    monkeypatch,
+):
     from app.events.bus import events
 
     project, workers = _setup()
     developer = workers["Developer"]
-    executive_calls = {"count": 0}
-    worker_calls = {"count": 0}
-
-    def executive_response(agent, messages, endpoint=None):
-        executive_calls["count"] += 1
-        if executive_calls["count"] == 1:
-            return json.dumps({
-                "type": "delegate_agent",
-                "agent_id": developer["id"],
-                "task": "Implement the requested change.",
-            })
-        return json.dumps({
+    answers = iter([
+        json.dumps({
+            "type": "delegate_agent",
+            "agent_id": developer["id"],
+            "task": "Implement the requested change.",
+        }),
+        json.dumps({
             "type": "reply",
-            "message": "Developer completed the requested change.",
-        })
-
-    def worker_response(agent, messages, endpoint=None):
-        worker_calls["count"] += 1
-        if worker_calls["count"] == 1:
-            return json.dumps({
-                "type": "final",
-                "verified": True,
-                "message": "Implementation is complete.",
-            })
-        return json.dumps({
-            "type": "final",
-            "verified": True,
-            "message": "Rechecked. Implementation is complete.",
-        })
+            "message": "Developer is working in the background.",
+        }),
+    ])
 
     monkeypatch.setattr(
         "app.agents.executive.run_messages",
-        executive_response,
+        lambda *args, **kwargs: next(answers),
     )
+
+    def fake_start_agent(**kwargs):
+        events.emit(
+            "background_job.queued",
+            project_id=project["id"],
+            job_id="job-1",
+            agent_id=developer["id"],
+            agent_name=developer["name"],
+            agent_role=developer["role"],
+            status="queued",
+            task=kwargs["task"],
+            message=developer["name"] + " queued in background.",
+        )
+        return {
+            "id": "job-1",
+            "project_id": project["id"],
+            "agent_id": developer["id"],
+            "agent_name": developer["name"],
+            "agent_role": developer["role"],
+            "task": kwargs["task"],
+            "status": "queued",
+            "created_at": "now",
+            "started_at": None,
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
+        }
+
     monkeypatch.setattr(
-        "app.agents.executor.run_messages",
-        worker_response,
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
     )
 
     cursor = events.current_sequence()
@@ -1102,56 +1138,32 @@ def test_executive_delegation_emits_connecting_then_worker_working(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-
     _, emitted = events.wait_since(
         cursor,
         timeout=0,
         project_id=project["id"],
     )
 
-    relevant = [
-        event
-        for event in emitted
-        if (
-            event["type"] == "executive.activity"
-            and event.get("phase") == "delegation"
-        )
-        or (
-            event["type"] == "agent.delegated"
-            and event.get("agent_id") == developer["id"]
-        )
-        or (
-            event["type"] == "agent.state.changed"
-            and event.get("agent_id") == developer["id"]
-        )
-    ]
-
     connecting_index = next(
         index
-        for index, event in enumerate(relevant)
+        for index, event in enumerate(emitted)
         if event["type"] == "executive.activity"
         and event.get("status") == "connecting"
     )
     assigned_index = next(
         index
-        for index, event in enumerate(relevant)
+        for index, event in enumerate(emitted)
         if event["type"] == "agent.delegated"
         and event.get("state") == "assigned"
     )
-    working_index = next(
+    queued_index = next(
         index
-        for index, event in enumerate(relevant)
-        if event["type"] == "agent.state.changed"
-        and event.get("state") == "working"
+        for index, event in enumerate(emitted)
+        if event["type"] == "background_job.queued"
+        and event.get("agent_id") == developer["id"]
     )
 
-    assert relevant[connecting_index]["message"] == (
-        "Connecting with " + developer["name"] + "..."
-    )
-    assert connecting_index < assigned_index < working_index
-
-
+    assert connecting_index < assigned_index < queued_index
 
 def test_agent_context_persists_and_can_be_updated():
     project, workers = _setup()
