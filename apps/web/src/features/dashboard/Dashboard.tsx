@@ -36,6 +36,9 @@ import {
 } from "lucide-react";
 
 import HudModal from "../../components/HudModal";
+import CommandConsole, {
+  CommandConsoleLine,
+} from "./CommandConsole";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
@@ -49,6 +52,7 @@ import {
   api,
   Agent,
   AIConnection,
+  BackgroundJob,
   EffectiveToolAccess,
   LLMLog,
   MainAgentConfig,
@@ -102,6 +106,175 @@ type LiveModelCall = {
   timestamp: string;
   error: string;
 };
+
+
+function consoleLineFromEvent(
+  runtimeEvent: RuntimeEvent,
+): CommandConsoleLine | null {
+  if (runtimeEvent.type === "agent.response.delta") {
+    return null;
+  }
+
+  const timestamp = String(
+    runtimeEvent.timestamp || "",
+  );
+  const status = String(
+    runtimeEvent.status ||
+      runtimeEvent.state ||
+      "info",
+  );
+
+  if (runtimeEvent.type === "runtime.console") {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.source ||
+          runtimeEvent.agent_name ||
+          "runtime",
+      ),
+      status,
+      message: String(runtimeEvent.message || ""),
+    };
+  }
+
+  if (
+    runtimeEvent.type.startsWith("background_job.")
+  ) {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.agent_name ||
+          "background worker",
+      ),
+      status,
+      message: String(
+        runtimeEvent.message ||
+          runtimeEvent.task ||
+          runtimeEvent.type,
+      ),
+    };
+  }
+
+  if (runtimeEvent.type === "executive.activity") {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source:
+        "Agent Man / " +
+        String(
+          runtimeEvent.label ||
+            runtimeEvent.phase ||
+            "executive",
+        ),
+      status,
+      message: String(
+        runtimeEvent.message || runtimeEvent.type,
+      ),
+    };
+  }
+
+  if (runtimeEvent.type === "agent.state.changed") {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.agent_name ||
+          runtimeEvent.agent_id ||
+          "worker",
+      ),
+      status,
+      message:
+        "State → " +
+        String(runtimeEvent.state || "unknown"),
+    };
+  }
+
+  if (runtimeEvent.type === "agent.delegated") {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.agent_name || "worker",
+      ),
+      status: "assigned",
+      message:
+        "Delegated: " +
+        String(runtimeEvent.task || ""),
+    };
+  }
+
+  if (
+    runtimeEvent.type === "agent.self_correction"
+  ) {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.agent_name || "agent",
+      ),
+      status,
+      message:
+        "Self-correction: " +
+        String(
+          runtimeEvent.failed_tool ||
+            runtimeEvent.recovery_tool ||
+            "replanning",
+        ),
+    };
+  }
+
+  if (
+    runtimeEvent.type === "tool.executed" ||
+    runtimeEvent.type === "multi_agent.tool.executed"
+  ) {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.tool || "tool",
+      ),
+      status,
+      message:
+        String(
+          runtimeEvent.agent_name ||
+            runtimeEvent.agent_id ||
+            "agent",
+        ) +
+        " / " +
+        String(runtimeEvent.status || "completed"),
+    };
+  }
+
+  if (
+    runtimeEvent.type === "agent.response.completed" ||
+    runtimeEvent.type === "agent.response.error"
+  ) {
+    return {
+      id: runtimeEvent.id,
+      timestamp,
+      source: String(
+        runtimeEvent.agent_name || "LLM",
+      ),
+      status:
+        runtimeEvent.type === "agent.response.error"
+          ? "error"
+          : "success",
+      message:
+        runtimeEvent.type === "agent.response.error"
+          ? String(runtimeEvent.error || "Model call failed")
+          : "Model response completed" +
+            (typeof runtimeEvent.duration_ms === "number"
+              ? " in " +
+                runtimeEvent.duration_ms +
+                " ms"
+              : ""),
+    };
+  }
+
+  return null;
+}
 
 
 const VIEW_META: Record<
@@ -169,6 +342,11 @@ export default function Dashboard() {
   const [liveModelCalls, setLiveModelCalls] =
     useState<LiveModelCall[]>([]);
   const [serverLogs, setServerLogs] = useState<LLMLog[]>([]);
+  const [backgroundJobs, setBackgroundJobs] =
+    useState<BackgroundJob[]>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleLines, setConsoleLines] =
+    useState<CommandConsoleLine[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
@@ -238,15 +416,18 @@ export default function Dashboard() {
           executiveConfig,
           effectiveAccess,
           recentServerLogs,
+          recentBackgroundJobs,
         ] = await Promise.all([
           api.agents(currentProject.id),
           api.mainAgentConfig(currentProject.id),
           api.effectiveMainAgentTools(currentProject.id),
           api.llmLogs(currentProject.id, 12),
+          api.backgroundJobs(currentProject.id),
         ]);
         setMainConfig(executiveConfig);
         setExecutiveAccess(effectiveAccess);
         setServerLogs(recentServerLogs);
+        setBackgroundJobs(recentBackgroundJobs);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -259,6 +440,7 @@ export default function Dashboard() {
         setMainConfig(null);
         setExecutiveAccess(null);
         setServerLogs([]);
+        setBackgroundJobs([]);
       }
     } catch {
       setOnline(false);
@@ -334,6 +516,7 @@ export default function Dashboard() {
     setLiveResponses([]);
     setLiveActivities([]);
     setLiveModelCalls([]);
+    setConsoleLines([]);
     setStreamConnected(false);
     if (!project) return;
 
@@ -349,6 +532,119 @@ export default function Dashboard() {
       try {
         runtimeEvent = JSON.parse(event.data) as RuntimeEvent;
       } catch {
+        return;
+      }
+
+      const consoleLine =
+        consoleLineFromEvent(runtimeEvent);
+      if (consoleLine) {
+        setConsoleLines((current) =>
+          [...current, consoleLine].slice(-300),
+        );
+      }
+
+      if (
+        runtimeEvent.type === "ui.command_console"
+      ) {
+        const action = String(
+          runtimeEvent.action || "toggle",
+        );
+        setConsoleOpen((current) =>
+          action === "open"
+            ? true
+            : action === "close"
+              ? false
+              : !current,
+        );
+        return;
+      }
+
+      if (
+        runtimeEvent.type.startsWith(
+          "background_job.",
+        ) &&
+        runtimeEvent.job_id
+      ) {
+        const jobId = String(runtimeEvent.job_id);
+        setBackgroundJobs((current) => {
+          const existing = current.find(
+            (item) => item.id === jobId,
+          );
+          const next: BackgroundJob = {
+            id: jobId,
+            project_id: String(
+              runtimeEvent.project_id ||
+                existing?.project_id ||
+                project.id,
+            ),
+            agent_id: String(
+              runtimeEvent.agent_id ||
+                existing?.agent_id ||
+                "",
+            ),
+            agent_name: String(
+              runtimeEvent.agent_name ||
+                existing?.agent_name ||
+                "Worker",
+            ),
+            agent_role: String(
+              runtimeEvent.agent_role ||
+                existing?.agent_role ||
+                "Worker",
+            ),
+            task: String(
+              runtimeEvent.task ||
+                existing?.task ||
+                "",
+            ),
+            status: String(
+              runtimeEvent.status ||
+                existing?.status ||
+                "queued",
+            ),
+            created_at:
+              existing?.created_at ||
+              String(runtimeEvent.timestamp || ""),
+            started_at:
+              runtimeEvent.type ===
+              "background_job.started"
+                ? String(
+                    runtimeEvent.timestamp || "",
+                  )
+                : existing?.started_at || null,
+            completed_at:
+              runtimeEvent.type ===
+                "background_job.completed" ||
+              runtimeEvent.type ===
+                "background_job.error"
+                ? String(
+                    runtimeEvent.timestamp || "",
+                  )
+                : existing?.completed_at || null,
+            result_text: String(
+              runtimeEvent.result_text ||
+                existing?.result_text ||
+                "",
+            ),
+            step_count:
+              typeof runtimeEvent.step_count ===
+              "number"
+                ? runtimeEvent.step_count
+                : existing?.step_count || 0,
+            error: String(
+              runtimeEvent.error ||
+                existing?.error ||
+                "",
+            ),
+          };
+          return (
+            existing
+              ? current.map((item) =>
+                  item.id === jobId ? next : item,
+                )
+              : [next, ...current]
+          ).slice(0, 40);
+        });
         return;
       }
 
@@ -873,6 +1169,15 @@ export default function Dashboard() {
     );
   }, [agent, connections]);
 
+  const activeBackgroundJobs =
+    backgroundJobs.filter((item) =>
+      ["queued", "running"].includes(item.status),
+    );
+  const completedBackgroundJobs =
+    backgroundJobs.filter(
+      (item) => item.status === "completed",
+    ).length;
+
   const activeWorkerStates = new Set([
     "assigned",
     "working",
@@ -1117,6 +1422,22 @@ export default function Dashboard() {
               <i className={interactionPhase} />
             </button>
 
+            <button
+              className={
+                consoleOpen
+                  ? "consoleCoreButton active"
+                  : "consoleCoreButton"
+              }
+              onClick={() =>
+                setConsoleOpen((current) => !current)
+              }
+              title="Command Console"
+            >
+              <TerminalSquare size={14} />
+              <span>CONSOLE</span>
+              <b>{activeBackgroundJobs.length}</b>
+            </button>
+
             <div
               className={
                 online ? "runtimeBadge online" : "runtimeBadge offline"
@@ -1177,7 +1498,12 @@ export default function Dashboard() {
                 label="Workers"
                 value={agents.length}
                 detail={
-                  agents.length ? "READY FOR DELEGATION" : "NONE CONFIGURED"
+                  activeBackgroundJobs.length
+                    ? activeBackgroundJobs.length +
+                      " BACKGROUND ACTIVE"
+                    : agents.length
+                      ? "READY FOR DELEGATION"
+                      : "NONE CONFIGURED"
                 }
               />
               <Telemetry
@@ -1373,6 +1699,24 @@ export default function Dashboard() {
                       : busy
                         ? "EXECUTIVE WORKING"
                         : "—"}
+                  </b>
+                  <span>BACKGROUND JOBS</span>
+                  <b>
+                    {activeBackgroundJobs.length
+                      ? activeBackgroundJobs.length +
+                        " ACTIVE / " +
+                        completedBackgroundJobs +
+                        " COMPLETE"
+                      : completedBackgroundJobs
+                        ? completedBackgroundJobs +
+                          " COMPLETE"
+                        : "NONE"}
+                  </b>
+                  <span>EXECUTIVE CHANNEL</span>
+                  <b>
+                    {busy
+                      ? "RESPONDING"
+                      : "AVAILABLE"}
                   </b>
                 </div>
 
@@ -1810,6 +2154,13 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      <CommandConsole
+        open={consoleOpen}
+        lines={consoleLines}
+        onClose={() => setConsoleOpen(false)}
+        onClear={() => setConsoleLines([])}
+      />
 
       <HudModal
         open={projectDialog}
