@@ -636,6 +636,34 @@ export default function Dashboard() {
                 existing?.error ||
                 "",
             ),
+            current_phase: String(
+              runtimeEvent.current_phase ||
+                existing?.current_phase ||
+                runtimeEvent.status ||
+                "queued",
+            ),
+            current_action: String(
+              runtimeEvent.current_action ||
+                runtimeEvent.message ||
+                existing?.current_action ||
+                "",
+            ),
+            current_tool: String(
+              runtimeEvent.current_tool ||
+                existing?.current_tool ||
+                "",
+            ),
+            current_detail: String(
+              runtimeEvent.current_detail ||
+                existing?.current_detail ||
+                "",
+            ),
+            updated_at: String(
+              runtimeEvent.updated_at ||
+                runtimeEvent.timestamp ||
+                existing?.updated_at ||
+                "",
+            ),
           };
           return (
             existing
@@ -1173,6 +1201,10 @@ export default function Dashboard() {
     backgroundJobs.filter((item) =>
       ["queued", "running"].includes(item.status),
     );
+  const activeBackgroundJob =
+    activeBackgroundJobs.length > 0
+      ? activeBackgroundJobs[0]
+      : null;
   const completedBackgroundJobs =
     backgroundJobs.filter(
       (item) => item.status === "completed",
@@ -1717,6 +1749,15 @@ export default function Dashboard() {
                     {busy
                       ? "RESPONDING"
                       : "AVAILABLE"}
+                  </b>
+                  <span>CURRENT PROCESS</span>
+                  <b>
+                    {activeBackgroundJob
+                      ? activeBackgroundJob.agent_name +
+                        ": " +
+                        (activeBackgroundJob.current_action ||
+                          activeBackgroundJob.current_phase)
+                      : "—"}
                   </b>
                 </div>
 
