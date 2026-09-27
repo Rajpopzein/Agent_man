@@ -9,6 +9,7 @@ from app.tools.capabilities import (
     detect_missing_capability,
     resolve_capability,
 )
+from app.tools.intelligence import recovery_guidance
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
@@ -169,6 +170,8 @@ def execute_agent(
     ]
     trace: list[dict[str, Any]] = []
     verification_pending = False
+    correction_count = 0
+    active_correction: dict[str, Any] | None = None
 
     _set_agent_state(
         agent=agent,
@@ -415,15 +418,69 @@ def execute_agent(
                 "status": "waiting_approval",
             }
         except Exception as exc:
+            recovery = recovery_guidance(
+                tool_name,
+                str(exc),
+                allowed_names,
+            )
             step = {
                 "turn": turn_number,
                 "tool": tool_name,
                 "arguments": arguments,
                 "status": "error",
                 "error": str(exc),
+                "recovery_tools": list(recovery),
             }
 
         trace.append(step)
+
+        if step["status"] == "error":
+            correction_count += 1
+            active_correction = {
+                "failed_tool": tool_name,
+                "error": step["error"],
+                "recovery_tools": step.get("recovery_tools", []),
+            }
+            correction_step = {
+                "turn": turn_number,
+                "type": "self_correction",
+                "status": "replanning",
+                "failed_tool": tool_name,
+                "error": step["error"],
+                "recovery_tools": step.get("recovery_tools", []),
+                "correction_number": correction_count,
+            }
+            trace.append(correction_step)
+            events.emit(
+                "agent.self_correction",
+                agent_id=agent.id,
+                agent_name=agent.name,
+                project_id=project.id,
+                status="replanning",
+                failed_tool=tool_name,
+                recovery_tools=step.get("recovery_tools", []),
+                correction_number=correction_count,
+            )
+        elif active_correction is not None:
+            recovery_step = {
+                "turn": turn_number,
+                "type": "self_correction",
+                "status": "recovered",
+                "failed_tool": active_correction["failed_tool"],
+                "recovery_tool": tool_name,
+            }
+            trace.append(recovery_step)
+            events.emit(
+                "agent.self_correction",
+                agent_id=agent.id,
+                agent_name=agent.name,
+                project_id=project.id,
+                status="recovered",
+                failed_tool=active_correction["failed_tool"],
+                recovery_tool=tool_name,
+            )
+            active_correction = None
+
         events.emit(
             "tool.executed",
             agent_id=agent.id,
@@ -442,8 +499,15 @@ def execute_agent(
                         ensure_ascii=False,
                         default=str,
                     )
+                    + (
+                        "\nSELF-CORRECTION CHECKPOINT: Re-plan from the "
+                        "observable failure and recovery tools. Do not keep "
+                        "repeating an unchanged failing action."
+                        if step["status"] == "error"
+                        else ""
+                    )
                     + "\nContinue the original task. If this approach failed, "
-                    "inspect the failure and try another safe approach."
+                    "revise the plan and try another safe approach."
                 ),
             }
         )
