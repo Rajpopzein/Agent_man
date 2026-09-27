@@ -330,15 +330,22 @@ export function useWakeWord({
         return;
       }
 
-      modeRef.current = "off";
+      // End only the active conversation. Wake-word standby must
+      // remain active so the user can start a new conversation hands-free.
+      modeRef.current = "standby";
       commandFinalPartsRef.current = [];
       commandInterimRef.current = "";
+      commandSubmittedRef.current = false;
       setLiveTranscript("");
       setErrorMessage(
-        "No response for 30 seconds. Microphone turned off.",
+        "Conversation idle. Waiting for the wake phrase.",
       );
-      setState("off");
+      setState("standby");
       invalidateRecognition();
+      restartTimerRef.current = window.setTimeout(() => {
+        restartTimerRef.current = null;
+        startModeRef.current?.("standby");
+      }, 220);
     }, CONVERSATION_IDLE_MS);
   }, [invalidateRecognition]);
 

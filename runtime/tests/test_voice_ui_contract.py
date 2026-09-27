@@ -89,7 +89,7 @@ def test_voice_conversation_hands_turn_back_to_user_after_agent_reply():
     assert 'scheduleStart("command", 220);' in command_completion
     assert 'scheduleStart("standby")' not in command_completion
 
-def test_voice_conversation_turn_times_out_and_turns_microphone_off():
+def test_voice_conversation_turn_times_out_to_wake_word_standby():
     root = Path(__file__).resolve().parents[2]
     wake = (
         root
@@ -100,25 +100,21 @@ def test_voice_conversation_turn_times_out_and_turns_microphone_off():
         / "audio"
         / "useWakeWord.ts"
     ).read_text(encoding="utf-8")
-    dashboard = (
-        root
-        / "apps"
-        / "web"
-        / "src"
-        / "features"
-        / "dashboard"
-        / "Dashboard.tsx"
-    ).read_text(encoding="utf-8")
 
     assert "CONVERSATION_IDLE_MS = 30_000" in wake
     assert "armConversationIdleTimer()" in wake
     assert "clearConversationIdleTimer()" in wake
-    assert "No response for 30 seconds. Microphone turned off." in wake
-    assert 'modeRef.current = "off";' in wake
-    assert 'setState("off");' in wake
+    assert "Conversation idle. Waiting for the wake phrase." in wake
 
-    # The UI must reflect the real recognition state after idle expiry.
-    assert 'wake.state === "off"' in dashboard
-    assert '"MIC OFF"' in dashboard
-    assert "Microphone is off. Use Listen Now or re-enable Wake Mode." in dashboard
+    idle_handler = wake.split(
+        "conversationIdleTimerRef.current = window.setTimeout", 1
+    )[1].split("}, CONVERSATION_IDLE_MS);", 1)[0]
+
+    # Thirty seconds of silence ends the active conversation, but it must
+    # return to wake-word standby so hands-free activation still works.
+    assert 'modeRef.current = "standby";' in idle_handler
+    assert 'setState("standby");' in idle_handler
+    assert 'startModeRef.current?.("standby");' in idle_handler
+    assert 'modeRef.current = "off";' not in idle_handler
+    assert 'setState("off");' not in idle_handler
 
