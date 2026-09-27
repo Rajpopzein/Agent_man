@@ -39,6 +39,7 @@ import HudModal from "../../components/HudModal";
 import CommandConsole, {
   CommandConsoleLine,
 } from "./CommandConsole";
+import HolographicField from "./HolographicField";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
@@ -1328,6 +1329,13 @@ export default function Dashboard() {
 
   return (
     <div className="jarvisShell">
+      <HolographicField
+        active={
+          busy ||
+          voice.speaking ||
+          activeBackgroundJobs.length > 0
+        }
+      />
       <div className="ambientGrid" aria-hidden="true" />
       <div className="scanline" aria-hidden="true" />
 
