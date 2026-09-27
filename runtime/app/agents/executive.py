@@ -730,8 +730,26 @@ def run_main_agent(
 
             text = str(action.get("message", raw)).strip()
             _store_assistant_message(db, project.id, text)
+            background_active = any(
+                step.get("type")
+                in {
+                    "delegate_agent",
+                    "delegate_parallel",
+                    "delegate_peers",
+                    "run_workflow",
+                }
+                and str(
+                    (step.get("result") or {}).get("status", "")
+                )
+                in {"queued", "running", "partial"}
+                for step in steps
+            )
             return {
-                "status": "completed",
+                "status": (
+                    "background"
+                    if background_active
+                    else "completed"
+                ),
                 "text": text,
                 "steps": steps,
             }
