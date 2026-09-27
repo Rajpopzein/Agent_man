@@ -689,13 +689,15 @@ def test_health_reports_current_runtime_revision():
     assert response.status_code == 200
     body = response.json()
     assert body["runtime"] == "agent-man"
-    assert body["api_revision"] == "audio-server-log-v1"
+    assert body["api_revision"] == "self-improvement-v1"
     assert body["features"]["executive_tool_assignment_set"] is True
     assert body["features"]["elevenlabs_voice"] is True
     assert body["features"]["mission_control_effective_access"] is True
     assert body["features"]["agent_context"] is True
     assert body["features"]["audio_output_recovery"] is True
     assert body["features"]["command_server_log"] is True
+    assert body["features"]["self_correction"] is True
+    assert body["features"]["self_upgrade_proposals"] is True
 
 
 def test_exact_bulk_set_route_is_registered():
@@ -1271,3 +1273,255 @@ def test_executive_worker_catalog_includes_agent_context(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
+
+def test_executive_self_correction_records_failure_and_recovery(monkeypatch):
+    project, _workers = _setup()
+    answers = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "read_file",
+            "args": {"path": "missing.txt"},
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "list_files",
+            "args": {"path": "."},
+        }),
+        json.dumps({
+            "type": "reply",
+            "message": "Recovered by inspecting the project instead.",
+        }),
+    ])
+
+    def fake_execute(**kwargs):
+        if kwargs["name"] == "read_file":
+            raise FileNotFoundError("missing.txt")
+        if kwargs["name"] == "list_files":
+            return [{"path": "README.md", "type": "file"}]
+        raise AssertionError(kwargs["name"])
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: next(answers),
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        fake_execute,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Investigate the project and recover if a tool fails."},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    corrections = [
+        step
+        for step in body["steps"]
+        if step.get("type") == "self_correction"
+    ]
+    assert corrections[0]["status"] == "replanning"
+    assert corrections[0]["failed_tool"] == "read_file"
+    assert corrections[-1]["status"] == "recovered"
+    assert corrections[-1]["recovery_tool"] == "list_files"
+
+
+def test_self_upgrade_blocks_mutation_until_proposal_is_approved(monkeypatch):
+    project, _workers = _setup()
+    executed = []
+    answers = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "edit_file",
+            "args": {
+                "path": "runtime/app/example.py",
+                "old_text": "old",
+                "new_text": "new",
+            },
+        }),
+        json.dumps({
+            "type": "propose_upgrade",
+            "title": "Improve recovery behavior",
+            "reason": "Repeated failures need a safer correction strategy.",
+            "changes": [
+                "Add a bounded correction checkpoint after tool failures."
+            ],
+            "validation": [
+                "Run the runtime test suite."
+            ],
+        }),
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: next(answers),
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        lambda **kwargs: executed.append(kwargs["name"]),
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Self upgrade and improve your recovery behavior."},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_upgrade_approval"
+    assert executed == []
+    assert any(
+        step.get("reason") == "self_upgrade_requires_approval"
+        for step in body["steps"]
+    )
+    proposal = body["steps"][-1]
+    assert proposal["type"] == "self_upgrade"
+    assert proposal["status"] == "proposed"
+
+
+def test_self_upgrade_proposal_can_be_approved_and_persists(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: json.dumps({
+            "type": "propose_upgrade",
+            "title": "Improve recovery behavior",
+            "reason": "A recurring runtime limitation was identified.",
+            "changes": ["Add correction telemetry."],
+            "validation": ["Run runtime tests."],
+        }),
+    )
+
+    proposed = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Please self upgrade your recovery system."},
+    )
+    assert proposed.status_code == 200
+    proposal_id = proposed.json()["steps"][-1]["proposal_id"]
+
+    blocked = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "apply upgrade " + proposal_id},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["status"] == "waiting_upgrade_approval"
+
+    approved = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "approve upgrade " + proposal_id},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["steps"][0]["status"] == "approved"
+
+    listed = client.get(
+        "/api/main-agent/projects/" + project["id"] + "/upgrades"
+    )
+    assert listed.status_code == 200
+    saved = next(
+        item for item in listed.json()
+        if item["id"] == proposal_id
+    )
+    assert saved["status"] == "approved"
+
+
+def test_approved_self_upgrade_requires_change_and_validation(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: json.dumps({
+            "type": "propose_upgrade",
+            "title": "Improve correction telemetry",
+            "reason": "Make recovery behavior observable.",
+            "changes": ["Update runtime correction telemetry."],
+            "validation": ["Run runtime tests."],
+        }),
+    )
+    proposed = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Self upgrade the correction telemetry."},
+    )
+    proposal_id = proposed.json()["steps"][-1]["proposal_id"]
+
+    approved = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "approve upgrade " + proposal_id},
+    )
+    assert approved.status_code == 200
+
+    answers = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "edit_file",
+            "args": {
+                "path": "runtime/app/example.py",
+                "old_text": "old",
+                "new_text": "new",
+            },
+        }),
+        json.dumps({
+            "type": "reply",
+            "message": "The change is complete.",
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "run_tests",
+            "args": {"command": "python -m pytest -q"},
+        }),
+        json.dumps({
+            "type": "mark_upgrade_applied",
+            "proposal_id": proposal_id,
+        }),
+        json.dumps({
+            "type": "reply",
+            "message": "The approved upgrade was changed, validated, and applied.",
+        }),
+    ])
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *args, **kwargs: next(answers),
+    )
+
+    executed = []
+
+    def fake_execute(**kwargs):
+        executed.append(kwargs["name"])
+        return {
+            "tool": kwargs["name"],
+            "exit_code": 0,
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executive.tools.execute",
+        fake_execute,
+    )
+
+    applied = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "apply upgrade " + proposal_id,
+            "allow_terminal": True,
+        },
+    )
+    assert applied.status_code == 200
+    body = applied.json()
+    assert body["status"] == "completed"
+    assert executed == ["edit_file", "run_tests"]
+    assert any(
+        step.get("reason") == "approved_upgrade_not_finalized"
+        and step.get("change_succeeded") is True
+        and step.get("validation_succeeded") is False
+        for step in body["steps"]
+    )
+    assert any(
+        step.get("type") == "self_upgrade"
+        and step.get("status") == "applied"
+        for step in body["steps"]
+    )
+
+    listed = client.get(
+        "/api/main-agent/projects/" + project["id"] + "/upgrades"
+    ).json()
+    saved = next(item for item in listed if item["id"] == proposal_id)
+    assert saved["status"] == "applied"
+
