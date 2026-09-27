@@ -223,6 +223,11 @@ export type BackgroundJob = {
   result_text: string;
   step_count: number;
   error: string;
+  current_phase: string;
+  current_action: string;
+  current_tool: string;
+  current_detail: string;
+  updated_at: string;
 };
 
 
