@@ -232,7 +232,6 @@ def execute_agent(
         phase="starting",
         action="Started the assigned task.",
         detail=prompt,
-        next_step="Plan the first implementation milestone.",
     )
 
     for turn_number in range(1, MAX_TURNS + 1):
@@ -241,7 +240,6 @@ def execute_agent(
             phase="planning",
             action="Planning the next action.",
             detail=f"Turn {turn_number}",
-            next_step="Choose the next concrete action.",
         )
         try:
             raw = run_messages(agent, messages, endpoint)
