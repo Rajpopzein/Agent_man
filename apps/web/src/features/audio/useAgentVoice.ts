@@ -169,6 +169,8 @@ export function useAgentVoice() {
   const speechQueueRef =
     useRef<Promise<void>>(Promise.resolve());
   const speechGenerationRef = useRef(0);
+  const browserSpeechCancelRef =
+    useRef<(() => void) | null>(null);
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -310,6 +312,8 @@ export function useAgentVoice() {
   }, []);
 
   const stopPlayback = useCallback(() => {
+    browserSpeechCancelRef.current?.();
+    browserSpeechCancelRef.current = null;
     window.speechSynthesis.cancel();
     audioAbortRef.current?.abort();
     audioAbortRef.current = null;
@@ -343,12 +347,16 @@ export function useAgentVoice() {
 
       const speakOnce = (
         voice: SpeechSynthesisVoice | null,
-      ) =>
-        new Promise<boolean>((resolve) => {
+      ) => {
+        const generation = speechGenerationRef.current;
+        return new Promise<boolean>((resolve) => {
           let started = false;
           let settled = false;
+          let startTimer: number | null = null;
+          let speakTimer: number | null = null;
           const utterance =
             new SpeechSynthesisUtterance(cleaned);
+
           utterance.rate = settings.rate;
           utterance.pitch = settings.pitch;
           utterance.volume = Math.max(
@@ -365,12 +373,32 @@ export function useAgentVoice() {
           const finish = (ok: boolean) => {
             if (settled) return;
             settled = true;
-            window.clearTimeout(startTimer);
+            if (startTimer !== null) {
+              window.clearTimeout(startTimer);
+            }
+            if (speakTimer !== null) {
+              window.clearTimeout(speakTimer);
+            }
+            if (
+              browserSpeechCancelRef.current === cancelThisSpeech
+            ) {
+              browserSpeechCancelRef.current = null;
+            }
             setSpeaking(false);
             resolve(ok);
           };
 
+          const cancelThisSpeech = () => {
+            finish(false);
+          };
+          browserSpeechCancelRef.current = cancelThisSpeech;
+
           utterance.onstart = () => {
+            if (generation !== speechGenerationRef.current) {
+              synth.cancel();
+              finish(false);
+              return;
+            }
             started = true;
             setSpeaking(true);
             setAudioStatus(
@@ -391,7 +419,7 @@ export function useAgentVoice() {
             finish(false);
           };
 
-          const startTimer = window.setTimeout(() => {
+          startTimer = window.setTimeout(() => {
             if (!started) {
               synth.cancel();
               setAudioStatus(
@@ -401,12 +429,20 @@ export function useAgentVoice() {
             }
           }, 1800);
 
-          window.setTimeout(() => {
+          speakTimer = window.setTimeout(() => {
+            if (
+              settled ||
+              generation !== speechGenerationRef.current
+            ) {
+              finish(false);
+              return;
+            }
             synth.cancel();
             synth.resume();
             synth.speak(utterance);
           }, 40);
         });
+      };
 
       const first = await speakOnce(selectedVoice);
       if (!first && selectedVoice) {
