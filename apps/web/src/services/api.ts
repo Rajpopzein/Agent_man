@@ -24,6 +24,30 @@ export type Project = {
   workspace_path: string;
 };
 
+export type Skill = {
+  id: string;
+  project_id: string;
+  name: string;
+  slug: string;
+  description: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Connector = {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  base_url: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  has_secret: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AgentRun = {
   agent_id: string;
   status: string;
@@ -402,6 +426,90 @@ export const api = {
     }),
   agents: (projectId: string) =>
     request<Agent[]>("/api/projects/" + projectId + "/agents"),
+  skills: (projectId: string) =>
+    request<Skill[]>("/api/extensions/projects/" + projectId + "/skills"),
+  createSkill: (
+    projectId: string,
+    payload: {
+      name: string;
+      slug: string;
+      description?: string;
+      content: string;
+    },
+  ) =>
+    request<Skill>(
+      "/api/extensions/projects/" + projectId + "/skills",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  updateSkill: (
+    skillId: string,
+    payload: Partial<{
+      name: string;
+      slug: string;
+      description: string;
+      content: string;
+    }>,
+  ) =>
+    request<Skill>("/api/extensions/skills/" + skillId, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteSkill: (skillId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/extensions/skills/" + skillId,
+      { method: "DELETE" },
+    ),
+  agentSkills: (agentId: string) =>
+    request<Skill[]>("/api/extensions/agents/" + agentId + "/skills"),
+  assignSkill: (agentId: string, skillId: string) =>
+    request<{ assigned: boolean }>(
+      "/api/extensions/agents/" + agentId + "/skills/" + skillId,
+      { method: "PUT" },
+    ),
+  unassignSkill: (agentId: string, skillId: string) =>
+    request<{ assigned: boolean }>(
+      "/api/extensions/agents/" + agentId + "/skills/" + skillId,
+      { method: "DELETE" },
+    ),
+  connectors: (projectId: string) =>
+    request<Connector[]>(
+      "/api/extensions/projects/" + projectId + "/connectors",
+    ),
+  createConnector: (
+    projectId: string,
+    payload: {
+      name: string;
+      kind: string;
+      base_url?: string;
+      config?: Record<string, unknown>;
+      api_key?: string;
+    },
+  ) =>
+    request<Connector>(
+      "/api/extensions/projects/" + projectId + "/connectors",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  updateConnector: (
+    connectorId: string,
+    payload: Partial<{
+      name: string;
+      kind: string;
+      base_url: string;
+      config: Record<string, unknown>;
+      enabled: boolean;
+      api_key: string;
+      clear_secret: boolean;
+    }>,
+  ) =>
+    request<Connector>("/api/extensions/connectors/" + connectorId, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteConnector: (connectorId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/extensions/connectors/" + connectorId,
+      { method: "DELETE" },
+    ),
   createAgent: (payload: unknown) =>
     request<Agent>("/api/agents", {
       method: "POST",
