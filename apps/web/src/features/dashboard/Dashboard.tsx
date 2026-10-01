@@ -193,26 +193,18 @@ function runtimeSpeechAnnouncement(
     );
   }
 
-  if (runtimeEvent.type === "background_job.progress") {
-    const phase = String(
-      runtimeEvent.current_phase || "",
+  if (
+    runtimeEvent.type === "executive.activity" &&
+    runtimeEvent.phase === "next_step"
+  ) {
+    return String(
+      runtimeEvent.message ||
+        name + " is moving to the next step.",
     );
-    if (
-      ![
-        "tool",
-        "verifying",
-        "recovering",
-        "waiting_capability",
-      ].includes(phase)
-    ) {
-      return null;
-    }
+  }
 
-    const action = String(
-      runtimeEvent.current_action || "",
-    ).trim();
-    if (!action) return null;
-    return name + ". " + action;
+  if (runtimeEvent.type === "background_job.progress") {
+    return null;
   }
 
   if (runtimeEvent.type === "background_job.completed") {
@@ -873,6 +865,11 @@ export default function Dashboard() {
             current_detail: String(
               runtimeEvent.current_detail ||
                 existing?.current_detail ||
+                "",
+            ),
+            current_next_step: String(
+              runtimeEvent.current_next_step ||
+                existing?.current_next_step ||
                 "",
             ),
             updated_at: String(
