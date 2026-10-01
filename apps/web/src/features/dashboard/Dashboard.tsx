@@ -774,6 +774,16 @@ export default function Dashboard() {
             ? null
             : current,
         );
+        if (runtimeEvent.type === "background_job.resumed") {
+          setRun((current) => ({
+            status: "background",
+            text: String(
+              runtimeEvent.message ||
+                "Approval received. Worker is resuming.",
+            ),
+            steps: current?.steps || [],
+          }));
+        }
       }
 
       if (
@@ -1551,6 +1561,10 @@ export default function Dashboard() {
     activeBackgroundJobs.length > 0
       ? activeBackgroundJobs[0]
       : null;
+  const waitingApprovalJob =
+    backgroundJobs.find(
+      (item) => item.status === "waiting_approval",
+    ) || null;
   const completedBackgroundJobs =
     backgroundJobs.filter(
       (item) => item.status === "completed",
@@ -2300,11 +2314,21 @@ export default function Dashboard() {
                         : "") +
                       (allowDelete ? "active" : "")
                     }
-                    onClick={() =>
-                      setAllowDelete((value) => !value)
-                    }
+                    onClick={() => {
+                      const shouldApproveWaitingJob =
+                        !allowDelete &&
+                        waitingApprovalJob?.current_detail ===
+                          "project.files.delete";
+                      setAllowDelete((value) => !value);
+                      if (shouldApproveWaitingJob) {
+                        void approveWaitingJob(
+                          waitingApprovalJob.id,
+                        );
+                      }
+                    }}
                     disabled={
                       busy ||
+                      approvalBusy ||
                       executiveGateCounts.delete === 0
                     }
                     title={
