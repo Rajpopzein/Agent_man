@@ -168,6 +168,7 @@ export function useAgentVoice() {
     useRef<AudioBufferSourceNode | null>(null);
   const speechQueueRef =
     useRef<Promise<void>>(Promise.resolve());
+  const speechGenerationRef = useRef(0);
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -308,13 +309,22 @@ export function useAgentVoice() {
     }
   }, []);
 
-  const stop = useCallback(() => {
+  const stopPlayback = useCallback(() => {
     window.speechSynthesis.cancel();
     audioAbortRef.current?.abort();
     audioAbortRef.current = null;
     cleanupAudio();
     setSpeaking(false);
   }, [cleanupAudio]);
+
+  const stop = useCallback(() => {
+    // Invalidate every queued narration item from the previous interaction.
+    // Resetting only the active audio is not enough because already chained
+    // Promise callbacks would otherwise speak stale messages later.
+    speechGenerationRef.current += 1;
+    speechQueueRef.current = Promise.resolve();
+    stopPlayback();
+  }, [stopPlayback]);
 
   useEffect(
     () => () => {
@@ -500,7 +510,7 @@ export function useAgentVoice() {
 
   const speakElevenAsync = useCallback(
     async (cleaned: string) => {
-      stop();
+      stopPlayback();
       if (
         !elevenConfig.has_secret ||
         !elevenConfig.voice_id
@@ -566,7 +576,7 @@ export function useAgentVoice() {
       settings.volume,
       playElevenResponse,
       speakBrowserAsync,
-      stop,
+      stopPlayback,
     ],
   );
 
@@ -587,7 +597,7 @@ export function useAgentVoice() {
         return;
       }
 
-      stop();
+      stopPlayback();
       await speakBrowserAsync(cleaned);
     },
     [
@@ -596,15 +606,21 @@ export function useAgentVoice() {
       settings.engine,
       speakBrowserAsync,
       speakElevenAsync,
-      stop,
+      stopPlayback,
     ],
   );
 
   const queueSpeakAsync = useCallback(
     (text: string, force = false) => {
+      const generation = speechGenerationRef.current;
       const queued = speechQueueRef.current
         .catch(() => undefined)
-        .then(() => speakAsync(text, force));
+        .then(async () => {
+          if (generation !== speechGenerationRef.current) {
+            return;
+          }
+          await speakAsync(text, force);
+        });
       speechQueueRef.current = queued.catch(
         () => undefined,
       );
@@ -615,9 +631,11 @@ export function useAgentVoice() {
 
   const speak = useCallback(
     (text: string, force = false) => {
+      // Non-queued speech is an interruption: discard older narration first.
+      stop();
       void speakAsync(text, force);
     },
-    [speakAsync],
+    [speakAsync, stop],
   );
 
   useEffect(() => {
