@@ -212,6 +212,46 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type ReinforcementEvent = {
+  id: string;
+  project_id: string;
+  agent_id: string | null;
+  agent_name: string;
+  tool_name: string | null;
+  source: string;
+  outcome: string;
+  reward: number;
+  task: string;
+  note: string;
+  reference_id: string | null;
+  created_at: string;
+};
+
+export type ReinforcementSummary = {
+  events: number;
+  overall: {
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  };
+  agents: Array<{
+    agent_id: string;
+    agent_name: string;
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  }>;
+  tools: Array<{
+    tool_name: string;
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  }>;
+};
+
 export type ManagedProcess = {
   id: string;
   command: string;
@@ -433,6 +473,33 @@ export const api = {
       "/api/main-agent/projects/" +
         projectId +
         "/background-jobs",
+    ),
+  reinforcementSummary: (projectId: string) =>
+    request<ReinforcementSummary>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/reinforcement/summary",
+    ),
+  reinforcementFeedback: (
+    projectId: string,
+    payload: {
+      value: -1 | 1;
+      agent_id?: string | null;
+      agent_name?: string;
+      tool_name?: string | null;
+      task?: string;
+      note?: string;
+      reference_id?: string | null;
+    },
+  ) =>
+    request<ReinforcementEvent>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/reinforcement/feedback",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
     ),
   managedProcesses: (projectId: string) =>
     request<ManagedProcess[]>("/api/runtime/processes?project_id=" + encodeURIComponent(projectId)),
