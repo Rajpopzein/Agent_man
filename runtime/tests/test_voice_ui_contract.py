@@ -258,3 +258,20 @@ def test_worker_approval_interrupts_user_with_text_only():
     assert "approvalJobId" in dashboard
     assert '"background_job.resumed"' in dashboard
 
+def test_agent_man_composer_clears_after_command_is_accepted():
+    root = Path(__file__).resolve().parents[2]
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'setLastDirective(command);' in dashboard
+    assert 'setPrompt("");' in dashboard
+    assert 'recentJob?.task || lastDirective' in dashboard
+    assert 'setPrompt(command);\n    voice.stop();' not in dashboard
+
