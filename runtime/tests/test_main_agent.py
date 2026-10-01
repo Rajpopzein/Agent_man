@@ -1846,3 +1846,72 @@ def test_executive_agent_api_tool_receives_project_context_in_chat(monkeypatch):
     )
     assert "React implementation" in saved["context"]
 
+def test_executive_background_reply_guarantees_worker_status(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "delegate_agent",
+                "agent_id": developer["id"],
+                "task": "Implement the requested feature.",
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "I remain available for more instructions.",
+        })
+
+    def fake_start_agent(**kwargs):
+        return {
+            "id": "job-status",
+            "project_id": project["id"],
+            "agent_id": developer["id"],
+            "agent_name": developer["name"],
+            "agent_role": developer["role"],
+            "task": kwargs["task"],
+            "status": "running",
+            "created_at": "now",
+            "started_at": "now",
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
+            "current_phase": "starting",
+            "current_action": "Started the assigned task.",
+            "current_tool": "",
+            "current_detail": kwargs["task"],
+            "updated_at": "now",
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.background_jobs.list_project",
+        lambda project_id: [
+            {
+                "agent_name": developer["name"],
+                "status": "running",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Ask Developer to implement the feature."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "background"
+    assert developer["name"] in body["text"]
+    assert "has been contacted and is working" in body["text"]
+
