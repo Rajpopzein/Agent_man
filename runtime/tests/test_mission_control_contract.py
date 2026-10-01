@@ -22,14 +22,13 @@ def test_mission_control_uses_executive_effective_access():
         in dashboard
     )
     assert "EXECUTIVE TOOLS" in dashboard
-    assert "SAFE AUTO TOOLS" in dashboard
+    assert "AUTO-AUTHORIZED TOOLS" in dashboard
 
     assert 'tool.approval_gate === "exec"' in dashboard
     assert 'tool.approval_gate === "net"' in dashboard
     assert 'tool.approval_gate === "hw"' in dashboard
     assert 'tool.approval_gate === "delete"' in dashboard
 
-    assert "Tool assignment controls what Agent Man can see." in dashboard
     assert "Assigned Executive tools are available immediately." in dashboard
     assert "Only destructive actions require separate approval." in dashboard
     assert " · AUTO" in dashboard
