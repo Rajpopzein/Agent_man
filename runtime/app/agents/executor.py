@@ -547,7 +547,7 @@ def execute_agent(
                     f"{agent.name} is waiting for approval to use "
                     f"{tool_name}. Required permission: "
                     f"{exc.permission.value}. Approve it in Mission Control, "
-                    "then retry or resume the worker."
+                    "then ask Agent Man to retry the worker."
                 ),
                 "steps": trace,
                 "status": "waiting_approval",
