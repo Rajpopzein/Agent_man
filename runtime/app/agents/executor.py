@@ -449,6 +449,7 @@ def execute_agent(
                 name=tool_name,
                 arguments=arguments,
                 workspace_path=project.workspace_path,
+                project_id=project.id,
                 approvals=approvals,
                 allowed_names=allowed_names,
             )
