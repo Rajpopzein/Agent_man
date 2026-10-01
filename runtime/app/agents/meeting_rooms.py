@@ -41,6 +41,9 @@ def append_room_message(
         job_id=job_id,
     )
     db.add(row)
+    room = db.get(MeetingRoomRecord, room_id)
+    if room is not None:
+        room.updated_at = _now()
     db.commit()
     db.refresh(row)
     return row
