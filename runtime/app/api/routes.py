@@ -55,6 +55,8 @@ def health():
             "parallel_worker_execution": True,
             "command_console": True,
             "executive_agent_api_tools": True,
+            "reinforcement_policy_memory": True,
+            "reinforcement_user_feedback": True,
         },
     }
 
