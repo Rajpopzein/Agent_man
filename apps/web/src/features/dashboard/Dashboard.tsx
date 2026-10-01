@@ -9,7 +9,6 @@ import {
   Activity,
   Bot,
   Boxes,
-  CircleDot,
   Clock3,
   Cpu,
   GitBranch,
@@ -39,7 +38,6 @@ import HudModal from "../../components/HudModal";
 import CommandConsole, {
   CommandConsoleLine,
 } from "./CommandConsole";
-import HolographicField from "./HolographicField";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import BackgroundPage from "../agents/BackgroundPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
@@ -286,42 +284,42 @@ const VIEW_META: Record<
 > = {
   background: {
     label: "Background Activity",
-    eyebrow: "SYSTEM / BACKGROUND WORK",
+    eyebrow: "WORKSPACE / BACKGROUND",
     description: "Monitor agent jobs, running processes, and output.",
   },
   dashboard: {
-    label: "Command Core",
-    eyebrow: "SYSTEM / OVERVIEW",
-    description: "Live agent command, execution and system awareness.",
+    label: "Overview",
+    eyebrow: "WORKSPACE / OVERVIEW",
+    description: "Monitor agents, tasks, tools, and runtime activity from one place.",
   },
   orchestration: {
-    label: "Orchestration Grid",
-    eyebrow: "SYSTEM / WORKFLOWS",
+    label: "Workflows",
+    eyebrow: "WORKSPACE / WORKFLOWS",
     description: "Deterministic stage handoffs with success and failure routing.",
   },
   "multi-agent": {
-    label: "Peer Intelligence",
-    eyebrow: "SYSTEM / MULTI-AGENT",
+    label: "Agents",
+    eyebrow: "WORKSPACE / AGENTS",
     description: "Shared task context with independent peer reasoning.",
   },
   tools: {
-    label: "Capability Matrix",
-    eyebrow: "SYSTEM / TOOLS",
+    label: "Tools & Permissions",
+    eyebrow: "WORKSPACE / TOOLS",
     description: "Control which runtime capabilities each agent can access.",
   },
   connections: {
-    label: "AI Uplink",
-    eyebrow: "SYSTEM / PROVIDERS",
+    label: "AI Connections",
+    eyebrow: "WORKSPACE / CONNECTIONS",
     description: "Configure local and cloud model connections.",
   },
   logs: {
     label: "LLM Logs",
-    eyebrow: "SYSTEM / MODEL ACTIVITY",
+    eyebrow: "WORKSPACE / MODEL ACTIVITY",
     description: "Inspect model requests, responses, latency, and failures.",
   },
   settings: {
     label: "Settings",
-    eyebrow: "SYSTEM / CONFIGURATION",
+    eyebrow: "WORKSPACE / SETTINGS",
     description: "Configure Agent Man executive behavior and runtime preferences.",
   },
 };
@@ -1341,15 +1339,6 @@ export default function Dashboard() {
 
   return (
     <div className="jarvisShell">
-      <HolographicField
-        active={
-          busy ||
-          voice.speaking ||
-          activeBackgroundJobs.length > 0
-        }
-      />
-      <div className="ambientGrid" aria-hidden="true" />
-      <div className="scanline" aria-hidden="true" />
 
       <aside className="commandRail">
         <button
@@ -1371,19 +1360,19 @@ export default function Dashboard() {
           />
           <RailButton
             active={view === "dashboard"}
-            label="Core"
+            label="Overview"
             icon={<Home />}
             onClick={() => setView("dashboard")}
           />
           <RailButton
             active={view === "orchestration"}
-            label="Flow"
+            label="Workflows"
             icon={<GitBranch />}
             onClick={() => setView("orchestration")}
           />
           <RailButton
             active={view === "multi-agent"}
-            label="Peers"
+            label="Agents"
             icon={<Network />}
             onClick={() => setView("multi-agent")}
           />
@@ -1395,7 +1384,7 @@ export default function Dashboard() {
           />
           <RailButton
             active={view === "connections"}
-            label="Uplink"
+            label="Connections"
             icon={<Plug />}
             onClick={() => setView("connections")}
           />
@@ -1439,7 +1428,7 @@ export default function Dashboard() {
               <span />
             </div>
             <div>
-              <small>AGENT MAN / WINDOWS INTELLIGENCE RUNTIME</small>
+              <small>AGENT MAN / LOCAL AGENT RUNTIME</small>
               <strong>{meta.label}</strong>
             </div>
           </div>
@@ -1502,8 +1491,8 @@ export default function Dashboard() {
               }
             >
               <Radio size={14} />
-              <span>{online ? "RUNTIME ONLINE" : "RUNTIME OFFLINE"}</span>
-              <b>{online ? "LIVE" : "DOWN"}</b>
+              <span>{online ? "Online" : "Offline"}</span>
+              <b>{online ? "Live" : "Down"}</b>
             </div>
           </div>
         </header>
@@ -1516,7 +1505,7 @@ export default function Dashboard() {
           </div>
 
           <div className="projectReadout">
-            <small>ACTIVE SANDBOX</small>
+            <small>ACTIVE PROJECT</small>
             <strong>{project?.name || "UNASSIGNED"}</strong>
             <code>
               {project?.workspace_path ||
@@ -1594,7 +1583,7 @@ export default function Dashboard() {
 
             <section className="coreGrid">
               <div className="hudPanel agentMatrix">
-                <PanelLabel icon={<Boxes />} label="AGENT MATRIX" />
+                <PanelLabel icon={<Boxes />} label="AGENTS" />
 
                 <div className="executiveAgentCard">
                   <div className="executiveAgentIdentity">
@@ -1619,7 +1608,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="workerDivider">
-                  <span>WORKER AGENTS</span>
+                  <span>WORKERS</span>
                   <i />
                 </div>
 
@@ -1672,56 +1661,127 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className={"intelligenceCore phase-" + interactionPhase}>
-                <div className="coreBackdrop" />
-                <div className="orbit orbitOne">
-                  <span />
-                  <span />
-                  <span />
+              <div className="executiveOverview">
+                <div className="executiveOverviewHeader">
+                  <div className="executiveAvatar">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <small>EXECUTIVE AGENT</small>
+                    <h2>Agent Man</h2>
+                    <p>
+                      Coordinates requests, delegates work, and reports live progress.
+                    </p>
+                  </div>
+                  <span
+                    className={
+                      online
+                        ? "professionalStatus online"
+                        : "professionalStatus offline"
+                    }
+                  >
+                    {online ? "Online" : "Offline"}
+                  </span>
                 </div>
-                <div className="orbit orbitTwo">
-                  <span />
-                  <span />
-                </div>
-                <div className="orbit orbitThree" />
-                <div className="coreHalo">
-                  <div className="coreSphere">
-                    <Zap size={34} />
-                    <span>AGENT</span>
-                    <b>MAN</b>
-                    <small>{online ? "CORE ACTIVE" : "CORE STANDBY"}</small>
+
+                <div className="executiveSummaryGrid">
+                  <div>
+                    <span>Current state</span>
+                    <strong>{interactionLabel}</strong>
+                  </div>
+                  <div>
+                    <span>Background jobs</span>
+                    <strong>{activeBackgroundJobs.length}</strong>
+                  </div>
+                  <div>
+                    <span>Available tools</span>
+                    <strong>{activeTools}</strong>
+                  </div>
+                  <div>
+                    <span>Workers</span>
+                    <strong>{agents.length}</strong>
                   </div>
                 </div>
 
-                {agents.slice(0, 6).map((item, index) => (
-                  <button
-                    key={item.id}
-                    className={`orbitalAgent orbitalAgent${index + 1} ${
-                      agent?.id === item.id ? "selected" : ""
-                    }`}
-                    onClick={() => setAgent(item)}
-                    title={item.name}
-                  >
+                <div className="currentWorkCard">
+                  <div className="currentWorkHeader">
+                    <div>
+                      <small>CURRENT PROCESS</small>
+                      <strong>
+                        {activeBackgroundJob
+                          ? activeBackgroundJob.agent_name
+                          : busy
+                            ? "Agent Man"
+                            : "No active task"}
+                      </strong>
+                    </div>
                     <span>
-                      <Bot size={14} />
+                      {activeBackgroundJob
+                        ? activeBackgroundJob.current_phase || activeBackgroundJob.status
+                        : busy
+                          ? "Working"
+                          : "Ready"}
                     </span>
-                    <b>{item.name}</b>
-                    <small>{item.role}</small>
-                  </button>
-                ))}
+                  </div>
+                  <p>
+                    {activeBackgroundJob
+                      ? activeBackgroundJob.current_action ||
+                        activeBackgroundJob.task
+                      : busy
+                        ? liveOutputText || "Processing your request."
+                        : "Agent Man is ready for your next instruction."}
+                  </p>
+                </div>
 
-                <div className="coreCaption">
-                  <CircleDot size={13} />
-                  <span>
-                    {agent
-                      ? `${agent.name.toUpperCase()} / ${providerLabel}`
-                      : "SELECT AN AGENT"}
-                  </span>
+                <div className="selectedWorkerCard">
+                  <div className="selectedWorkerTitle">
+                    <span>SELECTED WORKER</span>
+                    {agent && (
+                      <button
+                        type="button"
+                        onClick={openAgentContextDialog}
+                      >
+                        Edit context
+                      </button>
+                    )}
+                  </div>
+                  {agent ? (
+                    <>
+                      <div className="selectedWorkerIdentity">
+                        <div className="workerAvatar">
+                          <Bot size={17} />
+                        </div>
+                        <div>
+                          <strong>{agent.name}</strong>
+                          <span>{agent.role}</span>
+                        </div>
+                        <em className={"workerState state-" + agent.state}>
+                          {agent.state === "assigned"
+                            ? "connecting"
+                            : agent.state}
+                        </em>
+                      </div>
+                      <div className="selectedWorkerMeta">
+                        <div>
+                          <span>Provider</span>
+                          <strong>{providerLabel}</strong>
+                        </div>
+                        <div>
+                          <span>Model</span>
+                          <strong>{agent.llm.model}</strong>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="professionalEmpty">
+                      Select a worker to view its configuration and status.
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="hudPanel missionPanel">
-                <PanelLabel icon={<Activity />} label="MISSION CONTROL" />
+                <PanelLabel icon={<Activity />} label="RUNTIME STATUS" />
                 <div className="missionStatus">
                   <span
                     className={
@@ -2042,7 +2102,7 @@ export default function Dashboard() {
               <div className={"commandOutput " + (streamActive ? "streaming" : "")}>
                 <div className="outputRail">
                   <span />
-                  <small>{streamActive ? "LIVE" : "OUTPUT"}</small>
+                  <small>{streamActive ? "Live" : "OUTPUT"}</small>
                 </div>
                 <div className="outputBody">
                   <div className="outputStreamHeader">
@@ -2054,7 +2114,7 @@ export default function Dashboard() {
                     >
                       {streamActive
                         ? streamConnected
-                          ? "LIVE STREAM"
+                          ? "Live STREAM"
                           : "RECONNECTING"
                         : run
                           ? "FINAL"
@@ -2142,7 +2202,7 @@ export default function Dashboard() {
                   <header>
                     <div>
                       <span className="hudEyebrow">
-                        AI SERVER / LIVE
+                        AI SERVER / Live
                       </span>
                       <h4>Model Traffic</h4>
                     </div>
@@ -2193,7 +2253,7 @@ export default function Dashboard() {
                             <Clock3 size={10} />
                             {item.durationMs === null
                               ? item.live
-                                ? "LIVE"
+                                ? "Live"
                                 : "—"
                               : item.durationMs < 1000
                                 ? item.durationMs + " ms"
@@ -2241,7 +2301,7 @@ export default function Dashboard() {
         open={projectDialog}
         onClose={() => setProjectDialog(false)}
         title="Initialize Project"
-        eyebrow="COMMAND / NEW SANDBOX"
+        eyebrow="PROJECT / NEW"
         footer={
           <>
             <button
@@ -2293,7 +2353,7 @@ export default function Dashboard() {
         open={agentDialog}
         onClose={() => setAgentDialog(false)}
         title="Deploy Agent"
-        eyebrow="COMMAND / AGENT CONFIGURATION"
+        eyebrow="AGENT / CONFIGURATION"
         footer={
           <>
             <button
@@ -2444,7 +2504,7 @@ export default function Dashboard() {
         open={agentContextDialog}
         onClose={() => setAgentContextDialog(false)}
         title="Agent Context"
-        eyebrow="COMMAND / WORKER ROLE"
+        eyebrow="AGENT / CONTEXT"
         footer={
           <>
             <button
