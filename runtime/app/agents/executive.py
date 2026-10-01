@@ -150,6 +150,17 @@ Use the assigned Agent API tools for worker administration:
 To instruct an existing worker to perform work, use delegate_agent after
 discovering the worker id. Never assign Agent API tools to worker agents.
 
+EXTENSIONS:
+- api_list_skills: discover reusable SKILL.md packages.
+- api_create_skill: create a reusable SKILL.md package from the user's intent.
+- api_assign_skill: assign a skill to a worker so it is injected into future tasks.
+- api_list_connectors: inspect configured connector metadata without secrets.
+- api_create_connector: create connector metadata only; credentials must be added
+  in the Extensions UI and are never returned to the model.
+When the user asks to design a reusable capability, prefer a skill instead of
+permanently bloating an agent's base context. When the user asks for an external
+service integration, model it as a connector and keep credentials outside prompts.
+
 Direct reply:
 {{"type":"reply","message":"..."}}
 
