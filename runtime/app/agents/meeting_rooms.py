@@ -12,6 +12,8 @@ from app.persistence.models import (
     MeetingRoomMemberRecord,
     MeetingRoomMessageRecord,
     MeetingRoomRecord,
+    MultiAgentParticipantRecord,
+    MultiAgentTaskRecord,
     ProjectRecord,
 )
 
@@ -203,6 +205,52 @@ def room_messages(
     )
 
 
+def room_collaborations(
+    db: Session,
+    room_id: str,
+) -> list[dict[str, object]]:
+    tasks = list(
+        db.scalars(
+            select(MultiAgentTaskRecord)
+            .where(MultiAgentTaskRecord.room_id == room_id)
+            .order_by(MultiAgentTaskRecord.created_at.desc())
+        ).all()
+    )
+    result: list[dict[str, object]] = []
+    for task in tasks:
+        participants = list(
+            db.scalars(
+                select(MultiAgentParticipantRecord)
+                .where(MultiAgentParticipantRecord.task_id == task.id)
+                .order_by(MultiAgentParticipantRecord.position)
+            ).all()
+        )
+        participant_views: list[dict[str, object]] = []
+        for participant in participants:
+            agent = db.get(AgentRecord, participant.agent_id)
+            participant_views.append(
+                {
+                    "agent_id": participant.agent_id,
+                    "agent_name": agent.name if agent else "Missing agent",
+                    "role": agent.role if agent else "unknown",
+                    "status": participant.status,
+                    "last_round": participant.last_round,
+                }
+            )
+        result.append(
+            {
+                "id": task.id,
+                "status": task.status,
+                "prompt": task.prompt,
+                "current_round": task.current_round,
+                "created_at": task.created_at,
+                "completed_at": task.completed_at,
+                "participants": participant_views,
+            }
+        )
+    return result
+
+
 def room_snapshot(
     db: Session,
     room: MeetingRoomRecord,
@@ -250,6 +298,7 @@ def room_snapshot(
             for message in messages
         ],
         "jobs": list(jobs or []),
+        "collaborations": room_collaborations(db, room.id),
     }
 
 
