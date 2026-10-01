@@ -21,7 +21,6 @@ from app.persistence.models import (
     WorkflowRunStepRecord,
 )
 from app.tools.policy import EXECUTIVE_ONLY_TOOL_NAMES
-from app.tools.service import ensure_agent_defaults
 
 
 def _project(db: Session, project_id: str) -> ProjectRecord:
@@ -176,6 +175,7 @@ def create_agent(
     )
     db.add(agent)
     db.flush()
+    from app.tools.service import ensure_agent_defaults
     ensure_agent_defaults(db, agent.id)
     db.commit()
     db.refresh(agent)
