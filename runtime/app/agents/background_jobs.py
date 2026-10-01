@@ -453,8 +453,8 @@ class BackgroundJobSupervisor:
                         if approval_permission
                         else ""
                     )
-                    + ". Approve it in Mission Control, then retry or resume "
-                    "the worker."
+                    + ". Approve it in Mission Control, then ask Agent Man "
+                    "to retry the worker."
                 )
                 events.emit(
                     "background_job.approval_required",
