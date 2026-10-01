@@ -4,6 +4,13 @@ from typing import Any
 from app.core.permissions import Permission, PermissionDenied, require
 from app.devices.serial import serial_devices
 from app.persistence.database import SessionLocal
+from app.tools.extensions_api import (
+    assign_skill as api_assign_skill,
+    create_connector as api_create_connector,
+    create_skill as api_create_skill,
+    list_connectors as api_list_connectors,
+    list_skills as api_list_skills,
+)
 from app.tools.agent_api import (
     create_agent as api_create_agent,
     delete_agent as api_delete_agent,
@@ -40,6 +47,11 @@ TOOL_DEFINITIONS = [
     ToolDefinition("api_delete_agent", "Delete a worker agent after destructive approval, if no workflow or history references block deletion.", "agent_api", "destructive", "1.0.0", {"agent_id": "worker agent id"}),
     ToolDefinition("api_set_agent_tool", "Enable or disable one normal runtime tool for a worker agent.", "agent_api", "write", "1.0.0", {"agent_id": "worker agent id", "tool_name": "runtime tool name", "enabled": "boolean"}),
     ToolDefinition("api_list_ai_connections", "List configured AI connections without exposing credentials.", "agent_api", "read", "1.0.0", {}),
+    ToolDefinition("api_list_skills", "List reusable SKILL.md packages in the current project.", "extensions", "read", "1.0.0", {}),
+    ToolDefinition("api_create_skill", "Create a reusable SKILL.md package for the current project.", "extensions", "write", "1.0.0", {"name": "skill name", "slug": "optional stable slug", "description": "optional summary", "content": "complete SKILL.md content"}),
+    ToolDefinition("api_assign_skill", "Assign an existing project skill to a worker agent.", "extensions", "write", "1.0.0", {"agent_id": "worker agent id", "skill_id": "skill id"}),
+    ToolDefinition("api_list_connectors", "List configured connector metadata without exposing secrets.", "extensions", "read", "1.0.0", {}),
+    ToolDefinition("api_create_connector", "Create connector metadata. Credentials must be added through the Extensions UI.", "extensions", "write", "1.0.0", {"name": "connector name", "kind": "adapter kind such as groww or generic-http", "base_url": "optional documented base URL", "config": "optional non-secret object"}),
     ToolDefinition("list_files", "List files and folders inside the project.", "filesystem", "read", "1.0.0", {"path": "relative directory path"}),
     ToolDefinition("read_file", "Read a UTF-8 text file inside the project.", "filesystem", "read", "1.0.0", {"path": "relative file path"}),
     ToolDefinition("write_file", "Create or replace a UTF-8 text file inside the project.", "filesystem", "write", "1.0.0", {"path": "relative file path", "content": "complete file content"}),
@@ -125,6 +137,29 @@ class ToolRegistry:
                     )
                 if name == "api_list_ai_connections":
                     return api_list_ai_connections(db)
+                if name == "api_list_skills":
+                    return api_list_skills(db, project_id)
+                if name == "api_create_skill":
+                    return api_create_skill(
+                        db,
+                        project_id,
+                        arguments,
+                    )
+                if name == "api_assign_skill":
+                    return api_assign_skill(
+                        db,
+                        project_id,
+                        str(arguments["agent_id"]),
+                        str(arguments["skill_id"]),
+                    )
+                if name == "api_list_connectors":
+                    return api_list_connectors(db, project_id)
+                if name == "api_create_connector":
+                    return api_create_connector(
+                        db,
+                        project_id,
+                        arguments,
+                    )
                 if name == "api_create_agent":
                     return api_create_agent(
                         db,
