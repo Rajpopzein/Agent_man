@@ -583,6 +583,18 @@ export const api = {
         projectId +
         "/background-jobs",
     ),
+  approveBackgroundJob: (
+    projectId: string,
+    jobId: string,
+  ) =>
+    request<BackgroundJob>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/background-jobs/" +
+        jobId +
+        "/approve",
+      { method: "POST" },
+    ),
   reinforcementSummary: (projectId: string) =>
     request<ReinforcementSummary>(
       "/api/main-agent/projects/" +
