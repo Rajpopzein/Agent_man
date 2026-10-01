@@ -2114,7 +2114,7 @@ export default function Dashboard() {
                     >
                       {streamActive
                         ? streamConnected
-                          ? "Live STREAM"
+                          ? "LIVE STREAM"
                           : "RECONNECTING"
                         : run
                           ? "FINAL"
@@ -2202,7 +2202,7 @@ export default function Dashboard() {
                   <header>
                     <div>
                       <span className="hudEyebrow">
-                        AI SERVER / Live
+                        AI SERVER / LIVE
                       </span>
                       <h4>Model Traffic</h4>
                     </div>
