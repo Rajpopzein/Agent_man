@@ -2,6 +2,10 @@ import json
 from time import perf_counter
 from uuid import uuid4
 
+from app.agents.context_budget import (
+    ContextBudgetManager,
+    is_context_overflow_error,
+)
 from app.agents.protocol import response_preview
 from app.events.bus import events
 
@@ -86,44 +90,108 @@ def run_messages(
         "response_id": response_id,
     }
     structured = any(
-        item.get("role") == "system" and "Return exactly one JSON object" in item.get("content", "")
+        item.get("role") == "system"
+        and "Return exactly one JSON object" in item.get("content", "")
         for item in messages
     )
+
+    budget = ContextBudgetManager(
+        context_limit=getattr(agent, "context_limit", None),
+    )
+    sent_messages, budget_report = budget.fit(messages)
+    if budget_report.compacted:
+        events.emit(
+            "agent.context.compacted",
+            **event_context,
+            status="compacted",
+            reason="context_budget",
+            message="Older context was compacted to fit the model window.",
+            **budget_report.as_dict(),
+        )
+
     events.emit("agent.response.started", **event_context, text="")
     result = ""
+    last_sent_messages = sent_messages
 
     try:
-        kwargs = dict(
-            model=agent.model,
-            messages=messages,
-            endpoint=resolved_endpoint,
-            api_key=api_key,
-            temperature=agent.temperature_milli / 1000,
-        )
-        chunks = provider.stream_chat(**kwargs) if hasattr(provider, "stream_chat") else [provider.chat(**kwargs)]
-        last_emitted = started
-        last_text = ""
-        for chunk in chunks:
-            result += chunk
-            now = perf_counter()
-            text = response_preview(result, structured=structured)
-            should_emit = bool(
-                text
-                and text != last_text
-                and (
-                    not last_text
-                    or now - last_emitted >= 0.03
-                    or len(text) - len(last_text) >= 24
+        for attempt in range(2):
+            result = ""
+            last_emitted = perf_counter()
+            last_text = ""
+            last_sent_messages = sent_messages
+            try:
+                kwargs = dict(
+                    model=agent.model,
+                    messages=sent_messages,
+                    endpoint=resolved_endpoint,
+                    api_key=api_key,
+                    temperature=agent.temperature_milli / 1000,
                 )
-            )
-            if should_emit:
+                chunks = (
+                    provider.stream_chat(**kwargs)
+                    if hasattr(provider, "stream_chat")
+                    else [provider.chat(**kwargs)]
+                )
+                for chunk in chunks:
+                    result += chunk
+                    now = perf_counter()
+                    text = response_preview(
+                        result,
+                        structured=structured,
+                    )
+                    should_emit = bool(
+                        text
+                        and text != last_text
+                        and (
+                            not last_text
+                            or now - last_emitted >= 0.03
+                            or len(text) - len(last_text) >= 24
+                        )
+                    )
+                    if should_emit:
+                        events.emit(
+                            "agent.response.delta",
+                            **event_context,
+                            text=text,
+                        )
+                        last_text = text
+                        last_emitted = now
+                break
+            except Exception as exc:
+                can_retry = (
+                    attempt == 0
+                    and not result.strip()
+                    and is_context_overflow_error(exc)
+                )
+                if not can_retry:
+                    raise
+
+                sent_messages, retry_report = budget.fit(
+                    messages,
+                    aggressive=True,
+                    force=True,
+                )
                 events.emit(
-                    "agent.response.delta",
+                    "agent.self_correction",
                     **event_context,
-                    text=text,
+                    status="retrying",
+                    reason="context_overflow",
+                    message=(
+                        "The model context was too large. Agent Man reduced "
+                        "older context and retried the request."
+                    ),
+                    **retry_report.as_dict(),
                 )
-                last_text = text
-                last_emitted = now
+                events.emit(
+                    "agent.context.compacted",
+                    **event_context,
+                    status="retrying",
+                    reason="context_overflow",
+                    message=(
+                        "Agent Man reduced older context and retried the request."
+                    ),
+                    **retry_report.as_dict(),
+                )
 
         if not result.strip():
             raise RuntimeError("The model returned an empty response stream.")
@@ -154,7 +222,7 @@ def run_messages(
             agent=agent,
             provider_id=provider_id,
             endpoint=resolved_endpoint,
-            messages=messages,
+            messages=last_sent_messages,
             status="error",
             duration_ms=round((perf_counter() - started) * 1000),
             error_text=str(exc),
@@ -165,7 +233,7 @@ def run_messages(
         agent=agent,
         provider_id=provider_id,
         endpoint=resolved_endpoint,
-        messages=messages,
+        messages=last_sent_messages,
         status="success",
         duration_ms=round((perf_counter() - started) * 1000),
         response_text=result,
