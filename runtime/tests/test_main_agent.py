@@ -1931,3 +1931,79 @@ def test_executive_background_reply_guarantees_worker_status(monkeypatch):
     assert developer["name"] in body["text"]
     assert "has been contacted and is working" in body["text"]
 
+def test_background_worker_approval_is_escalated_to_executive(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+    from app.events.bus import events
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+
+    def fake_execute_agent(*, progress=None, **kwargs):
+        if progress is not None:
+            progress({
+                "phase": "waiting_approval",
+                "action": "run_command needs approval.",
+                "tool": "run_command",
+                "detail": "terminal.execute",
+                "status": "waiting_approval",
+            })
+        return {
+            "status": "waiting_approval",
+            "text": (
+                "Developer is waiting for approval to use run_command. "
+                "Required permission: terminal.execute."
+            ),
+            "steps": [
+                {
+                    "turn": 1,
+                    "tool": "run_command",
+                    "status": "approval_required",
+                    "permission": "terminal.execute",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    cursor = events.current_sequence()
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Run the validation command.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "waiting_approval"
+    assert finished["current_tool"] == "run_command"
+    assert finished["current_detail"] == "terminal.execute"
+
+    _, emitted = events.wait_since(
+        cursor,
+        timeout=0,
+        project_id=project["id"],
+    )
+    approval = next(
+        event
+        for event in emitted
+        if event["type"]
+        == "background_job.approval_required"
+    )
+    assert approval["agent_name"] == developer["name"]
+    assert approval["tool"] == "run_command"
+    assert approval["permission"] == "terminal.execute"
+    assert "waiting for approval" in approval["message"]
+
+    executive = next(
+        event
+        for event in emitted
+        if event["type"] == "executive.activity"
+        and event.get("phase") == "approval"
+    )
+    assert executive["status"] == "waiting_approval"
+    assert developer["name"] in executive["message"]
+
