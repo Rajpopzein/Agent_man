@@ -544,8 +544,10 @@ def execute_agent(
             )
             return {
                 "text": (
-                    f"{agent.name} can continue automatically after approval "
-                    f"for {exc.permission.value}."
+                    f"{agent.name} is waiting for approval to use "
+                    f"{tool_name}. Required permission: "
+                    f"{exc.permission.value}. Approve it in Mission Control, "
+                    "then retry or resume the worker."
                 ),
                 "steps": trace,
                 "status": "waiting_approval",
