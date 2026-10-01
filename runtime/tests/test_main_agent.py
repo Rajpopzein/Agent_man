@@ -37,17 +37,41 @@ def test_native_serial_template_executes_and_returns_context(monkeypatch):
     assert "tool_call" not in body["text"]
 
 
-def test_native_serial_open_still_requires_permission(monkeypatch):
+def test_native_serial_open_uses_assigned_hardware_tool_without_extra_approval(
+    monkeypatch,
+):
     project, _ = _setup()
-    monkeypatch.setattr("app.agents.executive.run_messages", lambda *a, **k:
-        '<|tool_call>call:serial_open{"device":"COM7"}<tool_call|>')
+    answers = iter([
+        '<|tool_call>call:serial_open{"device":"COM7"}<tool_call|>',
+        json.dumps({
+            "type": "reply",
+            "message": "The ESP32 serial session is open.",
+        }),
+    ])
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *a, **k: next(answers),
+    )
+    monkeypatch.setattr(
+        "app.tools.registry.serial_devices.open",
+        lambda **kwargs: {
+            "session_id": "serial-test",
+            "device": kwargs["device"],
+        },
+    )
     response = client.post(
         "/api/main-agent/projects/" + project["id"] + "/chat",
         json={"message": "check my esp32 connection", "allow_hardware": False},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "waiting_approval"
-    assert response.json()["steps"][-1]["permission"] == "hardware.serial"
+    body = response.json()
+    assert body["status"] == "completed"
+    step = next(
+        item
+        for item in body["steps"]
+        if item.get("tool") == "serial_open"
+    )
+    assert step["status"] == "ok"
 
 
 @pytest.mark.parametrize("recovers", [True, False])
@@ -285,16 +309,40 @@ def test_main_agent_can_use_runtime_tools_directly(monkeypatch):
     assert "http_get" in calls["allowed"]
 
 
-def test_main_agent_direct_tool_respects_approval(monkeypatch):
+def test_main_agent_assigned_terminal_tool_runs_without_extra_approval(
+    monkeypatch,
+):
     project, _workers = _setup()
-
-    monkeypatch.setattr(
-        "app.agents.executive.run_messages",
-        lambda agent, messages, endpoint=None: json.dumps({
+    answers = iter([
+        json.dumps({
             "type": "tool",
             "tool": "run_command",
             "args": {"command": "echo hello"},
         }),
+        json.dumps({
+            "type": "reply",
+            "message": "The command completed.",
+        }),
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: next(answers),
+    )
+    observed = {}
+
+    def fake_run(self, command, approvals=None):
+        observed["approvals"] = set(approvals or set())
+        return {
+            "command": command,
+            "returncode": 0,
+            "stdout": "hello",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(
+        "app.tools.registry.ProjectProcessRunner.run",
+        fake_run,
     )
 
     response = client.post(
@@ -308,8 +356,9 @@ def test_main_agent_direct_tool_respects_approval(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "waiting_approval"
-    assert body["steps"][0]["permission"] == "terminal.execute"
+    assert body["status"] == "completed"
+    assert body["steps"][0]["status"] == "ok"
+    assert "terminal.execute" in observed["approvals"]
 
 
 
@@ -513,6 +562,13 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
         }),
     )
 
+    monkeypatch.setattr(
+        "app.tools.registry.serial_devices.open",
+        lambda **kwargs: {
+            "session_id": "serial-open-test",
+            "device": kwargs["device"],
+        },
+    )
     response = client.post(
         "/api/main-agent/projects/" + project["id"] + "/chat",
         json={
@@ -525,7 +581,6 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "waiting_approval"
     assert body["steps"][0]["type"] == "tool_preflight"
     assert body["steps"][0]["tool"] == "list_serial_ports"
     serial_open_step = next(
@@ -533,7 +588,7 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
         for step in body["steps"]
         if step.get("tool") == "serial_open"
     )
-    assert serial_open_step["permission"] == "hardware.serial"
+    assert serial_open_step["status"] == "ok"
 
 
 
@@ -2006,4 +2061,82 @@ def test_background_worker_approval_is_escalated_to_executive(monkeypatch):
     )
     assert executive["status"] == "waiting_approval"
     assert developer["name"] in executive["message"]
+
+def test_worker_assigned_terminal_tool_runs_without_extra_approval(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+    observed = {}
+
+    def respond(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "tool",
+                "tool": "run_command",
+                "args": {"command": "echo worker"},
+                "progress": "Running the assigned validation command.",
+                "next_step": "Verify the command result.",
+            })
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Worker command verified.",
+            "progress": "Verifying the worker command.",
+            "next_step": "Report completion.",
+        })
+
+    def fake_run(self, command, approvals=None):
+        observed["approvals"] = set(approvals or set())
+        return {
+            "command": command,
+            "returncode": 0,
+            "stdout": "worker",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        respond,
+    )
+    monkeypatch.setattr(
+        "app.tools.registry.ProjectProcessRunner.run",
+        fake_run,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={
+            "prompt": "Run the validation command.",
+            "allow_terminal": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert "terminal.execute" in observed["approvals"]
+
+
+def test_executive_destructive_tool_still_requires_explicit_approval(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: json.dumps({
+            "type": "tool",
+            "tool": "delete_path",
+            "args": {"path": "do-not-delete.txt"},
+        }),
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Delete the file.",
+            "allow_delete": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_approval"
+    assert body["steps"][-1]["permission"] == "project.files.delete"
 
