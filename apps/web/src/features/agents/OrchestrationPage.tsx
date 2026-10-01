@@ -170,6 +170,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
     if (!active || !objective.trim()) return;
     setBusy(true);
     setStatus("Executing workflow...");
+    requestAgentSpeech("Starting the workflow.");
     try {
       const run = await api.runWorkflow(
         active.id,
@@ -198,6 +199,7 @@ export default function OrchestrationPage({ project, agents }: Props) {
     if (!activeRun) return;
     setBusy(true);
     setStatus("Resuming workflow...");
+    requestAgentSpeech("Resuming the workflow.");
     try {
       const run = await api.resumeWorkflowRun(
         activeRun.id,
