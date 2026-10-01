@@ -3,6 +3,16 @@ from typing import Any
 
 from app.core.permissions import Permission, PermissionDenied, require
 from app.devices.serial import serial_devices
+from app.persistence.database import SessionLocal
+from app.tools.agent_api import (
+    create_agent as api_create_agent,
+    delete_agent as api_delete_agent,
+    get_agent as api_get_agent,
+    list_agents as api_list_agents,
+    list_ai_connections as api_list_ai_connections,
+    set_agent_tool as api_set_agent_tool,
+    update_agent as api_update_agent,
+)
 from app.sandbox.development import DevelopmentTools
 from app.sandbox.filesystem import ProjectFilesystem
 from app.sandbox.git_tools import ProjectGit
@@ -23,6 +33,13 @@ class ToolDefinition:
 
 
 TOOL_DEFINITIONS = [
+    ToolDefinition("api_list_agents", "List worker agents in the current project, including saved configuration, state, and assigned tools.", "agent_api", "read", "1.0.0", {}),
+    ToolDefinition("api_get_agent", "Read one worker agent's saved configuration, state, model, context, and assigned tools.", "agent_api", "read", "1.0.0", {"agent_id": "worker agent id"}),
+    ToolDefinition("api_create_agent", "Create a worker agent in the current project using an existing AI connection.", "agent_api", "write", "1.0.0", {"name": "agent name", "role": "agent role", "context": "optional instructions", "connection_id": "AI connection id", "model": "model name; optional when connection has a default", "temperature": "optional 0 to 2", "context_limit": "optional integer >=256", "cloud_fallback_allowed": "optional boolean"}),
+    ToolDefinition("api_update_agent", "Update a worker agent's name, role, context, or LLM configuration. Omitted fields remain unchanged.", "agent_api", "write", "1.0.0", {"agent_id": "worker agent id", "changes": "object with name, role, context, or llm fields"}),
+    ToolDefinition("api_delete_agent", "Delete a worker agent after destructive approval, if no workflow or history references block deletion.", "agent_api", "destructive", "1.0.0", {"agent_id": "worker agent id"}),
+    ToolDefinition("api_set_agent_tool", "Enable or disable one normal runtime tool for a worker agent.", "agent_api", "write", "1.0.0", {"agent_id": "worker agent id", "tool_name": "runtime tool name", "enabled": "boolean"}),
+    ToolDefinition("api_list_ai_connections", "List configured AI connections without exposing credentials.", "agent_api", "read", "1.0.0", {}),
     ToolDefinition("list_files", "List files and folders inside the project.", "filesystem", "read", "1.0.0", {"path": "relative directory path"}),
     ToolDefinition("read_file", "Read a UTF-8 text file inside the project.", "filesystem", "read", "1.0.0", {"path": "relative file path"}),
     ToolDefinition("write_file", "Create or replace a UTF-8 text file inside the project.", "filesystem", "write", "1.0.0", {"path": "relative file path", "content": "complete file content"}),
@@ -83,6 +100,7 @@ class ToolRegistry:
         workspace_path: str,
         approvals: set[str] | None = None,
         allowed_names: set[str] | None = None,
+        project_id: str | None = None,
     ) -> Any:
         if allowed_names is not None and name not in allowed_names:
             raise PermissionDenied(
@@ -90,6 +108,59 @@ class ToolRegistry:
             )
 
         filesystem = ProjectFilesystem(workspace_path)
+
+        if name.startswith("api_"):
+            if not project_id:
+                raise ValueError(
+                    "Project context is required for Agent API tools"
+                )
+            with SessionLocal() as db:
+                if name == "api_list_agents":
+                    return api_list_agents(db, project_id)
+                if name == "api_get_agent":
+                    return api_get_agent(
+                        db,
+                        project_id,
+                        str(arguments["agent_id"]),
+                    )
+                if name == "api_list_ai_connections":
+                    return api_list_ai_connections(db)
+                if name == "api_create_agent":
+                    return api_create_agent(
+                        db,
+                        project_id,
+                        arguments,
+                    )
+                if name == "api_update_agent":
+                    changes = arguments.get("changes")
+                    if not isinstance(changes, dict):
+                        raise ValueError(
+                            "changes must be an object"
+                        )
+                    return api_update_agent(
+                        db,
+                        project_id,
+                        str(arguments["agent_id"]),
+                        changes,
+                    )
+                if name == "api_set_agent_tool":
+                    return api_set_agent_tool(
+                        db,
+                        project_id,
+                        str(arguments["agent_id"]),
+                        str(arguments["tool_name"]),
+                        bool(arguments.get("enabled", True)),
+                    )
+                if name == "api_delete_agent":
+                    return api_delete_agent(
+                        db,
+                        project_id,
+                        str(arguments["agent_id"]),
+                        approvals,
+                    )
+            raise ValueError(
+                "Unknown Agent API tool: " + name
+            )
 
         if name == "list_files":
             return filesystem.list_files(str(arguments.get("path", ".")))
