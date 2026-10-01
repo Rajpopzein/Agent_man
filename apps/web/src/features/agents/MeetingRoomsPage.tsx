@@ -13,6 +13,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  UserMinus,
   Users,
   XCircle,
 } from "lucide-react";
@@ -21,6 +22,8 @@ import {
   api,
   BackgroundJob,
   MeetingRoom,
+  MeetingRoomCollaboration,
+  MeetingRoomMember,
   Project,
 } from "../../services/api";
 
@@ -29,7 +32,15 @@ type Props = {
   backgroundJobs: BackgroundJob[];
 };
 
-const RUNNING_STATUSES = new Set([
+const ACTIVE_COLLABORATION_STATUSES = new Set([
+  "created",
+  "active",
+  "executing",
+  "waiting_approval",
+  "stopping",
+]);
+
+const ACTIVE_JOB_STATUSES = new Set([
   "queued",
   "running",
   "stopping",
@@ -37,17 +48,11 @@ const RUNNING_STATUSES = new Set([
   "waiting_capability",
 ]);
 
-function jobStatusLabel(job: BackgroundJob) {
-  if (job.status === "waiting_approval") return "approval required";
-  if (job.status === "stopping") return "stopping safely";
-  return job.status.replaceAll("_", " ");
-}
-
-function statusIcon(status: string) {
-  if (status === "completed") return <CheckCircle2 size={15} />;
-  if (["error", "turn_limit"].includes(status)) {
-    return <XCircle size={15} />;
+function collaborationStatusIcon(status: string) {
+  if (["completed", "completed_with_errors"].includes(status)) {
+    return <CheckCircle2 size={15} />;
   }
+  if (status === "failed") return <XCircle size={15} />;
   if (status === "stopped") return <CircleStop size={15} />;
   return <Clock3 size={15} />;
 }
@@ -59,7 +64,6 @@ export default function MeetingRoomsPage({
   const [rooms, setRooms] = useState<MeetingRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState("");
   const [room, setRoom] = useState<MeetingRoom | null>(null);
-  const [targetAgentId, setTargetAgentId] = useState("");
   const [instruction, setInstruction] = useState("");
   const [allowDelete, setAllowDelete] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -119,22 +123,6 @@ export default function MeetingRoomsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
-  useEffect(() => {
-    if (!room) {
-      setTargetAgentId("");
-      return;
-    }
-    const stillPresent = room.members.some(
-      (member) =>
-        member.active && member.agent_id === targetAgentId,
-    );
-    if (!stillPresent) {
-      setTargetAgentId(
-        room.members.find((member) => member.active)?.agent_id || "",
-      );
-    }
-  }, [room, targetAgentId]);
-
   const roomJobVersion = useMemo(() => {
     if (!activeRoomId) return "";
     return backgroundJobs
@@ -155,25 +143,37 @@ export default function MeetingRoomsPage({
   useEffect(() => {
     if (!activeRoomId || !roomJobVersion) return;
     void refreshRoom(activeRoomId);
-    // The version changes only when a room job changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomJobVersion]);
 
-  const jobs = useMemo(() => {
-    if (!room) return [];
-    const live = backgroundJobs.filter(
-      (job) => job.room_id === room.id,
+  const activeCollaboration = useMemo(() => {
+    if (!room) return null;
+    return (
+      room.collaborations.find((item) =>
+        ACTIVE_COLLABORATION_STATUSES.has(item.status),
+      ) || null
     );
-    const byId = new Map<string, BackgroundJob>();
-    for (const job of room.jobs) byId.set(job.id, job);
-    for (const job of live) byId.set(job.id, job);
-    return Array.from(byId.values()).sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    );
-  }, [room, backgroundJobs]);
+  }, [room]);
 
-  const activeJobs = jobs.filter((job) =>
-    RUNNING_STATUSES.has(job.status),
+  useEffect(() => {
+    if (!activeRoomId || !activeCollaboration) return;
+    const timer = window.setInterval(() => {
+      void refreshRoom(activeRoomId);
+    }, 1400);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, activeCollaboration?.id]);
+
+  const legacyActiveJobs = useMemo(
+    () =>
+      room
+        ? backgroundJobs.filter(
+            (job) =>
+              job.room_id === room.id &&
+              ACTIVE_JOB_STATUSES.has(job.status),
+          )
+        : [],
+    [backgroundJobs, room],
   );
 
   async function selectRoom(roomId: string) {
@@ -190,15 +190,7 @@ export default function MeetingRoomsPage({
 
   async function sendInstruction(event: FormEvent) {
     event.preventDefault();
-    if (
-      !project ||
-      !room ||
-      !targetAgentId ||
-      !instruction.trim() ||
-      busy
-    ) {
-      return;
-    }
+    if (!room || !instruction.trim() || busy) return;
 
     const task = instruction.trim();
     setInstruction("");
@@ -207,7 +199,6 @@ export default function MeetingRoomsPage({
 
     try {
       const fresh = await api.instructMeetingRoom(room.id, {
-        agent_id: targetAgentId,
         instruction: task,
         allow_delete: allowDelete,
       });
@@ -218,7 +209,11 @@ export default function MeetingRoomsPage({
         ),
       );
       setAllowDelete(false);
-      setStatus("Instruction assigned. Agent Man is tracking the job.");
+      setStatus(
+        activeCollaboration
+          ? "Instruction added to the live room discussion."
+          : "Room collaboration started. All active members are working together.",
+      );
     } catch (error) {
       setInstruction(task);
       setStatus(
@@ -229,21 +224,25 @@ export default function MeetingRoomsPage({
     }
   }
 
-  async function stopJob(job: BackgroundJob) {
-    if (!project || busy) return;
+  async function kickMember(member: MeetingRoomMember) {
+    if (!room || busy || !member.active) return;
     setBusy(true);
     setStatus("");
     try {
-      const stopped = await api.stopBackgroundJob(
-        project.id,
-        job.id,
+      const fresh = await api.kickMeetingRoomMember(
+        room.id,
+        member.agent_id,
+      );
+      setRoom(fresh);
+      setRooms((current) =>
+        current.map((item) =>
+          item.id === fresh.id ? fresh : item,
+        ),
       );
       setStatus(
-        stopped.status === "stopped"
-          ? stopped.agent_name + " stopped."
-          : "Stop requested for " + stopped.agent_name + ".",
+        member.agent_name +
+          " was kicked. They will stop participating at the next safe turn boundary.",
       );
-      await refreshRoom();
     } catch (error) {
       setStatus(
         error instanceof Error ? error.message : String(error),
@@ -253,14 +252,43 @@ export default function MeetingRoomsPage({
     }
   }
 
-  async function approveJob(job: BackgroundJob) {
-    if (!project || busy) return;
+  async function stopCollaboration(
+    collaboration: MeetingRoomCollaboration,
+  ) {
+    if (!room || busy) return;
     setBusy(true);
     setStatus("");
     try {
-      await api.approveBackgroundJob(project.id, job.id);
-      setStatus(job.agent_name + " received approval and is resuming.");
-      await refreshRoom();
+      const fresh = await api.stopMeetingRoomCollaboration(
+        room.id,
+        collaboration.id,
+      );
+      setRoom(fresh);
+      setStatus("Stop requested for the shared room session.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveDelete(
+    collaboration: MeetingRoomCollaboration,
+  ) {
+    if (!room || busy) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      const fresh = await api.approveMeetingRoomDelete(
+        room.id,
+        collaboration.id,
+      );
+      setRoom(fresh);
+      setStatus(
+        "Destructive action approved. The room is continuing.",
+      );
     } catch (error) {
       setStatus(
         error instanceof Error ? error.message : String(error),
@@ -310,9 +338,9 @@ export default function MeetingRoomsPage({
         <div>
           <h2>Meeting Rooms</h2>
           <p>
-            Persistent user-directed sessions. Agent Man stays in every
-            room as the Executive host, tracks worker progress, and keeps
-            the task transcript tied to the room.
+            Shared working sessions. Give the room one instruction and
+            the connected agents communicate, use their tools, review one
+            another, and keep going until they agree the objective is complete.
           </p>
         </div>
         <button
@@ -339,18 +367,20 @@ export default function MeetingRoomsPage({
               <Sparkles size={18} />
               <b>No meeting rooms yet</b>
               <p>
-                Ask the Executive: “Create a meeting room for the login
-                issue and connect the relevant agents.”
+                Ask Agent Man to create a meeting room and connect the
+                relevant agents.
               </p>
             </div>
           ) : (
             <div className="meetingRoomRows">
               {rooms.map((item) => {
-                const roomJobs = backgroundJobs.filter(
-                  (job) => job.room_id === item.id,
+                const live = item.collaborations.some((collaboration) =>
+                  ACTIVE_COLLABORATION_STATUSES.has(
+                    collaboration.status,
+                  ),
                 );
-                const running = roomJobs.filter((job) =>
-                  RUNNING_STATUSES.has(job.status),
+                const activeMembers = item.members.filter(
+                  (member) => member.active,
                 ).length;
                 return (
                   <button
@@ -364,10 +394,10 @@ export default function MeetingRoomsPage({
                     <span>
                       <b>{item.title}</b>
                       <small>
-                        {item.members.length} workers · {item.status}
+                        {activeMembers} active agents · {item.status}
                       </small>
                     </span>
-                    {running > 0 && <em>{running} live</em>}
+                    {live && <em>LIVE</em>}
                   </button>
                 );
               })}
@@ -390,22 +420,30 @@ export default function MeetingRoomsPage({
               <section className="panel meetingRoomHeader">
                 <div className="meetingRoomTitle">
                   <div>
-                    <small>ACTIVE SESSION</small>
+                    <small>COLLABORATIVE SESSION</small>
                     <h3>{room.title}</h3>
                     <p>{room.objective || "No objective provided."}</p>
                   </div>
                   <div className="meetingRoomHeaderActions">
-                    <span className="taskStatus">
-                      {room.status}
-                    </span>
+                    <span className="taskStatus">{room.status}</span>
+                    {activeCollaboration && (
+                      <span className="taskStatus active">
+                        round {activeCollaboration.current_round} ·{" "}
+                        {activeCollaboration.status.replaceAll("_", " ")}
+                      </span>
+                    )}
                     {room.status === "active" && (
                       <button
                         className="secondaryButton"
                         onClick={() => void closeRoom()}
-                        disabled={busy || activeJobs.length > 0}
+                        disabled={
+                          busy ||
+                          Boolean(activeCollaboration) ||
+                          legacyActiveJobs.length > 0
+                        }
                         title={
-                          activeJobs.length > 0
-                            ? "Stop or finish active tasks before closing."
+                          activeCollaboration
+                            ? "Stop or finish the active collaboration first."
                             : "Close this room"
                         }
                       >
@@ -421,22 +459,44 @@ export default function MeetingRoomsPage({
                     <span>
                       <b>{room.executive.name}</b>
                       <small>
-                        Executive · {room.executive.status}
+                        Executive · tracks the shared session
                       </small>
                     </span>
                   </article>
+
                   {room.members.map((member) => (
                     <article
-                      className="meetingParticipant"
+                      className={
+                        "meetingParticipant " +
+                        (member.active ? "" : "inactive")
+                      }
                       key={member.agent_id}
                     >
                       <Bot size={17} />
                       <span>
                         <b>{member.agent_name}</b>
                         <small>
-                          {member.role} · {member.state}
+                          {member.role} ·{" "}
+                          {member.active
+                            ? member.state
+                            : "kicked"}
                         </small>
                       </span>
+                      {member.active && room.status === "active" && (
+                        <button
+                          className="meetingKickButton"
+                          disabled={busy}
+                          onClick={() => void kickMember(member)}
+                          title={
+                            "Kick " +
+                            member.agent_name +
+                            " from this room"
+                          }
+                        >
+                          <UserMinus size={13} />
+                          Kick
+                        </button>
+                      )}
                     </article>
                   ))}
                 </div>
@@ -446,10 +506,10 @@ export default function MeetingRoomsPage({
                 <div className="panel meetingRoomThread">
                   <div className="meetingPanelHeader">
                     <div>
-                      <h3>Room transcript</h3>
+                      <h3>Shared room transcript</h3>
                       <small>
-                        User instructions, Executive assignments, and
-                        worker results
+                        Your instructions, peer discussion, reviews, and
+                        final confirmations
                       </small>
                     </div>
                   </div>
@@ -467,7 +527,9 @@ export default function MeetingRoomsPage({
                       >
                         <header>
                           <b>{message.sender_name}</b>
-                          <span>{message.kind.replaceAll("_", " ")}</span>
+                          <span>
+                            {message.kind.replaceAll("_", " ")}
+                          </span>
                         </header>
                         <p>{message.content}</p>
                       </article>
@@ -479,27 +541,16 @@ export default function MeetingRoomsPage({
                     onSubmit={sendInstruction}
                   >
                     <div className="meetingComposerTop">
-                      <label>
-                        Send task to
-                        <select
-                          value={targetAgentId}
-                          onChange={(event) =>
-                            setTargetAgentId(event.target.value)
-                          }
-                          disabled={room.status !== "active"}
-                        >
-                          {room.members
-                            .filter((member) => member.active)
-                            .map((member) => (
-                              <option
-                                value={member.agent_id}
-                                key={member.agent_id}
-                              >
-                                {member.agent_name} · {member.role}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
+                      <div className="meetingSharedTarget">
+                        <Users size={14} />
+                        <span>
+                          <b>Send to the room</b>
+                          <small>
+                            Every active agent receives the same shared
+                            instruction.
+                          </small>
+                        </span>
+                      </div>
                       <label className="meetingDeleteApproval">
                         <input
                           type="checkbox"
@@ -512,25 +563,40 @@ export default function MeetingRoomsPage({
                         Allow destructive delete
                       </label>
                     </div>
+
                     <textarea
                       value={instruction}
                       onChange={(event) =>
                         setInstruction(event.target.value)
                       }
-                      placeholder="Tell the selected agent exactly what to work on..."
-                      disabled={room.status !== "active"}
+                      placeholder={
+                        activeCollaboration
+                          ? "Add a follow-up instruction to the live room..."
+                          : "Tell the room what you want the agents to solve together..."
+                      }
+                      disabled={
+                        room.status !== "active" ||
+                        room.members.every(
+                          (member) => !member.active,
+                        )
+                      }
                     />
+
                     <button
                       className="primaryButton"
                       disabled={
                         busy ||
                         room.status !== "active" ||
-                        !targetAgentId ||
-                        !instruction.trim()
+                        !instruction.trim() ||
+                        room.members.every(
+                          (member) => !member.active,
+                        )
                       }
                     >
                       <Send size={15} />
-                      Assign task
+                      {activeCollaboration
+                        ? "Send follow-up"
+                        : "Start collaboration"}
                     </button>
                   </form>
                 </div>
@@ -540,97 +606,117 @@ export default function MeetingRoomsPage({
                     <div>
                       <h3>Executive tracking</h3>
                       <small>
-                        {activeJobs.length
-                          ? activeJobs.length + " active task(s)"
-                          : "No active tasks"}
+                        Shared progress without assigning a worker
+                        manually
                       </small>
                     </div>
                   </div>
 
                   <div className="meetingJobList">
-                    {jobs.length === 0 && (
+                    {room.collaborations.length === 0 && (
                       <div className="meetingRoomHint compact">
-                        <Clock3 size={17} />
+                        <Users size={17} />
                         <p>
-                          Assign a task to a room member to start a
-                          tracked worker session.
+                          Send one instruction to start peer collaboration
+                          across all active room members.
                         </p>
                       </div>
                     )}
 
-                    {jobs.map((job) => (
+                    {room.collaborations.map((collaboration) => (
                       <article
-                        className={"meetingJob " + job.status}
-                        key={job.id}
+                        className={
+                          "meetingJob " + collaboration.status
+                        }
+                        key={collaboration.id}
                       >
                         <header>
                           <span>
-                            {statusIcon(job.status)}
-                            <b>{job.agent_name}</b>
+                            {collaborationStatusIcon(
+                              collaboration.status,
+                            )}
+                            <b>Shared session</b>
                           </span>
-                          <em>{jobStatusLabel(job)}</em>
+                          <em>
+                            {collaboration.status.replaceAll("_", " ")}
+                          </em>
                         </header>
-                        <p>{job.task}</p>
 
-                        {(job.current_action ||
-                          job.current_next_step) && (
-                          <div className="meetingJobProgress">
-                            {job.current_action && (
-                              <span>
-                                <small>NOW</small>
-                                {job.current_action}
+                        <p>{collaboration.prompt}</p>
+
+                        <div className="meetingJobProgress">
+                          <span>
+                            <small>ROUND</small>
+                            {collaboration.current_round || "starting"}
+                          </span>
+                          <span>
+                            <small>ACTIVE PEERS</small>
+                            {
+                              collaboration.participants.filter(
+                                (participant) =>
+                                  participant.status !== "kicked",
+                              ).length
+                            }
+                          </span>
+                        </div>
+
+                        <div className="meetingPeerStatuses">
+                          {collaboration.participants.map(
+                            (participant) => (
+                              <span
+                                key={participant.agent_id}
+                                className={
+                                  participant.status === "kicked"
+                                    ? "kicked"
+                                    : ""
+                                }
+                              >
+                                <b>{participant.agent_name}</b>
+                                <small>
+                                  {participant.status.replaceAll(
+                                    "_",
+                                    " ",
+                                  )}
+                                </small>
                               </span>
-                            )}
-                            {job.current_next_step && (
-                              <span>
-                                <small>NEXT</small>
-                                {job.current_next_step}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {job.current_tool && (
-                          <code>{job.current_tool}</code>
-                        )}
-
-                        <div className="meetingJobActions">
-                          {job.status === "waiting_approval" && (
-                            <button
-                              className="primaryButton"
-                              disabled={busy}
-                              onClick={() => void approveJob(job)}
-                            >
-                              Approve & Continue
-                            </button>
-                          )}
-                          {[
-                            "queued",
-                            "running",
-                            "stopping",
-                            "waiting_approval",
-                            "waiting_capability",
-                          ].includes(job.status) && (
-                            <button
-                              className="dangerButton"
-                              disabled={
-                                busy || job.status === "stopping"
-                              }
-                              onClick={() => void stopJob(job)}
-                            >
-                              <CircleStop size={14} />
-                              {job.status === "stopping"
-                                ? "Stopping..."
-                                : "Stop agent"}
-                            </button>
+                            ),
                           )}
                         </div>
 
-                        {job.result_text && (
-                          <div className="meetingJobResult">
-                            {job.result_text}
-                          </div>
-                        )}
+                        <div className="meetingJobActions">
+                          {collaboration.status ===
+                            "waiting_approval" && (
+                            <button
+                              className="primaryButton"
+                              disabled={busy}
+                              onClick={() =>
+                                void approveDelete(collaboration)
+                              }
+                            >
+                              Approve delete & Continue
+                            </button>
+                          )}
+
+                          {ACTIVE_COLLABORATION_STATUSES.has(
+                            collaboration.status,
+                          ) && (
+                            <button
+                              className="dangerButton"
+                              disabled={
+                                busy ||
+                                collaboration.status === "stopping"
+                              }
+                              onClick={() =>
+                                void stopCollaboration(collaboration)
+                              }
+                            >
+                              <CircleStop size={14} />
+                              {collaboration.status === "stopping"
+                                ? "Stopping..."
+                                : "Stop session"}
+                            </button>
+                          )}
+                        </div>
                       </article>
                     ))}
                   </div>
