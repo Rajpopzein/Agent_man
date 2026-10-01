@@ -167,6 +167,11 @@ function runtimeSpeechAnnouncement(
     runtimeEvent.agent_name || "Worker",
   );
 
+  // Narration policy:
+  // 1. Speak once when delegation begins.
+  // 2. Stay silent during worker progress, approvals, resume, tools,
+  //    verification, and next-step updates.
+  // 3. Speak the final result or terminal error once.
   if (
     runtimeEvent.type === "executive.activity" &&
     runtimeEvent.phase === "delegation" &&
@@ -178,55 +183,26 @@ function runtimeSpeechAnnouncement(
     );
   }
 
-  if (runtimeEvent.type === "background_job.started") {
-    return name + " is working on the task now.";
-  }
-
-  if (
-    runtimeEvent.type ===
-    "background_job.approval_required"
-  ) {
-    const tool = String(runtimeEvent.tool || "");
-    const permission = String(
-      runtimeEvent.permission || "",
-    );
-    return (
-      name +
-      " is waiting for your approval to " +
-      approvalActionLabel(tool, permission) +
-      ". Please approve it to continue the same background task."
-    );
-  }
-
-  if (
-    runtimeEvent.type === "executive.activity" &&
-    runtimeEvent.phase === "next_step"
-  ) {
-    return String(
-      runtimeEvent.message ||
-        name + " is moving to the next step.",
-    );
-  }
-
-  if (runtimeEvent.type === "background_job.progress") {
-    return null;
-  }
-
-  if (runtimeEvent.type === "background_job.resumed") {
-    return name + " received approval and is resuming the task.";
-  }
-
   if (runtimeEvent.type === "background_job.completed") {
-    return name + " finished the assigned task.";
+    const result = String(
+      runtimeEvent.result_text || "",
+    ).trim();
+    return result
+      ? name + " finished the task. " + result
+      : name + " finished the assigned task.";
   }
 
   if (runtimeEvent.type === "background_job.error") {
-    return name + " ran into an error. Check the activity monitor.";
+    const error = String(
+      runtimeEvent.error || "",
+    ).trim();
+    return error
+      ? name + " could not complete the task. " + error
+      : name + " could not complete the assigned task.";
   }
 
   return null;
 }
-
 
 function consoleLineFromEvent(
   runtimeEvent: RuntimeEvent,
@@ -1384,9 +1360,7 @@ export default function Dashboard() {
 
     if (
       result &&
-      ["completed", "background"].includes(
-        result.status,
-      ) &&
+      result.status === "completed" &&
       result.text &&
       voice.settings.enabled &&
       voice.settings.autoSpeak
