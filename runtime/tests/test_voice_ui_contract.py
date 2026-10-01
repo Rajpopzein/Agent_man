@@ -146,3 +146,63 @@ def test_voice_sanitizes_markdown_json_and_special_characters_before_tts():
     assert "propose_upgrade" in executive
     assert "natural conversational" in executive
 
+def test_runtime_status_voice_is_queued_and_background_reply_is_spoken():
+    root = Path(__file__).resolve().parents[2]
+    hook = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "audio"
+        / "useAgentVoice.ts"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "speechQueueRef" in hook
+    assert "queueSpeakAsync" in hook
+    assert "requestAgentSpeech(speech)" in dashboard
+    assert "runtimeSpeechAnnouncement" in dashboard
+    assert '"background_job.started"' in dashboard
+    assert '"background_job.progress"' in dashboard
+    assert '"background_job.completed"' in dashboard
+    assert '"background_job.error"' in dashboard
+    assert '"completed", "background"' in dashboard
+    assert "voice.queueSpeakAsync(result.text)" in dashboard
+    assert 'setConsoleOpen(true);' in dashboard
+
+
+def test_worker_monitor_exposes_safe_progress_not_private_chain_of_thought():
+    root = Path(__file__).resolve().parents[2]
+    worker = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "executor.py"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert '"progress" field written for the user' in worker
+    assert "Do not expose private" in worker
+    assert 'phase="planning"' in worker
+    assert "safeMonitorDetail" in dashboard
+    assert '"[redacted]"' in dashboard
+    assert '" · tool: "' in dashboard
+
