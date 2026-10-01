@@ -26,6 +26,18 @@ export type Project = {
   workspace_path: string;
 };
 
+export type ProjectFileEntry = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number | null;
+};
+
+export type ProjectFileContent = {
+  path: string;
+  content: string;
+};
+
 export type Skill = {
   id: string;
   project_id: string;
@@ -478,6 +490,15 @@ function legacyApprovalMetadata(
 }
 
 
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(BASE + path, init);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || response.statusText);
+  }
+  return response.blob();
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -501,6 +522,95 @@ export const api = {
     "/api/events/stream?project_id=" +
     encodeURIComponent(projectId),
   projects: () => request<Project[]>("/api/projects"),
+  projectFiles: (projectId: string, path = ".") =>
+    request<ProjectFileEntry[]>(
+      "/api/projects/" +
+        projectId +
+        "/files?path=" +
+        encodeURIComponent(path),
+    ),
+  projectFile: (projectId: string, path: string) =>
+    request<ProjectFileContent>(
+      "/api/projects/" +
+        projectId +
+        "/files/content?path=" +
+        encodeURIComponent(path),
+    ),
+  saveProjectFile: (
+    projectId: string,
+    path: string,
+    content: string,
+  ) =>
+    request<{ path: string; bytes_written: number }>(
+      "/api/projects/" + projectId + "/files/content",
+      {
+        method: "PUT",
+        body: JSON.stringify({ path, content }),
+      },
+    ),
+  createProjectDirectory: (projectId: string, path: string) =>
+    request<{ path: string; created: boolean }>(
+      "/api/projects/" + projectId + "/files/directory",
+      {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      },
+    ),
+  moveProjectPath: (
+    projectId: string,
+    source: string,
+    destination: string,
+  ) =>
+    request<{ source: string; path: string; moved: boolean }>(
+      "/api/projects/" + projectId + "/files/move",
+      {
+        method: "POST",
+        body: JSON.stringify({ source, destination }),
+      },
+    ),
+  deleteProjectPath: (projectId: string, path: string) =>
+    request<{ path: string; deleted: boolean }>(
+      "/api/projects/" +
+        projectId +
+        "/files?path=" +
+        encodeURIComponent(path),
+      { method: "DELETE" },
+    ),
+  uploadProjectFile: async (
+    projectId: string,
+    path: string,
+    content: ArrayBuffer,
+  ) => {
+    const response = await fetch(
+      BASE +
+        "/api/projects/" +
+        projectId +
+        "/files/upload?path=" +
+        encodeURIComponent(path),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: content,
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || response.statusText);
+    }
+    return response.json() as Promise<{
+      path: string;
+      bytes_written: number;
+    }>;
+  },
+  downloadProjectFile: (projectId: string, path: string) =>
+    requestBlob(
+      "/api/projects/" +
+        projectId +
+        "/files/download?path=" +
+        encodeURIComponent(path),
+    ),
+  exportProject: (projectId: string) =>
+    requestBlob("/api/projects/" + projectId + "/export"),
   createProject: (payload: { name: string; workspace_path: string }) =>
     request<Project>("/api/projects", {
       method: "POST",

@@ -23,6 +23,7 @@ import {
   Search,
   Server,
   FileText,
+  FolderTree,
   Settings2,
   ShieldAlert,
   ShieldCheck,
@@ -57,6 +58,7 @@ import AIConnections from "../settings/AIConnections";
 import LLMLogsPage from "../settings/LLMLogsPage";
 import SettingsPage from "../settings/SettingsPage";
 import ToolsPage from "../tools/ToolsPage";
+import WorkbenchPage from "../workbench/WorkbenchPage";
 import {
   api,
   Agent,
@@ -75,6 +77,7 @@ import {
 type View =
   | "background"
   | "dashboard"
+  | "workbench"
   | "orchestration"
   | "multi-agent"
   | "meeting-rooms"
@@ -405,6 +408,11 @@ const VIEW_META: Record<
     label: "Overview",
     eyebrow: "WORKSPACE / OVERVIEW",
     description: "Monitor agents, tasks, tools, and runtime activity from one place.",
+  },
+  workbench: {
+    label: "Workbench",
+    eyebrow: "WORKSPACE / PROJECT",
+    description: "Browse, edit, preview, download, and coordinate work on project files.",
   },
   orchestration: {
     label: "Workflows",
@@ -1717,6 +1725,12 @@ export default function Dashboard() {
             onClick={() => setView("dashboard")}
           />
           <RailButton
+            active={view === "workbench"}
+            label="Workbench"
+            icon={<FolderTree />}
+            onClick={() => setView("workbench")}
+          />
+          <RailButton
             active={view === "orchestration"}
             label="Workflows"
             icon={<GitBranch />}
@@ -1880,6 +1894,11 @@ export default function Dashboard() {
 
         {view === "background" ? (
           <BackgroundPage project={project} />
+        ) : view === "workbench" ? (
+          <WorkbenchPage
+            project={project}
+            backgroundJobs={backgroundJobs}
+          />
         ) : view === "connections" ? (
           <AIConnections
             connections={connections}
