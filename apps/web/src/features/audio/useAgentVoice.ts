@@ -171,6 +171,7 @@ export function useAgentVoice() {
   const speechGenerationRef = useRef(0);
   const browserSpeechCancelRef =
     useRef<(() => void) | null>(null);
+  const browserPlaybackGenerationRef = useRef(0);
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -312,6 +313,7 @@ export function useAgentVoice() {
   }, []);
 
   const stopPlayback = useCallback(() => {
+    browserPlaybackGenerationRef.current += 1;
     browserSpeechCancelRef.current?.();
     browserSpeechCancelRef.current = null;
     window.speechSynthesis.cancel();
@@ -344,11 +346,12 @@ export function useAgentVoice() {
   const speakBrowserAsync = useCallback(
     async (cleaned: string) => {
       const synth = window.speechSynthesis;
+      const playbackGeneration =
+        ++browserPlaybackGenerationRef.current;
 
       const speakOnce = (
         voice: SpeechSynthesisVoice | null,
       ) => {
-        const generation = speechGenerationRef.current;
         return new Promise<boolean>((resolve) => {
           let started = false;
           let settled = false;
@@ -394,7 +397,7 @@ export function useAgentVoice() {
           browserSpeechCancelRef.current = cancelThisSpeech;
 
           utterance.onstart = () => {
-            if (generation !== speechGenerationRef.current) {
+            if (playbackGeneration !== browserPlaybackGenerationRef.current) {
               synth.cancel();
               finish(false);
               return;
@@ -432,7 +435,7 @@ export function useAgentVoice() {
           speakTimer = window.setTimeout(() => {
             if (
               settled ||
-              generation !== speechGenerationRef.current
+              playbackGeneration !== browserPlaybackGenerationRef.current
             ) {
               finish(false);
               return;
@@ -445,6 +448,12 @@ export function useAgentVoice() {
       };
 
       const first = await speakOnce(selectedVoice);
+      if (
+        playbackGeneration !==
+        browserPlaybackGenerationRef.current
+      ) {
+        return;
+      }
       if (!first && selectedVoice) {
         await speakOnce(null);
       }
@@ -652,7 +661,7 @@ export function useAgentVoice() {
       const queued = speechQueueRef.current
         .catch(() => undefined)
         .then(async () => {
-          if (generation !== speechGenerationRef.current) {
+          if (playbackGeneration !== browserPlaybackGenerationRef.current) {
             return;
           }
           await speakAsync(text, force);
