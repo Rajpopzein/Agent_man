@@ -311,6 +311,7 @@ class BackgroundJobView(BaseModel):
     current_action: str
     current_tool: str
     current_detail: str
+    current_next_step: str
     updated_at: str
 
 
