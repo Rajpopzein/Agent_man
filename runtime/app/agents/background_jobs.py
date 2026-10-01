@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from app.agents.executor import execute_agent
 from app.agents.orchestration import execute_workflow_run
+from app.agents.reinforcement import record_reward
 from app.events.bus import events
 from app.persistence.database import SessionLocal
 from app.persistence.models import (
@@ -273,6 +274,23 @@ class BackgroundJobSupervisor:
                 current_action="Worker failed.",
                 current_detail=str(exc)[:2000],
             )
+            try:
+                with SessionLocal() as reward_db:
+                    record_reward(
+                        reward_db,
+                        project_id=project_id,
+                        agent_id=agent_id,
+                        agent_name=str(updated["agent_name"]),
+                        tool_name=str(updated.get("current_tool") or "") or None,
+                        source="background_job",
+                        outcome="error",
+                        task=task,
+                        note=str(exc)[:2000],
+                        reference_id=job_id,
+                    )
+            except Exception:
+                pass
+
             events.emit(
                 "background_job.error",
                 project_id=project_id,
@@ -438,6 +456,23 @@ class BackgroundJobSupervisor:
                     else str(result.get("text", ""))[:2000]
                 ),
             )
+
+            reward_tool = str(
+                updated.get("current_tool") or ""
+            ) or None
+            with SessionLocal() as reward_db:
+                record_reward(
+                    reward_db,
+                    project_id=project_id,
+                    agent_id=agent_id,
+                    agent_name=str(updated["agent_name"]),
+                    tool_name=reward_tool,
+                    source="background_job",
+                    outcome=terminal_status,
+                    task=task,
+                    note=str(result.get("text", ""))[:2000],
+                    reference_id=job_id,
+                )
 
             if terminal_status == "waiting_approval":
                 approval_message = (
