@@ -14,6 +14,7 @@ from app.tools.service import allowed_main_agent_tool_names
 
 _APPROVAL_GATE_BY_TOOL: dict[str, tuple[str, Permission]] = {
     "delete_path": ("delete", Permission.PROJECT_DELETE),
+    "api_delete_agent": ("delete", Permission.PROJECT_DELETE),
     "run_command": ("exec", Permission.TERMINAL_EXECUTE),
     "git_commit": ("exec", Permission.TERMINAL_EXECUTE),
     "run_tests": ("exec", Permission.TERMINAL_EXECUTE),
