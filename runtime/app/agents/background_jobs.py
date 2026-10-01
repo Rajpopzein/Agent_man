@@ -736,6 +736,7 @@ class BackgroundJobSupervisor:
             )
             snapshot = dict(job)
 
+        _persist_agent_task(snapshot)
         events.emit(
             "background_job.resumed",
             project_id=project_id,
