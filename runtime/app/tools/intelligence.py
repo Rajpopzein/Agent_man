@@ -56,6 +56,45 @@ class IntentRule:
 
 RULES: tuple[IntentRule, ...] = (
     IntentRule(
+        intent="agent_management",
+        terms=(
+            "worker agent",
+            "developer agent",
+            "tester agent",
+            "list agents",
+            "show agents",
+            "inspect agent",
+            "agent context",
+            "agent model",
+            "agent role",
+            "agent tools",
+            "create agent",
+            "new agent",
+            "update agent",
+            "modify agent",
+            "change developer",
+            "change tester",
+            "delete agent",
+            "remove agent",
+            "assign tool",
+            "revoke tool",
+            "ai connection",
+        ),
+        sequence=(
+            "api_list_agents",
+            "api_get_agent",
+            "api_list_ai_connections",
+            "api_update_agent",
+            "api_set_agent_tool",
+            "api_create_agent",
+            "api_delete_agent",
+        ),
+        reason=(
+            "The objective requires reading or changing Agent Man worker "
+            "configuration through the runtime Agent API."
+        ),
+    ),
+    IntentRule(
         intent="serial_hardware",
         terms=(
             "esp32",
@@ -298,6 +337,44 @@ def _specialize_sequence(
     lowered: str,
     sequence: tuple[str, ...],
 ) -> tuple[str, ...]:
+    if intent == "agent_management":
+        if any(term in lowered for term in ("create agent", "new agent")):
+            return (
+                "api_list_ai_connections",
+                "api_create_agent",
+            )
+        if any(term in lowered for term in ("delete agent", "remove agent")):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_delete_agent",
+            )
+        if any(term in lowered for term in ("assign tool", "revoke tool", "agent tools")):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_set_agent_tool",
+            )
+        if any(
+            term in lowered
+            for term in (
+                "update agent",
+                "modify agent",
+                "change developer",
+                "change tester",
+                "agent context",
+                "agent model",
+                "agent role",
+            )
+        ):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_list_ai_connections",
+                "api_update_agent",
+            )
+        return ("api_list_agents", "api_get_agent")
+
     if intent != "serial_hardware":
         return sequence
 
@@ -336,6 +413,7 @@ def _specialize_sequence(
 
 
 SAFE_PREFLIGHT_BY_INTENT: dict[str, str] = {
+    "agent_management": "api_list_agents",
     "serial_hardware": "list_serial_ports",
 }
 
