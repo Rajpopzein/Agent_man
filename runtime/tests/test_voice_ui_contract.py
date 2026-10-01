@@ -199,7 +199,8 @@ def test_worker_monitor_exposes_safe_progress_not_private_chain_of_thought():
         / "Dashboard.tsx"
     ).read_text(encoding="utf-8")
 
-    assert '"progress" field written for the user' in worker
+    assert '"progress" field and a short' in worker
+    assert '"next_step" field written for the user' in worker
     assert "Do not expose private" in worker
     assert 'phase="planning"' in worker
     assert "safeMonitorDetail" in dashboard
