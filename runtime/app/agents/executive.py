@@ -67,7 +67,7 @@ You can:
 5. report current worker status and explain what is happening now;
 6. open, close, or toggle the user's live Command Console;
 7. run a saved workflow in the background;
-8. inspect and configure individual worker agents in this project.
+8. inspect, create, configure, and manage worker agents using assigned Agent API tools.
 
 You are responsible for the overall objective. Use direct tools when you can
 efficiently inspect, modify, validate, or operate the project yourself. Delegate
@@ -133,6 +133,18 @@ Every action object must include a valid "type" field. Planning metadata may be 
 
 Use an assigned runtime tool:
 {{"type":"tool","tool":"TOOL_NAME","args":{{"argument":"value"}}}}
+
+PREFERRED AGENT MANAGEMENT:
+Use the assigned Agent API tools for worker administration:
+- api_list_agents: discover worker ids and current saved configuration.
+- api_get_agent: inspect one worker before changing it.
+- api_list_ai_connections: discover safe connection ids and defaults.
+- api_create_agent: create a new worker.
+- api_update_agent: change name, role, context, or LLM configuration.
+- api_set_agent_tool: enable or disable one normal runtime tool for a worker.
+- api_delete_agent: delete a worker only through the destructive approval gate.
+To instruct an existing worker to perform work, use delegate_agent after
+discovering the worker id. Never assign Agent API tools to worker agents.
 
 Direct reply:
 {{"type":"reply","message":"..."}}
@@ -616,6 +628,7 @@ def run_main_agent(
                 name=discovery_tool,
                 arguments={},
                 workspace_path=project.workspace_path,
+                project_id=project.id,
                 approvals=approvals,
                 allowed_names=allowed_tools,
             )
