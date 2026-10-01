@@ -1,4 +1,6 @@
-const BASE = "http://localhost:8765";
+const BASE = (
+  import.meta.env.VITE_API_BASE || "http://localhost:8765"
+).replace(/\/$/, "");
 
 export type Agent = {
   id: string;
