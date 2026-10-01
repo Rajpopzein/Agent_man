@@ -394,6 +394,79 @@ class ConnectorRecord(Base):
     )
 
 
+class MeetingRoomRecord(Base):
+    __tablename__ = "meeting_rooms"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(
+        String(32),
+        default="active",
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        onupdate=_now,
+        index=True,
+    )
+
+
+class MeetingRoomMemberRecord(Base):
+    __tablename__ = "meeting_room_members"
+
+    room_id: Mapped[str] = mapped_column(
+        ForeignKey("meeting_rooms.id"),
+        primary_key=True,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id"),
+        primary_key=True,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class MeetingRoomMessageRecord(Base):
+    __tablename__ = "meeting_room_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    room_id: Mapped[str] = mapped_column(
+        ForeignKey("meeting_rooms.id"),
+        index=True,
+    )
+    sender_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    sender_id: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+        index=True,
+    )
+    sender_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), default="message")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        index=True,
+    )
+
+
 class AgentTaskHistoryRecord(Base):
     __tablename__ = "agent_task_history"
 
@@ -408,6 +481,11 @@ class AgentTaskHistoryRecord(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(160), nullable=False)
     agent_role: Mapped[str] = mapped_column(String(120), default="")
+    room_id: Mapped[str | None] = mapped_column(
+        ForeignKey("meeting_rooms.id"),
+        nullable=True,
+        index=True,
+    )
     task: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(40), index=True)
     current_action: Mapped[str] = mapped_column(Text, default="")
