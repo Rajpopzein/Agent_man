@@ -237,6 +237,10 @@ def test_worker_approval_interrupts_user_with_text_and_voice():
     assert '"background_job.approval_required"' in supervisor
     assert 'phase="approval"' in supervisor
     assert 'status="waiting_approval"' in supervisor
-    assert "ask Agent Man " in supervisor
-    assert "to retry the worker." in supervisor
+    assert "Approve it to continue " in supervisor
+    assert "the same background task." in supervisor
+    assert "Approve & Continue" in dashboard
+    assert "api.approveBackgroundJob" in dashboard
+    assert "approvalJobId" in dashboard
+    assert '"background_job.resumed"' in dashboard
 
