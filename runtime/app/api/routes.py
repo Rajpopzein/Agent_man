@@ -54,6 +54,7 @@ def health():
             "background_worker_supervisor": True,
             "parallel_worker_execution": True,
             "command_console": True,
+            "executive_agent_api_tools": True,
         },
     }
 
