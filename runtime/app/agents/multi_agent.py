@@ -192,10 +192,20 @@ def _run_peer_turn(
         _transcript(db, task.id),
         agents,
     )
+    active_peer_ids = set(
+        db.scalars(
+            select(MultiAgentParticipantRecord.agent_id).where(
+                MultiAgentParticipantRecord.task_id == task.id,
+                MultiAgentParticipantRecord.status.notin_(
+                    {"failed", "kicked", "stopped"}
+                ),
+            )
+        ).all()
+    )
     peers = ", ".join(
         f"{peer.name} ({peer.role})"
         for peer in agents.values()
-        if peer.id != agent.id
+        if peer.id != agent.id and peer.id in active_peer_ids
     )
     round_context = (
         (
@@ -682,6 +692,9 @@ def run_peer_task(
                 kind=kind,
                 round=round_number,
             )
+
+        for participant in participants:
+            db.refresh(participant)
 
         healthy_ids = {
             participant.agent_id
