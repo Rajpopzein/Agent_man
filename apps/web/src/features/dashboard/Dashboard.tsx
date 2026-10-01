@@ -41,6 +41,7 @@ import CommandConsole, {
 } from "./CommandConsole";
 import HolographicField from "./HolographicField";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
+import BackgroundPage from "../agents/BackgroundPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
 import { useAgentVoice } from "../audio/useAgentVoice";
@@ -64,6 +65,7 @@ import {
 } from "../../services/api";
 
 type View =
+  | "background"
   | "dashboard"
   | "orchestration"
   | "multi-agent"
@@ -282,6 +284,11 @@ const VIEW_META: Record<
   View,
   { label: string; eyebrow: string; description: string }
 > = {
+  background: {
+    label: "Background Activity",
+    eyebrow: "SYSTEM / BACKGROUND WORK",
+    description: "Monitor agent jobs, running processes, and output.",
+  },
   dashboard: {
     label: "Command Core",
     eyebrow: "SYSTEM / OVERVIEW",
@@ -767,6 +774,11 @@ export default function Dashboard() {
             ? current.map((item) => item.id === responseId ? response : item)
             : [...current, response]).slice(-20);
         });
+        return;
+      }
+
+      if (runtimeEvent.type === "agent.configuration.updated") {
+        void refreshWorkers(project.id);
         return;
       }
 
@@ -1352,6 +1364,12 @@ export default function Dashboard() {
 
         <nav className="railNav">
           <RailButton
+            active={view === "background"}
+            label="Background"
+            icon={<Activity />}
+            onClick={() => setView("background")}
+          />
+          <RailButton
             active={view === "dashboard"}
             label="Core"
             icon={<Home />}
@@ -1507,7 +1525,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {view === "connections" ? (
+        {view === "background" ? (
+          <BackgroundPage project={project} />
+        ) : view === "connections" ? (
           <AIConnections
             connections={connections}
             onChanged={reloadConnections}
@@ -1516,6 +1536,12 @@ export default function Dashboard() {
           <LLMLogsPage project={project} />
         ) : view === "settings" ? (
           <SettingsPage
+            agents={agents}
+            onAgentSaved={(saved) => setAgents((current) =>
+              current.some((agent) => agent.id === saved.id)
+                ? current.map((agent) => agent.id === saved.id ? saved : agent)
+                : [...current, saved],
+            )}
             project={project}
             connections={connections}
             mainConfig={mainConfig}

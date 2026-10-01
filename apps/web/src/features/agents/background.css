@@ -1,0 +1,23 @@
+.backgroundPage{display:grid;gap:16px;min-width:0}
+.backgroundSummary{display:flex;flex-wrap:wrap;gap:16px;padding:16px;color:#9ec5d0}
+.backgroundSummary b{color:#a4efff;font-size:20px;margin-right:5px}
+.backgroundSection{padding:18px;min-width:0}
+.backgroundHeading,.backgroundJob header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.backgroundHeading h3{display:flex;align-items:center;gap:8px}
+.backgroundHeading label{display:flex;align-items:center;gap:8px}
+.backgroundJobs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:12px}
+.backgroundJob{padding:16px;border:1px solid rgba(99,230,255,.15);background:rgba(2,12,18,.45);min-width:0}
+.backgroundJob h4{margin:0 0 4px;color:#bcecf7}
+.backgroundJob small{color:#7da3af}
+.backgroundTask{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.backgroundJob dl{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px;font-size:12px}
+.backgroundJob dt{color:#7da3af}.backgroundJob dd{margin:0;overflow-wrap:anywhere}
+.backgroundJob summary{cursor:pointer;color:#9bc8d5;margin-top:12px}
+.backgroundOutput{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;background:rgba(0,0,0,.28);padding:12px;font-size:12px;line-height:1.6;color:#b5d4dd}
+.backgroundError{color:#ff9c9c;white-space:pre-wrap;overflow-wrap:anywhere}
+.backgroundProcesses{display:grid;gap:8px}
+.backgroundProcess{display:grid;gap:8px;text-align:left;padding:12px;background:rgba(2,12,18,.45);border:1px solid rgba(99,230,255,.15);color:#9ec5d0;cursor:pointer;min-width:0}
+.backgroundProcess code{white-space:pre-wrap;overflow-wrap:anywhere}.backgroundProcess span{font-size:12px}
+.backgroundProcess.selected{border-color:#63e6ff;background:rgba(99,230,255,.07)}
+.backgroundProcess:focus-visible{outline:2px solid #63e6ff;outline-offset:2px}
+.backgroundProcessOutput{margin-top:16px;min-width:0}

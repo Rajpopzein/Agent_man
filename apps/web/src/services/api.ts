@@ -12,6 +12,9 @@ export type Agent = {
     connection_id: string;
     model: string;
     endpoint?: string | null;
+    context_limit?: number | null;
+    temperature?: number;
+    cloud_fallback_allowed?: boolean;
   };
 };
 
@@ -209,6 +212,16 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type ManagedProcess = {
+  id: string;
+  command: string;
+  workspace_path: string;
+  pid: number;
+  port: number | null;
+  status: string;
+  exit_code: number | null;
+};
+
 export type BackgroundJob = {
   id: string;
   project_id: string;
@@ -359,6 +372,7 @@ export const api = {
       name?: string;
       role?: string;
       context?: string;
+      llm?: Agent["llm"];
     },
   ) =>
     request<Agent>("/api/agents/" + agentId, {
@@ -420,6 +434,10 @@ export const api = {
         projectId +
         "/background-jobs",
     ),
+  managedProcesses: (projectId: string) =>
+    request<ManagedProcess[]>("/api/runtime/processes?project_id=" + encodeURIComponent(projectId)),
+  processOutput: (projectId: string, processId: string) =>
+    request<{ output: string }>("/api/runtime/processes/" + encodeURIComponent(processId) + "/output?project_id=" + encodeURIComponent(projectId)),
   clearMainAgentMessages: (projectId: string) =>
     request<{ cleared: boolean }>(
       "/api/main-agent/projects/" + projectId + "/messages",

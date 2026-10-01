@@ -1,14 +1,16 @@
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.agents.configuration import agent_view, update_configuration
 from app.agents.executor import execute_agent
 from app.agents.runner import run_agent
-from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentUpdate, AgentView, LLMConfigInput, ProjectCreate, ProjectView
+from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentUpdate, AgentView, ProjectCreate, ProjectView
 from app.core.config import settings
 from app.events.bus import events
 from app.persistence.database import get_session
@@ -115,16 +117,12 @@ def update_agent(
     if agent is None:
         raise HTTPException(404, "Agent not found")
 
-    if body.name is not None:
-        agent.name = body.name.strip()
-    if body.role is not None:
-        agent.role = body.role.strip()
-    if body.context is not None:
-        agent.context = body.context.strip()
-
-    db.commit()
-    db.refresh(agent)
-    return agent_view(agent)
+    try:
+        return update_configuration(db, agent, body)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.delete("/api/agents/{agent_id}")
@@ -232,12 +230,23 @@ def execute(agent_id: str, body: AgentRunRequest, db: Session = Depends(get_sess
 
 
 @router.get("/api/runtime/processes")
-def list_managed_processes():
-    return processes.list()
+def list_managed_processes(project_id: str | None = None, db: Session = Depends(get_session)):
+    rows = processes.list()
+    if project_id is None:
+        return rows
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    workspace = Path(project.workspace_path).resolve()
+    return [row for row in rows if Path(str(row["workspace_path"])).resolve() == workspace]
 
 
 @router.get("/api/runtime/processes/{process_id}/output")
-def read_managed_process_output(process_id: str):
+def read_managed_process_output(process_id: str, project_id: str | None = None, db: Session = Depends(get_session)):
+    if project_id is not None and not any(
+        row["id"] == process_id for row in list_managed_processes(project_id, db)
+    ):
+        raise HTTPException(404, "Process not found in this project")
     try:
         return {"output": processes.read_output(process_id)}
     except KeyError as exc:
@@ -314,24 +323,4 @@ async def stream_events(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-    )
-
-
-def agent_view(row: AgentRecord) -> AgentView:
-    return AgentView(
-        id=row.id,
-        project_id=row.project_id,
-        name=row.name,
-        role=row.role,
-        context=row.context or "",
-        state=row.state,
-        llm=LLMConfigInput(
-            provider_id=row.provider_id,
-            connection_id=row.connection_id,
-            model=row.model,
-            endpoint=row.endpoint,
-            context_limit=row.context_limit,
-            temperature=row.temperature_milli / 1000,
-            cloud_fallback_allowed=row.cloud_fallback_allowed,
-        ),
     )

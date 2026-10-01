@@ -355,7 +355,7 @@ label{color:#6f98a8}
 @media(max-width:760px){
   .jarvisShell{grid-template-columns:1fr;padding-bottom:72px}
   .commandRail{position:fixed;left:0;right:0;bottom:0;top:auto;width:100%;height:64px;z-index:30;flex-direction:row;padding:6px 10px;border-right:0;border-top:1px solid rgba(99,230,255,.18)}
-  .commandRail:after{display:none}.coreMark{display:none}.railNav{grid-template-columns:repeat(7,1fr);gap:3px}.railButton{height:50px}.railButton.active:after{display:none}.railFooter{display:none}
+  .commandRail:after{display:none}.coreMark{display:none}.railNav{grid-template-columns:repeat(8,minmax(64px,1fr));gap:3px;overflow-x:auto}.railButton{height:50px}.railButton.active:after{display:none}.railFooter{display:none}
   .hudWorkspace{padding:0 14px 24px}.hudTopbar{height:62px}.systemIdentity small{display:none}.runtimeBadge span{display:none}
   .hudTitleRow{display:block;padding:20px 0 13px}.projectReadout{width:100%;margin-top:14px;text-align:left}
   .telemetryStrip{grid-template-columns:1fr 1fr}.telemetryCell{min-height:72px;padding:10px}.telemetryCell:nth-child(2){border-right:0}.telemetryCell:nth-child(-n+2){border-bottom:1px solid rgba(99,230,255,.08)}

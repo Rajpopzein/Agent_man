@@ -12,14 +12,18 @@ import {
 
 import {
   api,
+  Agent,
   AgentTool,
   AIConnection,
   EffectiveToolAccess,
   MainAgentConfig,
   Project,
 } from "../../services/api";
+import AgentSettings from "./AgentSettings";
 
 type Props = {
+  agents: Agent[];
+  onAgentSaved: (agent: Agent) => void;
   project: Project | null;
   connections: AIConnection[];
   mainConfig: MainAgentConfig | null;
@@ -27,6 +31,8 @@ type Props = {
 };
 
 export default function SettingsPage({
+  agents,
+  onAgentSaved,
   project,
   connections,
   mainConfig,
@@ -302,14 +308,17 @@ export default function SettingsPage({
         <div>
           <h2>Settings</h2>
           <p>
-            Configure Agent Man Executive, discover models, and explicitly
-            choose the runtime tools it can use.
+            Configure Executive and project agents, discover models, and
+            choose Executive runtime tools.
           </p>
         </div>
         <span className="connectionCount">
           {mainConfig ? "EXECUTIVE ONLINE" : "SETUP REQUIRED"}
         </span>
       </div>
+
+      <AgentSettings key={project.id} projectId={project.id} agents={agents}
+        connections={connections} onSaved={onAgentSaved} />
 
       <div className="settingsGrid">
         <form className="panel executiveSettings" onSubmit={save}>

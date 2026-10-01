@@ -73,6 +73,7 @@ class AgentCreate(BaseModel):
 
 
 class AgentUpdate(BaseModel):
+    llm: LLMConfigInput | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
     role: str | None = Field(default=None, min_length=1, max_length=120)
     context: str | None = Field(default=None, max_length=8_000)

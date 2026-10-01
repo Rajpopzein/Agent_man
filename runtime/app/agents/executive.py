@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
+from app.agents.executive_configuration import CONFIGURATION_ACTIONS, execute_configuration_action
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
 from app.agents.self_improvement import (
@@ -65,7 +66,8 @@ You can:
 4. delegate independent responsibilities to multiple background workers in parallel;
 5. report current worker status and explain what is happening now;
 6. open, close, or toggle the user's live Command Console;
-7. run a saved workflow in the background.
+7. run a saved workflow in the background;
+8. inspect and configure individual worker agents in this project.
 
 You are responsible for the overall objective. Use direct tools when you can
 efficiently inspect, modify, validate, or operate the project yourself. Delegate
@@ -151,6 +153,21 @@ Control the live Command Console:
 
 Run workflow:
 {{"type":"run_workflow","workflow_id":"...","task":"..."}}
+
+Inspect an individual worker's full saved configuration:
+{{"type":"inspect_agent","agent_id":"..."}}
+
+List available AI connections (no credentials):
+{{"type":"list_ai_connections"}}
+
+Update an individual worker's configuration:
+{{"type":"configure_agent","agent_id":"...","changes":{{"name":"Reviewer","role":"Tester","context":"Review and test changes","llm":{{"connection_id":"...","model":"...","temperature":0.2}}}}}}
+Send only the fields the user wants changed. Omitted fields stay unchanged.
+Inspect the agent before editing it. Use list_ai_connections to discover connection IDs.
+Supported llm fields: connection_id, model, temperature (0 to 2), context_limit
+(null or at least 256), cloud_fallback_allowed. Credentials cannot be edited.
+Configuration changes apply to subsequent runs; running work is not restarted.
+Use these actions when the user asks to inspect or modify worker settings.
 
 If you believe a capability is missing:
 {{"type":"capability_request","capability":"internet","reason":"Need current documentation."}}
@@ -681,6 +698,20 @@ def run_main_agent(
                     "Execute tools with type=tool; use type=reply only for a plain-language "
                     "summary of observed results and any remaining blocker."
                 )},
+            ])
+            continue
+
+        if kind in CONFIGURATION_ACTIONS:
+            try:
+                result = execute_configuration_action(db, project.id, {**action, "type": kind})
+                status = "ok"
+            except (ValueError, LookupError) as exc:
+                result = {"error": str(exc)}
+                status = "error"
+            steps.append({"type": kind, "step": step_number, "status": status, "result": result})
+            messages.extend([
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": "AGENT CONFIGURATION RESULT: " + json.dumps(result)},
             ])
             continue
 
