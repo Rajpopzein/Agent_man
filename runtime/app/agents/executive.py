@@ -294,6 +294,22 @@ def _request_requires_tool(text: str) -> bool:
         "com port",
         "esp32",
         "hardware",
+        "list agents",
+        "show agents",
+        "inspect agent",
+        "agent context",
+        "agent model",
+        "agent tools",
+        "create agent",
+        "new agent",
+        "update agent",
+        "modify agent",
+        "delete agent",
+        "remove agent",
+        "change developer",
+        "change tester",
+        "assign tool",
+        "revoke tool",
     )
     return any(phrase in lowered for phrase in phrases)
 
