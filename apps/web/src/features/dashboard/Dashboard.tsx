@@ -9,6 +9,7 @@ import {
   Activity,
   Bot,
   Boxes,
+  BrainCircuit,
   Clock3,
   Cpu,
   GitBranch,
@@ -27,6 +28,8 @@ import {
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Volume2,
   VolumeX,
@@ -61,6 +64,7 @@ import {
   MainAgentConfig,
   MainAgentReply,
   Project,
+  ReinforcementSummary,
   RuntimeEvent,
   Tool,
 } from "../../services/api";
@@ -481,6 +485,10 @@ export default function Dashboard() {
   const [serverLogs, setServerLogs] = useState<LLMLog[]>([]);
   const [backgroundJobs, setBackgroundJobs] =
     useState<BackgroundJob[]>([]);
+  const [reinforcement, setReinforcement] =
+    useState<ReinforcementSummary | null>(null);
+  const [feedbackSent, setFeedbackSent] =
+    useState<-1 | 1 | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleLines, setConsoleLines] =
     useState<CommandConsoleLine[]>([]);
@@ -554,17 +562,20 @@ export default function Dashboard() {
           effectiveAccess,
           recentServerLogs,
           recentBackgroundJobs,
+          reinforcementSummary,
         ] = await Promise.all([
           api.agents(currentProject.id),
           api.mainAgentConfig(currentProject.id),
           api.effectiveMainAgentTools(currentProject.id),
           api.llmLogs(currentProject.id, 12),
           api.backgroundJobs(currentProject.id),
+          api.reinforcementSummary(currentProject.id),
         ]);
         setMainConfig(executiveConfig);
         setExecutiveAccess(effectiveAccess);
         setServerLogs(recentServerLogs);
         setBackgroundJobs(recentBackgroundJobs);
+        setReinforcement(reinforcementSummary);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -578,6 +589,7 @@ export default function Dashboard() {
         setExecutiveAccess(null);
         setServerLogs([]);
         setBackgroundJobs([]);
+        setReinforcement(null);
       }
     } catch {
       setOnline(false);
@@ -619,6 +631,23 @@ export default function Dashboard() {
       setServerLogs(await api.llmLogs(id, 12));
     } catch {
       // Keep the last known server log snapshot.
+    }
+  }
+
+  async function refreshReinforcement(
+    projectId?: string,
+  ) {
+    const id = projectId || project?.id;
+    if (!id) {
+      setReinforcement(null);
+      return;
+    }
+    try {
+      setReinforcement(
+        await api.reinforcementSummary(id),
+      );
+    } catch {
+      // Keep the previous learning snapshot.
     }
   }
 
@@ -722,6 +751,13 @@ export default function Dashboard() {
           text: message,
           steps: current?.steps || [],
         }));
+      }
+
+      if (
+        runtimeEvent.type ===
+        "reinforcement.reward.recorded"
+      ) {
+        void refreshReinforcement(project.id);
       }
 
       if (
@@ -1277,6 +1313,7 @@ export default function Dashboard() {
     setBusy(true);
     setProcessingStartedAt(Date.now());
     setRun(null);
+    setFeedbackSent(null);
     setLiveResponses([]);
     setLiveActivities([]);
     setLiveModelCalls([]);
@@ -1317,6 +1354,58 @@ export default function Dashboard() {
       voice.settings.autoSpeak
     ) {
       await voice.queueSpeakAsync(result.text);
+    }
+  }
+
+  async function submitReinforcementFeedback(
+    value: -1 | 1,
+  ) {
+    if (!project || !run || feedbackSent !== null) {
+      return;
+    }
+
+    const recentJob =
+      backgroundJobs.length > 0
+        ? backgroundJobs[0]
+        : null;
+
+    try {
+      await api.reinforcementFeedback(project.id, {
+        value,
+        agent_id: recentJob?.agent_id || null,
+        agent_name:
+          recentJob?.agent_name || "Agent Man",
+        tool_name:
+          recentJob?.current_tool || null,
+        task:
+          recentJob?.task || prompt.trim(),
+        note:
+          value > 0
+            ? "User confirmed this result was useful."
+            : "User indicated this result needs improvement.",
+        reference_id: recentJob?.id || null,
+      });
+      setFeedbackSent(value);
+      await refreshReinforcement(project.id);
+      setNotice({
+        title:
+          value > 0
+            ? "Feedback learned"
+            : "Correction recorded",
+        message:
+          value > 0
+            ? "Agent Man will treat this outcome as positive evidence."
+            : "Agent Man will reduce confidence in this approach and use the feedback on future choices.",
+      });
+    } catch (error) {
+      setNotice({
+        title: "Feedback could not be saved",
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+        tone: "danger",
+      });
     }
   }
 
@@ -1754,6 +1843,20 @@ export default function Dashboard() {
                 label="Tools"
                 value={activeTools}
                 detail={`${globallyEnabledTools} RUNTIME ENABLED`}
+              />
+              <Telemetry
+                icon={<BrainCircuit />}
+                label="Learning"
+                value={
+                  reinforcement
+                    ? reinforcement.overall.average_reward.toFixed(2)
+                    : "0.00"
+                }
+                detail={
+                  reinforcement
+                    ? reinforcement.events + " REWARD EVENTS"
+                    : "NO FEEDBACK YET"
+                }
               />
               <Telemetry
                 icon={<ShieldCheck />}
@@ -2332,6 +2435,44 @@ export default function Dashboard() {
                       />
                     )}
                   </div>
+
+                  {run && !busy && (
+                    <div className="reinforcementFeedback">
+                      <span>Was this outcome useful?</span>
+                      <button
+                        type="button"
+                        className={
+                          feedbackSent === 1
+                            ? "positive active"
+                            : "positive"
+                        }
+                        onClick={() =>
+                          void submitReinforcementFeedback(1)
+                        }
+                        disabled={feedbackSent !== null}
+                        title="Positive reinforcement"
+                      >
+                        <ThumbsUp size={15} />
+                        Helpful
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          feedbackSent === -1
+                            ? "negative active"
+                            : "negative"
+                        }
+                        onClick={() =>
+                          void submitReinforcementFeedback(-1)
+                        }
+                        disabled={feedbackSent !== null}
+                        title="Negative reinforcement"
+                      >
+                        <ThumbsDown size={15} />
+                        Needs work
+                      </button>
+                    </div>
+                  )}
 
                   {busy && liveActivities.length > 0 && (
                     <div className="liveActivityFeed">
