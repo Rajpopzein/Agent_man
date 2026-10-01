@@ -1026,6 +1026,9 @@ class BackgroundJobSupervisor:
                 + str(job["id"])
                 + ": "
                 + str(job["agent_name"])
+                + ((
+                    " room=" + str(job.get("room_id"))
+                ) if job.get("room_id") else "")
                 + " ("
                 + str(job["agent_role"])
                 + ") ["
