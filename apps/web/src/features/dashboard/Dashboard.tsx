@@ -1472,7 +1472,6 @@ export default function Dashboard() {
       }));
       setNotice(null);
       setAllowDelete(false);
-      await refreshWorkers(project.id);
     } catch (error) {
       setNotice({
         title: "Approval could not continue the worker",
