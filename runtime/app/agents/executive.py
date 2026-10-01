@@ -835,7 +835,6 @@ def run_main_agent(
                 continue
 
             text = str(action.get("message", raw)).strip()
-            _store_assistant_message(db, project.id, text)
             background_active = any(
                 step.get("type")
                 in {
@@ -850,6 +849,39 @@ def run_main_agent(
                 in {"queued", "running", "partial"}
                 for step in steps
             )
+
+            if background_active:
+                active_jobs = [
+                    job
+                    for job in background_jobs.list_project(project.id)
+                    if str(job.get("status", ""))
+                    in {"queued", "running"}
+                ]
+                active_names = list(
+                    dict.fromkeys(
+                        str(job.get("agent_name", "Worker"))
+                        for job in active_jobs
+                    )
+                )
+                if active_names and not any(
+                    name.lower() in text.lower()
+                    for name in active_names
+                ):
+                    if len(active_names) == 1:
+                        status_prefix = (
+                            active_names[0]
+                            + " has been contacted and is working "
+                            "in the background. "
+                        )
+                    else:
+                        status_prefix = (
+                            ", ".join(active_names)
+                            + " have been contacted and are working "
+                            "in the background. "
+                        )
+                    text = status_prefix + text
+
+            _store_assistant_message(db, project.id, text)
             return {
                 "status": (
                     "background"
