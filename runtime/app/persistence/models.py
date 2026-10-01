@@ -345,3 +345,51 @@ class ReinforcementEventRecord(Base):
         index=True,
     )
 
+
+class SkillRecord(Base):
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    slug: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class AgentSkillRecord(Base):
+    __tablename__ = "agent_skills"
+
+    agent_id: Mapped[str] = mapped_column(
+        ForeignKey("agents.id"), primary_key=True
+    )
+    skill_id: Mapped[str] = mapped_column(
+        ForeignKey("skills.id"), primary_key=True
+    )
+
+
+class ConnectorRecord(Base):
+    __tablename__ = "connectors"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    kind: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    base_url: Mapped[str] = mapped_column(String(512), default="")
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    has_secret: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
