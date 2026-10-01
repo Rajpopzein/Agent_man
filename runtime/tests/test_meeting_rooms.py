@@ -122,6 +122,82 @@ def test_executive_can_create_persistent_meeting_room(monkeypatch):
     assert room["messages"][0]["kind"] == "room_created"
 
 
+def test_executive_resolves_placeholder_worker_ids_to_real_workers(monkeypatch):
+    project, workers = _setup()
+    suffix = workers["Developer"]["name"].removeprefix("Developer ")
+
+    designer = client.post(
+        "/api/agents",
+        json={
+            "project_id": project["id"],
+            "name": "UI Designer " + suffix,
+            "role": "UI Designer",
+            "context": "Design and refine the portfolio user interface.",
+            "llm": {
+                "provider_id": "lmstudio",
+                "connection_id": workers["Developer"]["llm"]["connection_id"],
+                "model": "ui-designer-model",
+            },
+        },
+    )
+    assert designer.status_code == 201
+    ui_designer = designer.json()
+    calls = {"count": 0}
+
+    def respond(agent, messages, endpoint=None):
+        calls["count"] += 1
+        return json.dumps(
+            {
+                "type": "create_meeting_room",
+                "title": "Portfolio Issues",
+                "objective": "Discuss and resolve portfolio-related issues",
+                "agent_ids": ["developer-id", "ui-designer-id"],
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        respond,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": (
+                "Create a meeting room for portfolio issues with the "
+                "Developer and UI Designer."
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "meeting_room"
+    assert calls["count"] == 1
+
+    created_step = next(
+        step
+        for step in body["steps"]
+        if step["type"] == "create_meeting_room"
+    )
+    assert set(created_step["agent_ids"]) == {
+        workers["Developer"]["id"],
+        ui_designer["id"],
+    }
+
+    room = client.get(
+        "/api/meeting-rooms/" + created_step["room_id"]
+    )
+    assert room.status_code == 200
+    assert {
+        member["agent_id"]
+        for member in room.json()["members"]
+    } == {
+        workers["Developer"]["id"],
+        ui_designer["id"],
+    }
+
+
 def test_room_instruction_tracks_background_job_and_manual_stop(monkeypatch):
     project, workers = _setup()
     developer = workers["Developer"]
