@@ -384,34 +384,120 @@ class BackgroundJobSupervisor:
                 }
                 else "completed"
             )
+            result_steps = result.get("steps", [])
+            approval_step = next(
+                (
+                    step
+                    for step in reversed(result_steps)
+                    if str(step.get("status", ""))
+                    == "approval_required"
+                ),
+                {},
+            )
+            approval_tool = str(
+                approval_step.get("tool") or ""
+            )
+            approval_permission = str(
+                approval_step.get("permission") or ""
+            )
+
             updated = self._update(
                 job_id,
                 status=terminal_status,
                 completed_at=_now(),
                 result_text=str(result.get("text", ""))[:12000],
-                step_count=len(result.get("steps", [])),
+                step_count=len(result_steps),
                 current_phase=terminal_status,
                 current_action=(
                     "Finished the assigned task."
                     if terminal_status == "completed"
-                    else "Worker stopped with status " + terminal_status + "."
+                    else (
+                        "Waiting for approval to use "
+                        + approval_tool
+                        + "."
+                        if terminal_status == "waiting_approval"
+                        and approval_tool
+                        else "Worker stopped with status "
+                        + terminal_status
+                        + "."
+                    )
                 ),
-                current_detail=str(result.get("text", ""))[:2000],
-            )
-            events.emit(
-                "background_job.completed",
-                project_id=project_id,
-                job_id=job_id,
-                agent_id=agent_id,
-                agent_name=updated["agent_name"],
-                agent_role=updated["agent_role"],
-                status=terminal_status,
-                result_text=updated["result_text"],
-                step_count=updated["step_count"],
-                message=(
-                    f"{updated['agent_name']} finished: {terminal_status}."
+                current_tool=(
+                    approval_tool
+                    if terminal_status == "waiting_approval"
+                    else str(
+                        self.get(job_id).get("current_tool", "")
+                        if self.get(job_id)
+                        else ""
+                    )
+                ),
+                current_detail=(
+                    approval_permission
+                    if terminal_status == "waiting_approval"
+                    and approval_permission
+                    else str(result.get("text", ""))[:2000]
                 ),
             )
+
+            if terminal_status == "waiting_approval":
+                approval_message = (
+                    f"{updated['agent_name']} is waiting for approval"
+                    + (
+                        " to use " + approval_tool
+                        if approval_tool
+                        else ""
+                    )
+                    + (
+                        ". Required permission: "
+                        + approval_permission
+                        if approval_permission
+                        else ""
+                    )
+                    + ". Approve it in Mission Control, then retry or resume "
+                    "the worker."
+                )
+                events.emit(
+                    "background_job.approval_required",
+                    project_id=project_id,
+                    job_id=job_id,
+                    agent_id=agent_id,
+                    agent_name=updated["agent_name"],
+                    agent_role=updated["agent_role"],
+                    status="waiting_approval",
+                    tool=approval_tool,
+                    permission=approval_permission,
+                    current_phase="waiting_approval",
+                    current_action=updated["current_action"],
+                    current_tool=approval_tool,
+                    current_detail=approval_permission,
+                    updated_at=updated["updated_at"],
+                    message=approval_message,
+                )
+                events.emit(
+                    "executive.activity",
+                    project_id=project_id,
+                    agent_id="main-agent:" + project_id,
+                    agent_name="Agent Man",
+                    phase="approval",
+                    status="waiting_approval",
+                    label=updated["agent_name"],
+                    message=approval_message,
+                )
+            else:
+                events.emit(
+                    "background_job.completed",
+                    project_id=project_id,
+                    job_id=job_id,
+                    agent_id=agent_id,
+                    agent_name=updated["agent_name"],
+                    agent_role=updated["agent_role"],
+                    status=terminal_status,
+                    result_text=updated["result_text"],
+                    step_count=updated["step_count"],
+                    message=(
+                        f"{updated['agent_name']} finished: {terminal_status}."
+                    ),
+                )
         except Exception as exc:
             updated = self._update(
                 job_id,
