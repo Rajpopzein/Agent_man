@@ -185,7 +185,7 @@ function runtimeSpeechAnnouncement(
       name +
       " is waiting for your approval to " +
       approvalActionLabel(tool, permission) +
-      ". Please approve it in Mission Control, then retry or resume the worker."
+      ". Please approve it in Mission Control, then ask Agent Man to retry the worker."
     );
   }
 
@@ -709,7 +709,7 @@ export default function Dashboard() {
           workerName +
           " is waiting for approval to " +
           action +
-          ". Approve it in Mission Control, then retry or resume the worker.";
+          ". Approve it in Mission Control, then ask Agent Man to retry the worker.";
 
         setConsoleOpen(true);
         setView("dashboard");
