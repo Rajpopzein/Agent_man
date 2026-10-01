@@ -189,6 +189,19 @@ def _run_peer_turn(
         for peer in agents.values()
         if peer.id != agent.id
     )
+    round_context = (
+        (
+            f"Current collaboration round: {round_number}. "
+            "This room session has no fixed round ceiling; "
+            "keep collaborating until the shared objective is complete."
+        )
+        if continuous
+        else (
+            f"Current collaboration round: {round_number} of "
+            f"safety ceiling {task.max_rounds}."
+        )
+    )
+
     messages = [
         {
             "role": "system",
@@ -207,15 +220,7 @@ def _run_peer_turn(
                 f"Shared task: {task.prompt}\n"
                 f"Your role: {agent.role}\n"
                 f"Peer agents: {peers or '(none)'}\n"
-                (
-                    f"Current collaboration round: {round_number}. "
-                    "This room session has no fixed round ceiling; "
-                    "keep collaborating until the shared objective is complete.\n\n"
-                    if continuous
-                    else f"Current collaboration round: "
-                    f"{round_number} of safety ceiling "
-                    f"{task.max_rounds}\n\n"
-                )
+                f"{round_context}\n\n"
                 f"Shared discussion:\n{transcript}\n\n"
                 "Take one useful peer turn now. Inspect the project "
                 "with tools when that is needed to verify the shared job."
@@ -480,6 +485,7 @@ def run_peer_task(
         "completed",
         "completed_with_errors",
         "failed",
+        "stopped",
     }:
         return task
 
@@ -713,7 +719,11 @@ def run_peer_task(
                 for participant in participants
             )
             for participant in participants:
-                if participant.status != "failed":
+                if participant.status not in {
+                    "failed",
+                    "kicked",
+                    "stopped",
+                }:
                     participant.status = "completed"
             task.status = (
                 "completed_with_errors"
@@ -729,6 +739,8 @@ def run_peer_task(
                 task_id=task.id,
                 status=task.status,
                 stable_rounds=STABLE_COMPLETION_ROUNDS,
+                project_id=task.project_id,
+                room_id=task.room_id,
             )
             return task
 
