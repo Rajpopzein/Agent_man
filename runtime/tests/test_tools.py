@@ -147,3 +147,126 @@ def test_serial_open_requires_hardware_approval(tmp_path: Path):
             allowed_names={"serial_open"},
         )
     assert exc.value.permission.value == "hardware.serial"
+
+def test_agent_api_tools_are_executive_only_by_default():
+    agent = _agent()
+    project_id = agent["project_id"]
+
+    worker_tools = client.get(
+        "/api/tools/agents/" + agent["id"]
+    )
+    assert worker_tools.status_code == 200
+    worker_by_name = {
+        item["name"]: item
+        for item in worker_tools.json()
+    }
+
+    executive_tools = client.get(
+        "/api/tools/main-agent/" + project_id
+    )
+    assert executive_tools.status_code == 200
+    executive_by_name = {
+        item["name"]: item
+        for item in executive_tools.json()
+    }
+
+    api_names = {
+        "api_list_agents",
+        "api_get_agent",
+        "api_create_agent",
+        "api_update_agent",
+        "api_delete_agent",
+        "api_set_agent_tool",
+        "api_list_ai_connections",
+    }
+    assert api_names <= set(worker_by_name)
+    assert api_names <= set(executive_by_name)
+    assert all(
+        worker_by_name[name]["assigned"] is False
+        for name in api_names
+    )
+    assert all(
+        executive_by_name[name]["assigned"] is True
+        for name in api_names
+    )
+
+
+def test_executive_agent_api_tool_can_inspect_and_update_worker():
+    agent = _agent()
+    project_id = agent["project_id"]
+
+    listed = tools.execute(
+        name="api_list_agents",
+        arguments={},
+        workspace_path=".",
+        project_id=project_id,
+        allowed_names={"api_list_agents"},
+    )
+    found = next(
+        item
+        for item in listed["agents"]
+        if item["id"] == agent["id"]
+    )
+    assert found["name"] == agent["name"]
+
+    updated = tools.execute(
+        name="api_update_agent",
+        arguments={
+            "agent_id": agent["id"],
+            "changes": {
+                "role": "Reviewer",
+                "context": "Review implementation and tests.",
+            },
+        },
+        workspace_path=".",
+        project_id=project_id,
+        allowed_names={"api_update_agent"},
+    )
+    assert updated["agent"]["role"] == "Reviewer"
+    assert (
+        updated["agent"]["context"]
+        == "Review implementation and tests."
+    )
+
+    inspected = tools.execute(
+        name="api_get_agent",
+        arguments={"agent_id": agent["id"]},
+        workspace_path=".",
+        project_id=project_id,
+        allowed_names={"api_get_agent"},
+    )
+    assert inspected["agent"]["role"] == "Reviewer"
+
+
+def test_executive_agent_delete_tool_requires_destructive_approval():
+    agent = _agent()
+
+    with pytest.raises(ApprovalRequired) as exc:
+        tools.execute(
+            name="api_delete_agent",
+            arguments={"agent_id": agent["id"]},
+            workspace_path=".",
+            project_id=agent["project_id"],
+            approvals=set(),
+            allowed_names={"api_delete_agent"},
+        )
+
+    assert exc.value.permission.value == "project.files.delete"
+
+
+def test_workers_cannot_be_given_executive_agent_api_tools():
+    agent = _agent()
+
+    with pytest.raises(ValueError, match="Executive-only"):
+        tools.execute(
+            name="api_set_agent_tool",
+            arguments={
+                "agent_id": agent["id"],
+                "tool_name": "api_update_agent",
+                "enabled": True,
+            },
+            workspace_path=".",
+            project_id=agent["project_id"],
+            allowed_names={"api_set_agent_tool"},
+        )
+
