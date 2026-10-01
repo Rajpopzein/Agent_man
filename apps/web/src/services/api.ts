@@ -280,6 +280,7 @@ export type BackgroundJob = {
   current_action: string;
   current_tool: string;
   current_detail: string;
+  current_next_step: string;
   updated_at: string;
 };
 
