@@ -2329,3 +2329,91 @@ input:focus,textarea:focus,select:focus{
   .selectedWorkerMeta{grid-template-columns:1fr}
 }
 
+/* Readability pass */
+body{font-size:15px}
+.railButton small{font-size:10px;letter-spacing:.25px}
+.systemIdentity small,.hudEyebrow{font-size:10px}
+.systemIdentity strong{font-size:14px}
+.topCommand,.runtimeBadge,.voiceCoreButton,.consoleCoreButton{
+  font-size:11px
+}
+.runtimeBadge b,.consoleCoreButton b{font-size:9px}
+.hudTitleRow p{font-size:13px}
+.projectReadout small{font-size:9px}
+.projectReadout strong{font-size:13px}
+.projectReadout code{font-size:10px}
+.panelLabel b{font-size:11px}
+.telemetryCell small{font-size:10px}
+.telemetryCell strong{font-size:22px}
+.telemetryCell span{font-size:10px}
+.agentMeta b{font-size:13px}
+.agentMeta small{font-size:10px}
+.agentModel,.matrixAgent em{font-size:9px}
+.executiveAgentIdentity small,
+.executiveManagedNote,
+.workerDivider span{font-size:9px}
+.executiveOverviewHeader small,
+.currentWorkHeader small,
+.selectedWorkerTitle>span{font-size:9px}
+.executiveOverviewHeader h2{font-size:20px}
+.executiveOverviewHeader p{font-size:12px}
+.professionalStatus{font-size:9px}
+.executiveSummaryGrid span,.selectedWorkerMeta span{font-size:10px}
+.executiveSummaryGrid strong{font-size:15px}
+.currentWorkHeader strong{font-size:14px}
+.currentWorkHeader>span{font-size:9px}
+.currentWorkCard p{font-size:12px}
+.selectedWorkerTitle button{font-size:11px}
+.selectedWorkerIdentity strong{font-size:13px}
+.selectedWorkerIdentity span{font-size:11px}
+.workerState{font-size:9px}
+.selectedWorkerMeta strong{font-size:11px}
+.professionalEmpty{font-size:12px}
+.missionStatus small{font-size:9px}
+.missionStatus strong{font-size:13px}
+.missionReadout span{font-size:9px!important}
+.missionReadout b{font-size:11px!important}
+.missionGateLegend{font-size:9px}
+.commandHeader h3{font-size:16px}
+.commandStatus{font-size:10px}
+.commandComposer textarea{font-size:14px;line-height:1.55}
+.commandComposer button{font-size:11px}
+.outputBody,.outputText{font-size:13px;line-height:1.6}
+.outputStreamHeader>b{font-size:10px}
+.outputStreamHeader>small,.streamState{font-size:9px}
+.liveActivityRow>span{font-size:8px}
+.liveActivityRow>b,.liveActivityRow>small{font-size:10px}
+.sectionHeading h2{font-size:19px}
+.sectionHeading p{font-size:13px}
+.connectionCount,.taskStatus{font-size:10px}
+input,textarea,select{font-size:13px}
+.primaryButton,.testButton,.secondaryButton,.iconButton{font-size:11px}
+.muted{font-size:12px}
+.connectionForm label,.multiComposer label,.workflowBuilder>label,.draftStage label,
+.toolControls label{font-size:10px}
+.connectionTop h3,.panel h3{font-size:14px}
+.connectionTop p,.connectionMeta,.modelChip{font-size:10px}
+.toolCategory>h3,.toolHeader h4{font-size:11px}
+.toolHeader small,.riskBadge,.toolToggle{font-size:9px}
+.toolCard p{font-size:11px}
+.trace h4,.traceRow b{font-size:10px}
+.traceRow span,.traceRow code{font-size:9px}
+.aiServerLogPanel h4{font-size:13px}
+.aiServerStatus{font-size:9px}
+.aiServerLogTop b{font-size:11px}
+.aiServerLogTop span{font-size:9px}
+.aiServerLogRow>small,.aiServerLogMeta{font-size:9px}
+.aiServerLogRow em{font-size:10px}
+.aiServerLogEmpty,.aiServerLogOpen{font-size:10px}
+.commandConsoleHeader span{font-size:10px}
+.commandConsoleHeader small{font-size:9px}
+.commandConsoleLine{font-size:10px;line-height:1.55}
+.commandConsoleEmpty{font-size:10px}
+
+@media(max-width:760px){
+  body{font-size:14px}
+  .railButton small{font-size:9px}
+  .hudTitleRow h1{font-size:24px}
+  .commandConsoleLine{font-size:9px}
+}
+
