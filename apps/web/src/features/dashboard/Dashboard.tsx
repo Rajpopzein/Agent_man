@@ -459,6 +459,7 @@ export default function Dashboard() {
     useState<EffectiveToolAccess | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [lastDirective, setLastDirective] = useState("");
   const [run, setRun] = useState<MainAgentReply | null>(null);
   const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
   const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
@@ -1322,7 +1323,8 @@ export default function Dashboard() {
     }
 
     setView("dashboard");
-    setPrompt(command);
+    setLastDirective(command);
+    setPrompt("");
     voice.stop();
     setBusy(true);
     setProcessingStartedAt(Date.now());
@@ -1390,7 +1392,7 @@ export default function Dashboard() {
         tool_name:
           recentJob?.current_tool || null,
         task:
-          recentJob?.task || prompt.trim(),
+          recentJob?.task || lastDirective,
         note:
           value > 0
             ? "User confirmed this result was useful."
