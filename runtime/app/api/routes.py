@@ -57,6 +57,8 @@ def health():
             "executive_agent_api_tools": True,
             "reinforcement_policy_memory": True,
             "reinforcement_user_feedback": True,
+            "skill_packages": True,
+            "connector_framework": True,
         },
     }
 
