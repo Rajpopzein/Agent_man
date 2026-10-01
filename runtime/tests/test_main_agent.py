@@ -1788,3 +1788,61 @@ def test_executive_prompt_uses_live_worker_snapshot_as_status_source():
     assert "doing now" in executive
     assert "instead of only repeating the original delegated task" in executive
 
+def test_executive_agent_api_tool_receives_project_context_in_chat(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+
+    def respond(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert "api_update_agent" in messages[0]["content"]
+            return json.dumps({
+                "type": "tool",
+                "tool": "api_update_agent",
+                "args": {
+                    "agent_id": developer["id"],
+                    "changes": {
+                        "context": (
+                            "Focus on React implementation and validate "
+                            "changes before reporting completion."
+                        )
+                    },
+                },
+            })
+        assert "TOOL RESULT" in messages[-1]["content"]
+        assert "React implementation" in messages[-1]["content"]
+        return json.dumps({
+            "type": "reply",
+            "message": "Developer context has been updated.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        respond,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Change Developer agent context for React work.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["steps"][-1]["tool"] == "api_update_agent"
+    assert body["steps"][-1]["status"] == "ok"
+
+    agents = client.get(
+        "/api/projects/" + project["id"] + "/agents"
+    )
+    assert agents.status_code == 200
+    saved = next(
+        item
+        for item in agents.json()
+        if item["id"] == developer["id"]
+    )
+    assert "React implementation" in saved["context"]
+
