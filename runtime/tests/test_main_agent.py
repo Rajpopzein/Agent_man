@@ -2140,3 +2140,114 @@ def test_executive_destructive_tool_still_requires_explicit_approval(monkeypatch
     assert body["status"] == "waiting_approval"
     assert body["steps"][-1]["permission"] == "project.files.delete"
 
+def test_waiting_background_job_resumes_same_job_after_approval(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append({
+            "allow_delete": kwargs.get("allow_delete", False),
+            "prompt": kwargs["prompt"],
+        })
+        if len(calls) == 1:
+            return {
+                "status": "waiting_approval",
+                "text": "Delete approval required.",
+                "steps": [
+                    {
+                        "turn": 1,
+                        "tool": "delete_path",
+                        "status": "approval_required",
+                        "permission": "project.files.delete",
+                    }
+                ],
+            }
+        return {
+            "status": "completed",
+            "text": "Deletion completed and task verified.",
+            "steps": [
+                {
+                    "turn": 1,
+                    "tool": "delete_path",
+                    "status": "ok",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Remove the obsolete file.",
+    )
+    waiting = background_jobs.wait(job["id"], timeout=5)
+    assert waiting["id"] == job["id"]
+    assert waiting["status"] == "waiting_approval"
+    assert waiting["current_detail"] == "project.files.delete"
+
+    response = client.post(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs/"
+        + job["id"]
+        + "/approve"
+    )
+    assert response.status_code == 200
+    resumed = response.json()
+    assert resumed["id"] == job["id"]
+    assert resumed["status"] in {"queued", "running"}
+
+    finished = background_jobs.wait(job["id"], timeout=5)
+    assert finished["id"] == job["id"]
+    assert finished["status"] == "completed"
+    assert "Deletion completed" in finished["result_text"]
+    assert len(calls) == 2
+    assert calls[0]["allow_delete"] is False
+    assert calls[1]["allow_delete"] is True
+    assert calls[0]["prompt"] == calls[1]["prompt"]
+
+
+def test_background_approval_endpoint_rejects_non_waiting_job(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        lambda **kwargs: {
+            "status": "completed",
+            "text": "Done.",
+            "steps": [],
+        },
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Complete a normal task.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+    assert finished["status"] == "completed"
+
+    response = client.post(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs/"
+        + job["id"]
+        + "/approve"
+    )
+    assert response.status_code == 409
+    assert "waiting for approval" in response.json()["detail"]
+
