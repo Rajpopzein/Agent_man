@@ -86,6 +86,8 @@ type Notice = {
   title: string;
   message: string;
   tone?: "default" | "danger";
+  approvalJobId?: string;
+  approvalPermission?: string;
 };
 
 type LiveResponse = {
@@ -144,10 +146,10 @@ function approvalActionLabel(
   ) {
     return "run a terminal command";
   }
-  if (permission === "network.access") {
+  if (permission === "network.internet") {
     return "use network access";
   }
-  if (permission === "serial.access") {
+  if (permission === "hardware.serial") {
     return "access connected hardware";
   }
   if (permission === "project.files.delete") {
@@ -192,7 +194,7 @@ function runtimeSpeechAnnouncement(
       name +
       " is waiting for your approval to " +
       approvalActionLabel(tool, permission) +
-      ". Please approve it in Mission Control, then ask Agent Man to retry the worker."
+      ". Please approve it to continue the same background task."
     );
   }
 
@@ -208,6 +210,10 @@ function runtimeSpeechAnnouncement(
 
   if (runtimeEvent.type === "background_job.progress") {
     return null;
+  }
+
+  if (runtimeEvent.type === "background_job.resumed") {
+    return name + " received approval and is resuming the task.";
   }
 
   if (runtimeEvent.type === "background_job.completed") {
@@ -496,6 +502,7 @@ export default function Dashboard() {
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processingStartedAt, setProcessingStartedAt] =
     useState<number | null>(null);
@@ -735,19 +742,38 @@ export default function Dashboard() {
           workerName +
           " is waiting for approval to " +
           action +
-          ". Approve it in Mission Control, then ask Agent Man to retry the worker.";
+          ". Approve it to continue the same background task.";
 
         setConsoleOpen(true);
         setView("dashboard");
         setNotice({
           title: "Agent Man needs your approval",
           message,
+          approvalJobId: String(runtimeEvent.job_id || ""),
+          approvalPermission: permission,
         });
         setRun((current) => ({
           status: "waiting_approval",
           text: message,
           steps: current?.steps || [],
         }));
+      }
+
+      if (
+        [
+          "background_job.resumed",
+          "background_job.started",
+          "background_job.completed",
+          "background_job.error",
+        ].includes(runtimeEvent.type) &&
+        runtimeEvent.job_id
+      ) {
+        const changedJobId = String(runtimeEvent.job_id);
+        setNotice((current) =>
+          current?.approvalJobId === changedJobId
+            ? null
+            : current,
+        );
       }
 
       if (
@@ -1408,6 +1434,46 @@ export default function Dashboard() {
             : String(error),
         tone: "danger",
       });
+    }
+  }
+
+  async function approveWaitingJob(jobId: string) {
+    if (!project || !jobId || approvalBusy) {
+      return;
+    }
+
+    setApprovalBusy(true);
+    try {
+      const resumed = await api.approveBackgroundJob(
+        project.id,
+        jobId,
+      );
+      setBackgroundJobs((current) =>
+        current.map((item) =>
+          item.id === resumed.id ? resumed : item,
+        ),
+      );
+      setRun((current) => ({
+        status: "background",
+        text:
+          resumed.agent_name +
+          " received approval and is resuming the task.",
+        steps: current?.steps || [],
+      }));
+      setNotice(null);
+      setAllowDelete(false);
+      await refreshWorkers(project.id);
+    } catch (error) {
+      setNotice({
+        title: "Approval could not continue the worker",
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setApprovalBusy(false);
     }
   }
 
@@ -2913,12 +2979,38 @@ export default function Dashboard() {
         }
         tone={notice?.tone}
         footer={
-          <button
-            className="primaryButton"
-            onClick={() => setNotice(null)}
-          >
-            Acknowledge
-          </button>
+          notice?.approvalJobId ? (
+            <>
+              <button
+                className="secondaryButton"
+                onClick={() => setNotice(null)}
+                disabled={approvalBusy}
+              >
+                Not now
+              </button>
+              <button
+                className="primaryButton"
+                onClick={() =>
+                  void approveWaitingJob(
+                    notice.approvalJobId || "",
+                  )
+                }
+                disabled={approvalBusy}
+              >
+                <ShieldCheck size={14} />
+                {approvalBusy
+                  ? "Continuing..."
+                  : "Approve & Continue"}
+              </button>
+            </>
+          ) : (
+            <button
+              className="primaryButton"
+              onClick={() => setNotice(null)}
+            >
+              Acknowledge
+            </button>
+          )
         }
       >
         <p className="systemMessage">{notice?.message}</p>
