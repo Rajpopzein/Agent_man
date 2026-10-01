@@ -33,6 +33,7 @@ import {
   Trash2,
   Volume2,
   VolumeX,
+  WandSparkles,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import CommandConsole, {
 } from "./CommandConsole";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import BackgroundPage from "../agents/BackgroundPage";
+import ExtensionsPage from "../extensions/ExtensionsPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
 import {
@@ -76,6 +78,7 @@ type View =
   | "multi-agent"
   | "tools"
   | "connections"
+  | "extensions"
   | "logs"
   | "settings";
 
@@ -438,6 +441,11 @@ const VIEW_META: Record<
     label: "AI Connections",
     eyebrow: "WORKSPACE / CONNECTIONS",
     description: "Configure local and cloud model connections.",
+  },
+  extensions: {
+    label: "Extensions",
+    eyebrow: "WORKSPACE / EXTENSIONS",
+    description: "Build reusable SKILL.md packages and governed connectors.",
   },
   logs: {
     label: "LLM Logs",
@@ -1657,6 +1665,12 @@ export default function Dashboard() {
             onClick={() => setView("connections")}
           />
           <RailButton
+            active={view === "extensions"}
+            label="Extensions"
+            icon={<WandSparkles />}
+            onClick={() => setView("extensions")}
+          />
+          <RailButton
             active={view === "logs"}
             label="Logs"
             icon={<FileText />}
@@ -1788,6 +1802,11 @@ export default function Dashboard() {
           <AIConnections
             connections={connections}
             onChanged={reloadConnections}
+          />
+        ) : view === "extensions" ? (
+          <ExtensionsPage
+            project={project}
+            agents={agents}
           />
         ) : view === "logs" ? (
           <LLMLogsPage project={project} />
