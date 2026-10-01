@@ -339,6 +339,24 @@ export type MeetingRoomMember = {
   active: boolean;
 };
 
+export type MeetingRoomCollaborationParticipant = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  status: string;
+  last_round: number;
+};
+
+export type MeetingRoomCollaboration = {
+  id: string;
+  status: string;
+  prompt: string;
+  current_round: number;
+  created_at: string;
+  completed_at: string | null;
+  participants: MeetingRoomCollaborationParticipant[];
+};
+
 export type MeetingRoomMessage = {
   id: string;
   sender_type: string;
@@ -367,6 +385,7 @@ export type MeetingRoom = {
   members: MeetingRoomMember[];
   messages: MeetingRoomMessage[];
   jobs: BackgroundJob[];
+  collaborations: MeetingRoomCollaboration[];
 };
 
 
@@ -695,12 +714,8 @@ export const api = {
   instructMeetingRoom: (
     roomId: string,
     payload: {
-      agent_id: string;
       instruction: string;
-      allow_terminal?: boolean;
       allow_delete?: boolean;
-      allow_network?: boolean;
-      allow_hardware?: boolean;
     },
   ) =>
     request<MeetingRoom>(
@@ -709,6 +724,42 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       },
+    ),
+  kickMeetingRoomMember: (
+    roomId: string,
+    agentId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/members/" +
+        agentId +
+        "/kick",
+      { method: "POST" },
+    ),
+  stopMeetingRoomCollaboration: (
+    roomId: string,
+    taskId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/collaborations/" +
+        taskId +
+        "/stop",
+      { method: "POST" },
+    ),
+  approveMeetingRoomDelete: (
+    roomId: string,
+    taskId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/collaborations/" +
+        taskId +
+        "/approve-delete",
+      { method: "POST" },
     ),
   closeMeetingRoom: (roomId: string) =>
     request<MeetingRoom>(

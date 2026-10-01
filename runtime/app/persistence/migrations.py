@@ -37,3 +37,21 @@ def run_migrations() -> None:
                     "ix_agent_task_history_room_id "
                     "ON agent_task_history (room_id)"
                 )
+
+
+    if "multi_agent_tasks" in table_names:
+        task_columns = {
+            column["name"]
+            for column in inspector.get_columns("multi_agent_tasks")
+        }
+        if "room_id" not in task_columns:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "ALTER TABLE multi_agent_tasks "
+                    "ADD COLUMN room_id VARCHAR(36)"
+                )
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_multi_agent_tasks_room_id "
+                    "ON multi_agent_tasks (room_id)"
+                )
