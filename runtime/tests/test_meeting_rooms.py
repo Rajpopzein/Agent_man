@@ -1,12 +1,17 @@
 import json
 from threading import Event
-from time import sleep
+from time import sleep, time
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app.agents.background_jobs import background_jobs
 from app.main import app
+from app.persistence.database import SessionLocal
+from app.persistence.models import (
+    MultiAgentMessageRecord,
+    MultiAgentTaskRecord,
+)
 
 
 client = TestClient(app)
@@ -67,6 +72,48 @@ def _setup():
     assert configured.status_code == 200
 
     return project.json(), workers
+
+
+def _create_room(project, workers):
+    created = client.post(
+        "/api/meeting-rooms",
+        json={
+            "project_id": project["id"],
+            "title": "Implementation Room",
+            "objective": "Solve the issue collaboratively.",
+            "agent_ids": [
+                workers["Developer"]["id"],
+                workers["Tester"]["id"],
+            ],
+        },
+    )
+    assert created.status_code == 201
+    return created.json()
+
+
+def _wait_for_collaboration(
+    room_id: str,
+    statuses: set[str],
+    timeout: float = 3.0,
+):
+    deadline = time() + timeout
+    latest = None
+    while time() < deadline:
+        response = client.get("/api/meeting-rooms/" + room_id)
+        assert response.status_code == 200
+        latest = response.json()
+        if (
+            latest["collaborations"]
+            and latest["collaborations"][0]["status"] in statuses
+        ):
+            return latest
+        sleep(0.02)
+    raise AssertionError(
+        "Collaboration did not reach "
+        + repr(statuses)
+        + "; latest="
+        + repr(latest)
+    )
 
 
 def test_executive_can_create_persistent_meeting_room(monkeypatch):
@@ -142,10 +189,8 @@ def test_executive_resolves_placeholder_worker_ids_to_real_workers(monkeypatch):
     )
     assert designer.status_code == 201
     ui_designer = designer.json()
-    calls = {"count": 0}
 
     def respond(agent, messages, endpoint=None):
-        calls["count"] += 1
         return json.dumps(
             {
                 "type": "create_meeting_room",
@@ -172,9 +217,6 @@ def test_executive_resolves_placeholder_worker_ids_to_real_workers(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "meeting_room"
-    assert calls["count"] == 1
-
     created_step = next(
         step
         for step in body["steps"]
@@ -185,215 +227,193 @@ def test_executive_resolves_placeholder_worker_ids_to_real_workers(monkeypatch):
         ui_designer["id"],
     }
 
-    room = client.get(
-        "/api/meeting-rooms/" + created_step["room_id"]
+
+def test_room_instruction_runs_all_peers_until_stable_completion(monkeypatch):
+    project, workers = _setup()
+    room = _create_room(project, workers)
+
+    def fake_peer_turn(**kwargs):
+        round_number = kwargs["round_number"]
+        agent = kwargs["agent"]
+        if round_number < 14:
+            return {
+                "type": "message",
+                "content": (
+                    agent.name
+                    + " is still collaborating in round "
+                    + str(round_number)
+                ),
+                "tool_steps": 0,
+            }
+        return {
+            "type": "final",
+            "content": agent.name + " confirms the shared task is complete.",
+            "tool_steps": 0,
+        }
+
+    monkeypatch.setattr(
+        "app.agents.multi_agent._run_peer_turn",
+        fake_peer_turn,
     )
-    assert room.status_code == 200
+
+    instructed = client.post(
+        "/api/meeting-rooms/" + room["id"] + "/instructions",
+        json={"instruction": "Fix and verify the portfolio issue."},
+    )
+    assert instructed.status_code == 200
+    assert instructed.json()["collaborations"]
+
+    completed = _wait_for_collaboration(
+        room["id"],
+        {"completed", "completed_with_errors"},
+        timeout=4.0,
+    )
+    collaboration = completed["collaborations"][0]
+
+    # Room sessions are continuous: this deliberately exceeds the normal
+    # 12-round ceiling and still runs until stable peer completion.
+    assert collaboration["current_round"] >= 15
     assert {
-        member["agent_id"]
-        for member in room.json()["members"]
+        participant["agent_id"]
+        for participant in collaboration["participants"]
     } == {
         workers["Developer"]["id"],
-        ui_designer["id"],
+        workers["Tester"]["id"],
     }
-
-
-def test_room_instruction_tracks_background_job_and_manual_stop(monkeypatch):
-    project, workers = _setup()
-    developer = workers["Developer"]
-
-    created = client.post(
-        "/api/meeting-rooms",
-        json={
-            "project_id": project["id"],
-            "title": "Implementation Room",
-            "objective": "Implement one scoped change.",
-            "agent_ids": [developer["id"]],
-        },
+    assert all(
+        participant["status"] == "completed"
+        for participant in collaboration["participants"]
     )
-    assert created.status_code == 201
-    room_id = created.json()["id"]
+    assert any(
+        message["kind"] == "peer_message"
+        for message in completed["messages"]
+    )
+    assert any(
+        message["kind"] == "peer_final"
+        for message in completed["messages"]
+    )
+    assert any(
+        message["kind"] == "collaboration_completed"
+        for message in completed["messages"]
+    )
 
-    worker_started = Event()
 
-    def fake_execute_agent(
-        *,
-        agent,
-        project,
-        prompt,
-        db,
-        endpoint=None,
-        allow_terminal=False,
-        allow_delete=False,
-        allow_network=False,
-        allow_hardware=False,
-        progress=None,
-        should_stop=None,
-    ):
-        worker_started.set()
-        if progress:
-            progress(
-                {
-                    "phase": "working",
-                    "action": "Editing the requested feature.",
-                    "tool": "edit_file",
-                    "detail": "Working in the project sandbox.",
-                    "next_step": "Run the focused tests.",
-                    "status": "running",
-                }
+def test_followup_instruction_joins_live_room_and_agent_can_be_kicked(
+    monkeypatch,
+):
+    project, workers = _setup()
+    room = _create_room(project, workers)
+
+    monkeypatch.setattr(
+        "app.agents.room_collaboration.room_collaborations.start",
+        lambda *args, **kwargs: None,
+    )
+
+    first = client.post(
+        "/api/meeting-rooms/" + room["id"] + "/instructions",
+        json={"instruction": "Start investigating the portfolio bug."},
+    )
+    assert first.status_code == 200
+    task_id = first.json()["collaborations"][0]["id"]
+
+    followup = client.post(
+        "/api/meeting-rooms/" + room["id"] + "/instructions",
+        json={"instruction": "Also verify the mobile layout."},
+    )
+    assert followup.status_code == 200
+    assert len(followup.json()["collaborations"]) == 1
+
+    with SessionLocal() as db:
+        task = db.get(MultiAgentTaskRecord, task_id)
+        assert task is not None
+        followup_message = db.scalar(
+            select(MultiAgentMessageRecord).where(
+                MultiAgentMessageRecord.task_id == task_id,
+                MultiAgentMessageRecord.kind == "user_instruction",
             )
+        )
+        assert followup_message is not None
+        assert "mobile layout" in followup_message.content
 
-        for _ in range(200):
-            if should_stop and should_stop():
-                return {
-                    "status": "stopped",
-                    "text": "Stopped by the user.",
-                    "steps": [],
-                }
-            sleep(0.01)
-
-        return {
-            "status": "completed",
-            "text": "Finished.",
-            "steps": [],
-        }
-
-    monkeypatch.setattr(
-        "app.agents.background_jobs.execute_agent",
-        fake_execute_agent,
+    kicked = client.post(
+        "/api/meeting-rooms/"
+        + room["id"]
+        + "/members/"
+        + workers["Tester"]["id"]
+        + "/kick"
     )
-
-    instructed = client.post(
-        "/api/meeting-rooms/" + room_id + "/instructions",
-        json={
-            "agent_id": developer["id"],
-            "instruction": "Implement the login button fix.",
-        },
+    assert kicked.status_code == 200
+    body = kicked.json()
+    tester = next(
+        member
+        for member in body["members"]
+        if member["agent_id"] == workers["Tester"]["id"]
     )
-    assert instructed.status_code == 200
-    body = instructed.json()
-    assert body["jobs"]
-    job = body["jobs"][0]
-    assert job["room_id"] == room_id
-    assert job["agent_id"] == developer["id"]
-    assert worker_started.wait(timeout=1.0)
-
-    stop = client.post(
-        "/api/main-agent/projects/"
-        + project["id"]
-        + "/background-jobs/"
-        + job["id"]
-        + "/stop"
-    )
-    assert stop.status_code == 200
-    assert stop.json()["status"] in {"stopping", "stopped"}
-
-    final_job = background_jobs.wait(job["id"], timeout=3.0)
-    assert final_job is not None
-    assert final_job["status"] == "stopped"
-    assert final_job["room_id"] == room_id
-    assert final_job["current_action"] == "Stopped by the user."
-
-    fresh = client.get("/api/meeting-rooms/" + room_id)
-    assert fresh.status_code == 200
-    room = fresh.json()
-    assert any(
-        message["kind"] == "instruction"
-        and "login button" in message["content"]
-        for message in room["messages"]
-    )
-    assert any(
-        message["kind"] == "assignment"
-        and message["job_id"] == job["id"]
-        for message in room["messages"]
-    )
-    assert any(
-        message["kind"] == "task_stopped"
-        and message["job_id"] == job["id"]
-        for message in room["messages"]
-    )
-
-    history = client.get(
-        "/api/main-agent/projects/" + project["id"] + "/task-history"
-    )
-    assert history.status_code == 200
-    row = next(
+    assert tester["active"] is False
+    participant = next(
         item
-        for item in history.json()
-        if item["id"] == job["id"]
+        for item in body["collaborations"][0]["participants"]
+        if item["agent_id"] == workers["Tester"]["id"]
     )
-    assert row["room_id"] == room_id
-    assert row["status"] == "stopped"
+    assert participant["status"] == "kicked"
+    assert any(
+        message["kind"] == "agent_kicked"
+        for message in body["messages"]
+    )
 
 
-def test_room_cannot_close_while_worker_is_active(monkeypatch):
+def test_room_cannot_close_until_shared_collaboration_stops(monkeypatch):
     project, workers = _setup()
-    developer = workers["Developer"]
+    room = _create_room(project, workers)
+    entered_turn = Event()
+    release_turn = Event()
 
-    created = client.post(
-        "/api/meeting-rooms",
-        json={
-            "project_id": project["id"],
-            "title": "Active Room",
-            "objective": "Keep task visible until stopped.",
-            "agent_ids": [developer["id"]],
-        },
-    )
-    assert created.status_code == 201
-    room_id = created.json()["id"]
-
-    release = Event()
-
-    def fake_execute_agent(**kwargs):
-        should_stop = kwargs.get("should_stop")
-        for _ in range(200):
-            if release.is_set():
-                break
-            if should_stop and should_stop():
-                return {
-                    "status": "stopped",
-                    "text": "Stopped by the user.",
-                    "steps": [],
-                }
-            sleep(0.01)
+    def blocking_peer_turn(**kwargs):
+        entered_turn.set()
+        release_turn.wait(timeout=2.0)
         return {
-            "status": "completed",
-            "text": "Done.",
-            "steps": [],
+            "type": "message",
+            "content": "Continuing shared work.",
+            "tool_steps": 0,
         }
 
     monkeypatch.setattr(
-        "app.agents.background_jobs.execute_agent",
-        fake_execute_agent,
+        "app.agents.multi_agent._run_peer_turn",
+        blocking_peer_turn,
     )
 
     instructed = client.post(
-        "/api/meeting-rooms/" + room_id + "/instructions",
-        json={
-            "agent_id": developer["id"],
-            "instruction": "Work on the task.",
-        },
+        "/api/meeting-rooms/" + room["id"] + "/instructions",
+        json={"instruction": "Keep working until this is resolved."},
     )
     assert instructed.status_code == 200
-    job = instructed.json()["jobs"][0]
+    task_id = instructed.json()["collaborations"][0]["id"]
+    assert entered_turn.wait(timeout=1.0)
 
     close = client.post(
-        "/api/meeting-rooms/" + room_id + "/close"
+        "/api/meeting-rooms/" + room["id"] + "/close"
     )
     assert close.status_code == 409
 
-    client.post(
-        "/api/main-agent/projects/"
-        + project["id"]
-        + "/background-jobs/"
-        + job["id"]
+    stop = client.post(
+        "/api/meeting-rooms/"
+        + room["id"]
+        + "/collaborations/"
+        + task_id
         + "/stop"
     )
-    background_jobs.wait(job["id"], timeout=3.0)
-    release.set()
+    assert stop.status_code == 200
+    release_turn.set()
+
+    stopped = _wait_for_collaboration(
+        room["id"],
+        {"stopped"},
+        timeout=3.0,
+    )
+    assert stopped["collaborations"][0]["status"] == "stopped"
 
     closed = client.post(
-        "/api/meeting-rooms/" + room_id + "/close"
+        "/api/meeting-rooms/" + room["id"] + "/close"
     )
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"
