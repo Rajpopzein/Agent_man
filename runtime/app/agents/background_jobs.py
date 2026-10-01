@@ -77,6 +77,7 @@ class BackgroundJobSupervisor:
                 "current_action": "Waiting to start.",
                 "current_tool": "",
                 "current_detail": "",
+                "current_next_step": "",
                 "updated_at": _now(),
             }
             self._jobs[job_id] = job
@@ -322,6 +323,7 @@ class BackgroundJobSupervisor:
                 current_action=str(payload.get("action") or "")[:500],
                 current_tool=str(payload.get("tool") or "")[:160],
                 current_detail=str(payload.get("detail") or "")[:2000],
+                current_next_step=str(payload.get("next_step") or "")[:500],
             )
             events.emit(
                 "background_job.progress",
@@ -335,6 +337,7 @@ class BackgroundJobSupervisor:
                 current_action=updated["current_action"],
                 current_tool=updated["current_tool"],
                 current_detail=updated["current_detail"],
+                current_next_step=updated["current_next_step"],
                 updated_at=updated["updated_at"],
                 message=updated["current_action"],
             )
@@ -613,6 +616,9 @@ class BackgroundJobSupervisor:
             current_tool = str(
                 job.get("current_tool") or ""
             )[:160]
+            next_step = " ".join(
+                str(job.get("current_next_step") or "").split()
+            )[:500]
             lines.append(
                 "- "
                 + str(job["id"])
@@ -629,6 +635,7 @@ class BackgroundJobSupervisor:
                 + (f"; action={current_action}" if current_action else "")
                 + (f"; tool={current_tool}" if current_tool else "")
                 + (f"; detail={detail}" if detail else "")
+                + (f"; next={next_step}" if next_step else "")
                 + "; updated="
                 + str(job.get("updated_at") or job["created_at"])
             )
