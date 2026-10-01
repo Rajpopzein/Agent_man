@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
+from app.agents.context_budget import compact_runtime_payload
 from app.agents.reinforcement import policy_context
 from app.agents.executive_configuration import CONFIGURATION_ACTIONS, execute_configuration_action
 from app.agents.runner import run_messages
@@ -44,12 +45,13 @@ from app.tools.executive_access import (
 from app.tools.intelligence import (
     plan_tools,
     preflight_tool,
+    prompt_tool_names,
     recovery_guidance,
 )
-from app.tools.registry import tools
+from app.tools.registry import catalog_for_prompt, tools
 
 MAX_EXECUTIVE_STEPS = 30
-MAX_HISTORY = 20
+MAX_HISTORY = 14
 MAX_TOOL_CORRECTIONS = 3
 
 SYSTEM_PROMPT = """You are Agent Man, the executive agent and primary user interface.
@@ -413,6 +415,7 @@ def _proxy(config: MainAgentConfigRecord, db: Session):
         model=config.model,
         endpoint=config.endpoint,
         temperature_milli=config.temperature_milli,
+        context_limit=config.context_limit,
     )
     bind_agent_connection(proxy, db)
     return proxy
@@ -432,14 +435,17 @@ def _context(project_id: str, db: Session):
             + (
                 " ".join(
                     str(getattr(a, "context", "") or "").split()
-                )[:1200]
+                )[:360]
                 or "(no custom context)"
             )
         )
         for a in workers
     ) or "(none)"
     workflow_text = "\n".join(
-        f"- {w.id}: {w.name} - {w.description}"
+        (
+            f"- {w.id}: {w.name} - "
+            + " ".join(str(w.description or "").split())[:320]
+        )
         for w in workflows
     ) or "(none)"
     return workers, workflows, worker_text, workflow_text
@@ -614,6 +620,11 @@ def run_main_agent(
     )
     allowed_tools = set(tool_access.names)
     tool_plan = plan_tools(message, allowed_tools)
+    prompt_tools = prompt_tool_names(
+        message,
+        allowed_tools,
+        plan=tool_plan,
+    )
 
     approvals: set[str] = automatic_approvals_for_tools(
         allowed_tools
@@ -631,7 +642,10 @@ def run_main_agent(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                tools=tool_access.catalog or "(none)",
+                tools=(
+                    catalog_for_prompt(set(prompt_tools))
+                    or "(no detailed tool schema needed for this request)"
+                ),
                 tool_count=tool_access.count,
                 tool_names=", ".join(tool_access.names) or "(none)",
                 tool_plan=tool_plan.prompt_text(),
@@ -641,12 +655,24 @@ def run_main_agent(
                 reinforcement_policy=policy_context(db, project.id),
                 upgrades=upgrade_context(db, project.id),
             ),
+            "_context_priority": "critical",
         }
     ]
-    messages.extend(
-        {"role": item.role, "content": item.content}
-        for item in history
-    )
+    for index, item in enumerate(history):
+        messages.append(
+            {
+                "role": item.role,
+                "content": item.content,
+                "_context_priority": (
+                    "critical"
+                    if (
+                        index == len(history) - 1
+                        and item.role == "user"
+                    )
+                    else "normal"
+                ),
+            }
+        )
     proxy = _proxy(config, db)
     steps: list[dict] = []
     tool_corrections = 0
@@ -710,11 +736,7 @@ def run_main_agent(
                 "role": "user",
                 "content": (
                     "RUNTIME PREFLIGHT RESULT:\n"
-                    + json.dumps(
-                        discovery_step,
-                        ensure_ascii=False,
-                        default=str,
-                    )
+                    + compact_runtime_payload(discovery_step)
                     + "\nUse this real discovery result when choosing the "
                     "next tool. Never invent a device or runtime identifier."
                 ),
@@ -764,7 +786,13 @@ def run_main_agent(
             steps.append({"type": kind, "step": step_number, "status": status, "result": result})
             messages.extend([
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": "AGENT CONFIGURATION RESULT: " + json.dumps(result)},
+                {
+                    "role": "user",
+                    "content": (
+                        "AGENT CONFIGURATION RESULT: "
+                        + compact_runtime_payload(result)
+                    ),
+                },
             ])
             continue
 
@@ -1169,11 +1197,7 @@ def run_main_agent(
                     "role": "user",
                     "content": (
                         "TOOL RESULT:\n"
-                        + json.dumps(
-                            step,
-                            ensure_ascii=False,
-                            default=str,
-                        )
+                        + compact_runtime_payload(step)
                         + recovery_text
                         + (
                             "\nSELF-CORRECTION CHECKPOINT: Do not repeat the "
@@ -1649,11 +1673,7 @@ def run_main_agent(
                 "role": "user",
                 "content": (
                     "DELEGATION RESULT:\n"
-                    + json.dumps(
-                        step,
-                        ensure_ascii=False,
-                        default=str,
-                    )
+                    + compact_runtime_payload(step)
                     + (
                         "\nBACKGROUND DISPATCH COMPLETE. Do not wait for the "
                         "worker result. Reply to the user now with which work "
