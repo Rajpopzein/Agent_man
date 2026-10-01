@@ -90,7 +90,7 @@ Available tools:
 Return exactly one JSON object and no markdown.
 
 Use a tool:
-{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
+{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}},"progress":"Reading the project overview before making changes."}}
 
 If you need a capability that is not currently usable, request it instead of
 stopping or saying you cannot do the task:
@@ -100,6 +100,10 @@ When you believe the job is finished:
 {{"type":"final","verified":true,"message":"What was completed and how it was verified."}}
 
 Rules:
+- Every tool, capability, or completion action should include a short
+  "progress" field written for the user. It must say what you are doing now
+  and the immediate purpose in one simple sentence. Do not expose private
+  chain-of-thought, hidden analysis, secrets, or long reasoning.
 - Do not stop just because the first approach failed. Inspect the error and try
   another safe approach when one is available.
 - Do not say you lack internet/web access if an internet tool is available.
@@ -222,8 +226,8 @@ def execute_agent(
     for turn_number in range(1, MAX_TURNS + 1):
         _report_progress(
             progress,
-            phase="thinking",
-            action="Reviewing the next step.",
+            phase="planning",
+            action="Planning the next action.",
             detail=f"Turn {turn_number}",
         )
         try:
@@ -239,13 +243,19 @@ def execute_agent(
             raise
         action = _parse_action(raw)
         action_type = str(action.get("type", "message")).lower()
+        progress_note = " ".join(
+            str(action.get("progress", "")).split()
+        )[:500]
 
         if action_type == "capability_request":
             capability = str(action.get("capability", "")).strip().lower()
             _report_progress(
                 progress,
                 phase="capability",
-                action="Checking a required capability.",
+                action=(
+                    progress_note
+                    or "Checking a required capability."
+                ),
                 detail=capability,
             )
             resolved = resolve_capability(
@@ -331,7 +341,10 @@ def execute_agent(
                 _report_progress(
                     progress,
                     phase="verifying",
-                    action="Checking the completed work before finishing.",
+                    action=(
+                        progress_note
+                        or "Checking the completed work before finishing."
+                    ),
                     detail=message,
                 )
                 _set_agent_state(
@@ -437,7 +450,10 @@ def execute_agent(
         _report_progress(
             progress,
             phase="tool",
-            action="Using " + tool_name + ".",
+            action=(
+                progress_note
+                or "Using " + tool_name + "."
+            ),
             tool=tool_name,
             detail=json.dumps(
                 arguments,
