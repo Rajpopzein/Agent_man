@@ -10,6 +10,7 @@ from app.tools.capabilities import (
     detect_missing_capability,
     resolve_capability,
 )
+from app.tools.executive_access import automatic_approvals_for_tools
 from app.tools.intelligence import recovery_guidance
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
@@ -194,6 +195,9 @@ def execute_agent(
         approvals.add(Permission.SERIAL_ACCESS.value)
 
     allowed_names = allowed_tool_names(db, agent.id)
+    approvals.update(
+        automatic_approvals_for_tools(allowed_names)
+    )
     messages = [
         {
             "role": "system",
