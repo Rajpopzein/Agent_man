@@ -2679,3 +2679,165 @@ input,textarea,select{font-size:13px}
   }
 }
 
+/* Extensions workspace */
+.extensionsPage{display:grid;gap:16px}
+.extensionsGrid{
+  display:grid;
+  grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);
+  gap:16px
+}
+.skillStudio,.connectorStudio{padding:18px}
+.extensionPanelHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding-bottom:14px;
+  margin-bottom:14px;
+  border-bottom:1px solid var(--line)
+}
+.extensionPanelHeader small{
+  display:block;
+  color:#768394;
+  font-size:9px;
+  letter-spacing:.7px
+}
+.extensionPanelHeader h3{
+  margin:4px 0 4px;
+  font-size:16px
+}
+.extensionPanelHeader p{
+  margin:0;
+  color:#8996a6;
+  font-size:11px;
+  line-height:1.5
+}
+.extensionStatus{
+  padding:10px 12px;
+  color:#aab5c3;
+  font-size:11px
+}
+.skillPicker{
+  display:flex;
+  gap:8px;
+  overflow-x:auto;
+  padding-bottom:10px
+}
+.skillPicker button{
+  min-width:150px;
+  text-align:left;
+  display:grid;
+  gap:3px;
+  padding:9px 10px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#0e141b;
+  color:#aab5c2
+}
+.skillPicker button.active{
+  border-color:rgba(111,156,255,.35);
+  background:#172033;
+  color:#edf2f7
+}
+.skillPicker strong{font-size:11px}
+.skillPicker small{
+  font-family:var(--mono);
+  font-size:8px;
+  color:#788596
+}
+.skillEditor,.connectorForm{
+  display:grid;
+  gap:10px
+}
+.skillEditor label,.connectorForm label{
+  display:grid;
+  gap:5px;
+  color:#8996a6;
+  font-size:10px
+}
+.extensionTwoCol{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px
+}
+.skillMarkdownEditor{
+  min-height:310px;
+  resize:vertical;
+  font-family:var(--mono);
+  font-size:11px;
+  line-height:1.55
+}
+.extensionActions{
+  display:flex;
+  align-items:center;
+  gap:8px
+}
+.secondaryButton.danger{color:#f0919d}
+.skillAssignment{
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid var(--line);
+  display:grid;
+  gap:10px
+}
+.skillAssignment>div:first-child{
+  display:flex;
+  align-items:center;
+  gap:7px
+}
+.skillAssignmentList{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px
+}
+.skillAssignmentList label{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:9px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#0e141b
+}
+.skillAssignmentList span{display:grid;gap:2px}
+.skillAssignmentList b{font-size:10px}
+.skillAssignmentList small{
+  color:#768394;
+  font-size:9px;
+  line-height:1.4
+}
+.connectorList{
+  display:grid;
+  gap:8px;
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid var(--line)
+}
+.connectorRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 34px;
+  align-items:center;
+  gap:10px;
+  padding:10px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:#0e141b
+}
+.connectorRow>div{display:grid;gap:3px;min-width:0}
+.connectorRow strong{font-size:11px}
+.connectorRow small{color:#7f8c9c;font-size:9px}
+.connectorRow code{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#7e8c9e;
+  font-size:9px
+}
+@media(max-width:1100px){
+  .extensionsGrid{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .extensionPanelHeader{flex-direction:column}
+  .extensionTwoCol,.skillAssignmentList{grid-template-columns:1fr}
+}
+
