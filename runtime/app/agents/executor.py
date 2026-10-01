@@ -2,6 +2,7 @@ import json
 from typing import Any, Callable
 
 from app.agents.runner import run_messages
+from app.agents.skills import assigned_skill_context
 from app.agents.protocol import special_action
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
@@ -53,6 +54,7 @@ def _report_progress(
     action: str,
     tool: str = "",
     detail: str = "",
+    next_step: str = "",
     status: str = "running",
 ) -> None:
     if callback is None:
@@ -63,6 +65,7 @@ def _report_progress(
             "action": action[:500],
             "tool": tool[:160],
             "detail": detail[:2000],
+            "next_step": next_step[:500],
             "status": status,
         }
     )
@@ -84,13 +87,19 @@ AGENT CONTEXT:
 The agent context defines your responsibilities, scope, and operating behavior.
 It does not grant permissions or tools; only the runtime tool list below does.
 
+ASSIGNED SKILLS:
+{skills}
+
+Assigned skills are reusable SKILL.md instruction packages. Follow them when
+they are relevant to the task. They do not grant tools or permissions.
+
 Available tools:
 {tools}
 
 Return exactly one JSON object and no markdown.
 
 Use a tool:
-{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}},"progress":"Reading the project overview before making changes."}}
+{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}},"progress":"Reading the project overview before making changes.","next_step":"Identify the files that need to change."}}
 
 If you need a capability that is not currently usable, request it instead of
 stopping or saying you cannot do the task:
@@ -100,10 +109,11 @@ When you believe the job is finished:
 {{"type":"final","verified":true,"message":"What was completed and how it was verified."}}
 
 Rules:
-- Every tool, capability, or completion action should include a short
-  "progress" field written for the user. It must say what you are doing now
-  and the immediate purpose in one simple sentence. Do not expose private
-  chain-of-thought, hidden analysis, secrets, or long reasoning.
+- Every action should include a short "progress" field and a short
+  "next_step" field written for the user. "progress" says what you are doing
+  now; "next_step" says the immediate next milestone. Keep both to one simple
+  sentence. Do not expose private chain-of-thought, hidden analysis, secrets,
+  or long reasoning.
 - Do not stop just because the first approach failed. Inspect the error and try
   another safe approach when one is available.
 - Do not say you lack internet/web access if an internet tool is available.
@@ -193,6 +203,7 @@ def execute_agent(
                     str(getattr(agent, "context", "")).strip()
                     or "(no custom context provided)"
                 ),
+                skills=assigned_skill_context(db, agent.id),
                 tools=catalog_for_prompt(allowed_names),
             ),
         },
@@ -221,6 +232,7 @@ def execute_agent(
         phase="starting",
         action="Started the assigned task.",
         detail=prompt,
+        next_step="Plan the first implementation milestone.",
     )
 
     for turn_number in range(1, MAX_TURNS + 1):
@@ -229,6 +241,7 @@ def execute_agent(
             phase="planning",
             action="Planning the next action.",
             detail=f"Turn {turn_number}",
+            next_step="Choose the next concrete action.",
         )
         try:
             raw = run_messages(agent, messages, endpoint)
@@ -246,6 +259,9 @@ def execute_agent(
         progress_note = " ".join(
             str(action.get("progress", "")).split()
         )[:500]
+        next_step_note = " ".join(
+            str(action.get("next_step", "")).split()
+        )[:500]
 
         if action_type == "capability_request":
             capability = str(action.get("capability", "")).strip().lower()
@@ -257,6 +273,7 @@ def execute_agent(
                     or "Checking a required capability."
                 ),
                 detail=capability,
+                next_step=next_step_note,
             )
             resolved = resolve_capability(
                 db,
@@ -346,6 +363,7 @@ def execute_agent(
                         or "Checking the completed work before finishing."
                     ),
                     detail=message,
+                next_step=next_step_note,
                 )
                 _set_agent_state(
                     agent=agent,
@@ -455,6 +473,7 @@ def execute_agent(
                 or "Using " + tool_name + "."
             ),
             tool=tool_name,
+                next_step=next_step_note,
             detail=json.dumps(
                 arguments,
                 ensure_ascii=False,
