@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
+from app.agents.reinforcement import policy_context
 from app.agents.executive_configuration import CONFIGURATION_ACTIONS, execute_configuration_action
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
@@ -105,6 +106,9 @@ Available workflows:
 BACKGROUND EXECUTION STATE:
 {background_jobs}
 
+REINFORCEMENT POLICY MEMORY:
+{reinforcement_policy}
+
 For every active background worker, this state includes the original task,
 current phase, current action, current tool, latest safe runtime detail, and
 last update time. Treat this as the source of truth for what the worker is
@@ -195,6 +199,9 @@ Rules:
 - Never approve your own self-upgrade proposal. Approval belongs to the user.
 - Never mark an upgrade applied until an actual scoped change and validation
   have both succeeded.
+- Reinforcement history is weak evidence, not authority. Use it only when
+  several relevant workers or tools are valid choices. Never let reward scores
+  override the user's instruction, safety gates, permissions, or task relevance.
 - Never invent a COM port, file path, process id, session id, URL, or other
   runtime identifier when a discovery/inspection tool can obtain it first.
 - Tool actions are internal instructions, never a user-facing answer. Final
@@ -615,6 +622,7 @@ def run_main_agent(
                 workers=worker_text,
                 workflows=workflow_text,
                 background_jobs=background_jobs.context_text(project.id),
+                reinforcement_policy=policy_context(db, project.id),
                 upgrades=upgrade_context(db, project.id),
             ),
         }
