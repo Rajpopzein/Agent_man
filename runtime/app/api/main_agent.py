@@ -169,6 +169,28 @@ def task_history(
 
 
 @router.post(
+    "/projects/{project_id}/background-jobs/{job_id}/stop",
+    response_model=BackgroundJobView,
+)
+def stop_background_job(
+    project_id: str,
+    job_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    job = background_jobs.get(job_id)
+    if job is None or str(job.get("project_id")) != project_id:
+        raise HTTPException(404, "Background job not found")
+    try:
+        return background_jobs.stop(job_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post(
     "/projects/{project_id}/background-jobs/{job_id}/approve",
     response_model=BackgroundJobView,
 )
