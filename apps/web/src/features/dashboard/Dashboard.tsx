@@ -43,6 +43,7 @@ import CommandConsole, {
   CommandConsoleLine,
 } from "./CommandConsole";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
+import MeetingRoomsPage from "../agents/MeetingRoomsPage";
 import BackgroundPage from "../agents/BackgroundPage";
 import ExtensionsPage from "../extensions/ExtensionsPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
@@ -76,6 +77,7 @@ type View =
   | "dashboard"
   | "orchestration"
   | "multi-agent"
+  | "meeting-rooms"
   | "tools"
   | "connections"
   | "extensions"
@@ -414,6 +416,11 @@ const VIEW_META: Record<
     eyebrow: "WORKSPACE / AGENTS",
     description: "Shared task context with independent peer reasoning.",
   },
+  "meeting-rooms": {
+    label: "Meeting Rooms",
+    eyebrow: "WORKSPACE / MEETING ROOMS",
+    description: "Direct worker sessions hosted and tracked by Agent Man.",
+  },
   tools: {
     label: "Tools & Permissions",
     eyebrow: "WORKSPACE / TOOLS",
@@ -742,6 +749,7 @@ export default function Dashboard() {
           "background_job.started",
           "background_job.completed",
           "background_job.error",
+          "background_job.stopped",
         ].includes(runtimeEvent.type) &&
         runtimeEvent.job_id
       ) {
@@ -761,6 +769,10 @@ export default function Dashboard() {
             steps: current?.steps || [],
           }));
         }
+      }
+
+      if (runtimeEvent.type === "meeting_room.created") {
+        setView("meeting-rooms");
       }
 
       if (
@@ -804,6 +816,10 @@ export default function Dashboard() {
                 existing?.project_id ||
                 project.id,
             ),
+            room_id:
+              runtimeEvent.room_id != null
+                ? String(runtimeEvent.room_id)
+                : existing?.room_id || null,
             agent_id: String(
               runtimeEvent.agent_id ||
                 existing?.agent_id ||
@@ -843,7 +859,9 @@ export default function Dashboard() {
               runtimeEvent.type ===
                 "background_job.completed" ||
               runtimeEvent.type ===
-                "background_job.error"
+                "background_job.error" ||
+              runtimeEvent.type ===
+                "background_job.stopped"
                 ? String(
                     runtimeEvent.timestamp || "",
                   )
@@ -896,6 +914,12 @@ export default function Dashboard() {
                 existing?.updated_at ||
                 "",
             ),
+            stop_requested:
+              runtimeEvent.type ===
+                "background_job.stop_requested" ||
+              runtimeEvent.status === "stopping" ||
+              existing?.stop_requested ||
+              false,
           };
           return (
             existing
@@ -1530,7 +1554,7 @@ export default function Dashboard() {
 
   const activeBackgroundJobs =
     backgroundJobs.filter((item) =>
-      ["queued", "running"].includes(item.status),
+      ["queued", "running", "stopping"].includes(item.status),
     );
   const activeBackgroundJob =
     activeBackgroundJobs.length > 0
@@ -1703,6 +1727,12 @@ export default function Dashboard() {
             label="Agents"
             icon={<Network />}
             onClick={() => setView("multi-agent")}
+          />
+          <RailButton
+            active={view === "meeting-rooms"}
+            label="Rooms"
+            icon={<Radio />}
+            onClick={() => setView("meeting-rooms")}
           />
           <RailButton
             active={view === "tools"}
@@ -1879,6 +1909,12 @@ export default function Dashboard() {
           <OrchestrationPage project={project} agents={agents} />
         ) : view === "multi-agent" ? (
           <MultiAgentWorkspace project={project} agents={agents} />
+        ) : view === "meeting-rooms" ? (
+          <MeetingRoomsPage
+            project={project}
+            agents={agents}
+            backgroundJobs={backgroundJobs}
+          />
         ) : view === "tools" ? (
           <ToolsPage
             project={project}
