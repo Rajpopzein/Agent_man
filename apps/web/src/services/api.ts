@@ -286,6 +286,25 @@ export type ManagedProcess = {
   exit_code: number | null;
 };
 
+export type AgentTaskHistory = {
+  id: string;
+  project_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_role: string;
+  task: string;
+  status: string;
+  current_action: string;
+  current_tool: string;
+  result_text: string;
+  error: string;
+  step_count: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
 export type BackgroundJob = {
   id: string;
   project_id: string;
@@ -582,6 +601,12 @@ export const api = {
       "/api/main-agent/projects/" +
         projectId +
         "/background-jobs",
+    ),
+  taskHistory: (projectId: string) =>
+    request<AgentTaskHistory[]>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/task-history",
     ),
   approveBackgroundJob: (
     projectId: string,
