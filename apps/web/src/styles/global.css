@@ -2615,3 +2615,67 @@ input,textarea,select{font-size:13px}
   }
 }
 
+/* Reinforcement learning feedback */
+@media(min-width:1061px){
+  .telemetryStrip{
+    grid-template-columns:repeat(5,minmax(0,1fr))
+  }
+}
+.reinforcementFeedback{
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid var(--line);
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap
+}
+.reinforcementFeedback>span{
+  margin-right:auto;
+  color:#8895a5;
+  font-size:11px
+}
+.reinforcementFeedback button{
+  min-height:32px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#141b23;
+  color:#9ba7b6;
+  font-size:10px;
+  cursor:pointer
+}
+.reinforcementFeedback button:hover:not(:disabled){
+  border-color:rgba(111,156,255,.35);
+  color:#edf2f7
+}
+.reinforcementFeedback button.positive.active{
+  border-color:rgba(85,199,165,.4);
+  background:rgba(85,199,165,.1);
+  color:#8ed9c1
+}
+.reinforcementFeedback button.negative.active{
+  border-color:rgba(239,113,128,.4);
+  background:rgba(239,113,128,.1);
+  color:#f0919d
+}
+.reinforcementFeedback button:disabled{
+  cursor:default;
+  opacity:.72
+}
+@media(max-width:1060px){
+  .telemetryStrip{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+}
+@media(max-width:560px){
+  .telemetryStrip{grid-template-columns:1fr}
+  .reinforcementFeedback>span{
+    width:100%;
+    margin-right:0
+  }
+}
+
