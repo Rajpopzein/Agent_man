@@ -1898,8 +1898,24 @@ def test_executive_background_reply_guarantees_worker_status(monkeypatch):
         "app.agents.executive.background_jobs.list_project",
         lambda project_id: [
             {
+                "id": "job-status",
+                "project_id": project["id"],
+                "agent_id": developer["id"],
                 "agent_name": developer["name"],
+                "agent_role": developer["role"],
+                "task": "Implement the requested feature.",
                 "status": "running",
+                "created_at": "now",
+                "started_at": "now",
+                "completed_at": None,
+                "result_text": "",
+                "step_count": 0,
+                "error": "",
+                "current_phase": "starting",
+                "current_action": "Started the assigned task.",
+                "current_tool": "",
+                "current_detail": "",
+                "updated_at": "now",
             }
         ],
     )
