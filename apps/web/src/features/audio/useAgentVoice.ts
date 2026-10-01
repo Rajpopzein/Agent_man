@@ -30,10 +30,13 @@ export type VoiceSettings = {
 const STORAGE_KEY = "agent-man.voice.settings.v2";
 const SPEAK_EVENT = "agent-man:speak";
 
-export function requestAgentSpeech(text: string) {
+export function requestAgentSpeech(
+  text: string,
+  queue = true,
+) {
   window.dispatchEvent(
     new CustomEvent(SPEAK_EVENT, {
-      detail: { text },
+      detail: { text, queue },
     }),
   );
 }
@@ -163,6 +166,8 @@ export function useAgentVoice() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef =
     useRef<AudioBufferSourceNode | null>(null);
+  const speechQueueRef =
+    useRef<Promise<void>>(Promise.resolve());
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -595,6 +600,19 @@ export function useAgentVoice() {
     ],
   );
 
+  const queueSpeakAsync = useCallback(
+    (text: string, force = false) => {
+      const queued = speechQueueRef.current
+        .catch(() => undefined)
+        .then(() => speakAsync(text, force));
+      speechQueueRef.current = queued.catch(
+        () => undefined,
+      );
+      return queued;
+    },
+    [speakAsync],
+  );
+
   const speak = useCallback(
     (text: string, force = false) => {
       void speakAsync(text, force);
@@ -605,10 +623,17 @@ export function useAgentVoice() {
   useEffect(() => {
     function onSpeak(event: Event) {
       const detail = (
-        event as CustomEvent<{ text?: string }>
+        event as CustomEvent<{
+          text?: string;
+          queue?: boolean;
+        }>
       ).detail;
       if (detail?.text) {
-        speak(detail.text);
+        if (detail.queue === false) {
+          speak(detail.text);
+        } else {
+          void queueSpeakAsync(detail.text);
+        }
       }
     }
 
@@ -621,7 +646,7 @@ export function useAgentVoice() {
         SPEAK_EVENT,
         onSpeak,
       );
-  }, [speak]);
+  }, [queueSpeakAsync, speak]);
 
   const refreshElevenVoices = useCallback(
     async () => {
@@ -770,6 +795,7 @@ export function useAgentVoice() {
     update,
     speak,
     speakAsync,
+    queueSpeakAsync,
     stop,
     testVoice,
     resetSignature,
