@@ -180,7 +180,9 @@ Create a persistent meeting room with the relevant workers:
 The Executive is added automatically as the room host. When the user explicitly
 asks to create, open, or start a meeting room, choose the smallest relevant set
 of workers from Available workers based on role/context. Include at least one
-worker and never include the Executive id in agent_ids.
+worker and never include the Executive id in agent_ids. Copy the exact worker
+ids shown in Available workers. Never emit placeholders such as developer-id,
+ui-designer-id, worker-id, or ask the user to replace an id manually.
 
 Delegate one worker in the background:
 {{"type":"delegate_agent","agent_id":"...","task":"..."}}
@@ -370,6 +372,141 @@ def _meeting_room_requested(text: str) -> bool:
         any(term in lowered for term in room_terms)
         and any(term in lowered for term in action_terms)
     )
+
+
+def _worker_key(value: object) -> str:
+    return "".join(
+        char
+        for char in str(value or "").lower()
+        if char.isalnum()
+    )
+
+
+def _worker_reference_key(value: object) -> str:
+    key = _worker_key(value)
+    suffixes = (
+        "workerid",
+        "agentid",
+        "worker",
+        "agent",
+        "id",
+    )
+    changed = True
+    while changed and key:
+        changed = False
+        for suffix in suffixes:
+            if key.endswith(suffix) and len(key) > len(suffix):
+                key = key[: -len(suffix)]
+                changed = True
+                break
+    return key
+
+
+def _request_phrase(value: object) -> str:
+    chars: list[str] = []
+    previous_space = True
+    for char in str(value or "").lower():
+        if char.isalnum():
+            chars.append(char)
+            previous_space = False
+        elif not previous_space:
+            chars.append(" ")
+            previous_space = True
+    return " ".join("".join(chars).split())
+
+
+def _resolve_meeting_room_worker_ids(
+    *,
+    requested_ids: object,
+    request_text: str,
+    workers: list[AgentRecord],
+) -> tuple[list[str], list[str]]:
+    raw_items = (
+        requested_ids
+        if isinstance(requested_ids, list)
+        else []
+    )
+    by_id = {worker.id: worker for worker in workers}
+    selected: list[str] = []
+    seen: set[str] = set()
+    unresolved: list[str] = []
+
+    def add(worker: AgentRecord) -> None:
+        if worker.id not in seen:
+            seen.add(worker.id)
+            selected.append(worker.id)
+
+    for raw in raw_items:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        exact = by_id.get(token)
+        if exact is not None:
+            add(exact)
+            continue
+
+        key = _worker_reference_key(token)
+        candidates: list[AgentRecord] = []
+        if key:
+            for worker in workers:
+                aliases = {
+                    _worker_reference_key(worker.name),
+                    _worker_reference_key(worker.role),
+                }
+                if any(
+                    alias
+                    and (
+                        key == alias
+                        or key.startswith(alias)
+                        or alias.startswith(key)
+                    )
+                    for alias in aliases
+                ):
+                    candidates.append(worker)
+
+        unique = {
+            candidate.id: candidate
+            for candidate in candidates
+        }
+        if len(unique) == 1:
+            add(next(iter(unique.values())))
+        else:
+            unresolved.append(token)
+
+    normalized_request = " " + _request_phrase(request_text) + " "
+    for worker in workers:
+        if worker.id in seen:
+            continue
+        labels = {
+            _request_phrase(worker.name),
+            _request_phrase(worker.role),
+        }
+        matched = False
+        for label in labels:
+            if not label:
+                continue
+            phrase = " " + label + " "
+            if phrase not in normalized_request:
+                continue
+
+            # A role can legitimately be shared by multiple workers. Only use
+            # a role/name mention when it identifies one configured worker.
+            same_label = [
+                candidate
+                for candidate in workers
+                if label
+                in {
+                    _request_phrase(candidate.name),
+                    _request_phrase(candidate.role),
+                }
+            ]
+            if len({candidate.id for candidate in same_label}) == 1:
+                matched = True
+                break
+        if matched:
+            add(worker)
+
+    return selected, unresolved
 
 
 def _explicit_parallel_requested(text: str) -> bool:
@@ -1498,37 +1635,57 @@ def run_main_agent(
             continue
 
         if kind == "create_meeting_room":
-            requested_ids = action.get("agent_ids") or []
-            if not isinstance(requested_ids, list):
-                requested_ids = []
-            agent_ids: list[str] = []
-            seen_room_agents: set[str] = set()
-            for item in requested_ids:
-                agent_id = str(item).strip()
-                if (
-                    agent_id in worker_ids
-                    and agent_id not in seen_room_agents
-                ):
-                    seen_room_agents.add(agent_id)
-                    agent_ids.append(agent_id)
+            agent_ids, unresolved_worker_refs = (
+                _resolve_meeting_room_worker_ids(
+                    requested_ids=action.get("agent_ids"),
+                    request_text=message,
+                    workers=list(workers),
+                )
+            )
 
             if not agent_ids:
+                meeting_room_corrections += 1
+                steps.append(
+                    {
+                        "type": "runtime_guard",
+                        "step": step_number,
+                        "status": (
+                            "retry"
+                            if meeting_room_corrections
+                            <= MAX_TOOL_CORRECTIONS
+                            else "error"
+                        ),
+                        "reason": "meeting_room_worker_resolution_failed",
+                        "unresolved_worker_refs": unresolved_worker_refs,
+                    }
+                )
+                if meeting_room_corrections <= MAX_TOOL_CORRECTIONS:
+                    messages.extend(
+                        [
+                            {"role": "assistant", "content": raw},
+                            {
+                                "role": "user",
+                                "content": (
+                                    "RUNTIME CORRECTION: The meeting room "
+                                    "worker references did not resolve. Copy "
+                                    "the exact worker ids from Available "
+                                    "workers. Do not use placeholders and do "
+                                    "not ask the user to replace ids."
+                                ),
+                            },
+                        ]
+                    )
+                    continue
+
                 text = (
-                    "I need at least one relevant worker to create the "
-                    "meeting room. No valid worker was selected."
+                    "I could not safely match the requested meeting room "
+                    "workers to configured agents."
                 )
                 _store_assistant_message(db, project.id, text)
                 return {
                     "status": "error",
                     "text": text,
-                    "steps": [
-                        {
-                            "type": "create_meeting_room",
-                            "step": step_number,
-                            "status": "error",
-                            "error": "No valid worker selected",
-                        }
-                    ],
+                    "steps": steps,
                 }
 
             title = str(
