@@ -205,10 +205,10 @@ def instruct_room(
             job_id=task.id,
         )
 
-        if task.status == "waiting_approval" and body.allow_delete:
+        if task.status != "waiting_approval" or body.allow_delete:
             room_collaborations.start(
                 task.id,
-                allow_delete=True,
+                allow_delete=body.allow_delete,
             )
         db.refresh(room)
         return _view(db, room)
