@@ -10,6 +10,7 @@ from app.events.bus import events
 from app.persistence.database import SessionLocal
 from app.persistence.models import (
     AgentRecord,
+    AgentTaskHistoryRecord,
     ProjectRecord,
     WorkflowRecord,
     WorkflowRunRecord,
@@ -22,6 +23,79 @@ ACTIVE_STATUSES = {"queued", "running"}
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _timestamp(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _persist_agent_task(job: dict[str, object]) -> None:
+    agent_id = str(job.get("agent_id") or "")
+    if not agent_id or agent_id.startswith("workflow:"):
+        return
+
+    try:
+        with SessionLocal() as db:
+            row = db.get(
+                AgentTaskHistoryRecord,
+                str(job["id"]),
+            )
+            if row is None:
+                row = AgentTaskHistoryRecord(
+                    id=str(job["id"]),
+                    project_id=str(job["project_id"]),
+                    agent_id=agent_id,
+                    agent_name=str(job.get("agent_name") or "Worker"),
+                    agent_role=str(job.get("agent_role") or ""),
+                    task=str(job.get("task") or ""),
+                    status=str(job.get("status") or "queued"),
+                    created_at=(
+                        _timestamp(job.get("created_at"))
+                        or datetime.now(timezone.utc)
+                    ),
+                )
+                db.add(row)
+
+            row.agent_name = str(
+                job.get("agent_name") or row.agent_name
+            )
+            row.agent_role = str(
+                job.get("agent_role") or row.agent_role
+            )
+            row.task = str(job.get("task") or row.task)
+            row.status = str(job.get("status") or row.status)
+            row.current_action = str(
+                job.get("current_action") or ""
+            )[:4000]
+            row.current_tool = str(
+                job.get("current_tool") or ""
+            )[:160]
+            row.result_text = str(
+                job.get("result_text") or ""
+            )[:12000]
+            row.error = str(job.get("error") or "")[:4000]
+            row.step_count = int(job.get("step_count") or 0)
+            row.started_at = _timestamp(job.get("started_at"))
+            row.completed_at = _timestamp(
+                job.get("completed_at")
+            )
+            row.updated_at = (
+                _timestamp(job.get("updated_at"))
+                or datetime.now(timezone.utc)
+            )
+            db.commit()
+    except Exception:
+        # Work execution must never fail because audit persistence failed.
+        pass
 
 
 class BackgroundJobSupervisor:
@@ -81,6 +155,7 @@ class BackgroundJobSupervisor:
                 "updated_at": _now(),
             }
             self._jobs[job_id] = job
+            _persist_agent_task(job)
             self._futures[job_id] = self._executor.submit(
                 self._run_agent,
                 job_id,
@@ -313,7 +388,9 @@ class BackgroundJobSupervisor:
             job = self._jobs[job_id]
             changes.setdefault("updated_at", _now())
             job.update(changes)
-            return dict(job)
+            snapshot = dict(job)
+        _persist_agent_task(snapshot)
+        return snapshot
 
     def _progress_callback(self, job_id: str):
         def update_progress(payload: dict[str, object]) -> None:
