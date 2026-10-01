@@ -5,6 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
+from app.agents.meeting_rooms import (
+    create_meeting_room,
+    room_member_agents,
+)
 from app.agents.reinforcement import policy_context
 from app.agents.executive_configuration import CONFIGURATION_ACTIONS, execute_configuration_action
 from app.agents.runner import run_messages
@@ -166,6 +170,13 @@ service integration, model it as a connector and keep credentials outside prompt
 
 Direct reply:
 {{"type":"reply","message":"..."}}
+
+Create a persistent meeting room with the relevant workers:
+{{"type":"create_meeting_room","title":"Short room title","objective":"What this room is for","agent_ids":["worker-id"]}}
+The Executive is added automatically as the room host. When the user explicitly
+asks to create, open, or start a meeting room, choose the smallest relevant set
+of workers from Available workers based on role/context. Include at least one
+worker and never include the Executive id in agent_ids.
 
 Delegate one worker in the background:
 {{"type":"delegate_agent","agent_id":"...","task":"..."}}
@@ -1426,7 +1437,102 @@ def run_main_agent(
             )
             continue
 
-        if kind == "delegate_agent":
+        if kind == "create_meeting_room":
+            requested_ids = action.get("agent_ids") or []
+            if not isinstance(requested_ids, list):
+                requested_ids = []
+            agent_ids: list[str] = []
+            seen_room_agents: set[str] = set()
+            for item in requested_ids:
+                agent_id = str(item).strip()
+                if (
+                    agent_id in worker_ids
+                    and agent_id not in seen_room_agents
+                ):
+                    seen_room_agents.add(agent_id)
+                    agent_ids.append(agent_id)
+
+            if not agent_ids:
+                text = (
+                    "I need at least one relevant worker to create the "
+                    "meeting room. No valid worker was selected."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "error",
+                    "text": text,
+                    "steps": [
+                        {
+                            "type": "create_meeting_room",
+                            "step": step_number,
+                            "status": "error",
+                            "error": "No valid worker selected",
+                        }
+                    ],
+                }
+
+            title = str(
+                action.get("title") or "Agent Meeting Room"
+            ).strip()
+            objective = str(
+                action.get("objective") or message
+            ).strip()
+            try:
+                room = create_meeting_room(
+                    db,
+                    project_id=project.id,
+                    title=title,
+                    objective=objective,
+                    agent_ids=agent_ids,
+                )
+                member_names = [
+                    agent.name
+                    for _member, agent in room_member_agents(
+                        db,
+                        room.id,
+                    )
+                ]
+                step = {
+                    "type": "create_meeting_room",
+                    "step": step_number,
+                    "status": "created",
+                    "room_id": room.id,
+                    "title": room.title,
+                    "agent_ids": agent_ids,
+                    "agent_names": member_names,
+                }
+                steps.append(step)
+                text = (
+                    "Meeting room "
+                    + room.title
+                    + " is ready with "
+                    + ", ".join(member_names)
+                    + ". I am included as the Executive host and will "
+                    "track their progress in the room."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "meeting_room",
+                    "text": text,
+                    "steps": steps,
+                }
+            except (LookupError, ValueError) as exc:
+                text = "Meeting room could not be created: " + str(exc)
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "error",
+                    "text": text,
+                    "steps": [
+                        {
+                            "type": "create_meeting_room",
+                            "step": step_number,
+                            "status": "error",
+                            "error": str(exc),
+                        }
+                    ],
+                }
+
+        elif kind == "delegate_agent":
             agent_id = str(action.get("agent_id", ""))
             task_text = str(action.get("task", message)).strip()
 
