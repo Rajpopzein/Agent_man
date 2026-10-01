@@ -183,6 +183,7 @@ def execute_agent(
     allow_network: bool = False,
     allow_hardware: bool = False,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
@@ -218,6 +219,34 @@ def execute_agent(
     correction_count = 0
     active_correction: dict[str, Any] | None = None
 
+    def stopped_result() -> dict[str, Any]:
+        _set_agent_state(
+            agent=agent,
+            db=db,
+            project_id=project.id,
+            state="idle",
+            source="manual_stop",
+        )
+        _report_progress(
+            progress,
+            phase="stopped",
+            action="Stopped by the user.",
+            detail="The worker stopped at a safe execution boundary.",
+            status="stopped",
+        )
+        events.emit(
+            "agent.run.stopped",
+            agent_id=agent.id,
+            agent_name=agent.name,
+            project_id=project.id,
+            reason="manual_stop",
+        )
+        return {
+            "text": "Stopped by the user.",
+            "steps": trace,
+            "status": "stopped",
+        }
+
     _set_agent_state(
         agent=agent,
         db=db,
@@ -239,6 +268,9 @@ def execute_agent(
     )
 
     for turn_number in range(1, MAX_TURNS + 1):
+        if should_stop is not None and should_stop():
+            return stopped_result()
+
         _report_progress(
             progress,
             phase="planning",
@@ -256,6 +288,9 @@ def execute_agent(
                 source="llm",
             )
             raise
+        if should_stop is not None and should_stop():
+            return stopped_result()
+
         action = _parse_action(raw)
         action_type = str(action.get("type", "message")).lower()
         progress_note = " ".join(
@@ -482,6 +517,9 @@ def execute_agent(
                 default=str,
             ),
         )
+
+        if should_stop is not None and should_stop():
+            return stopped_result()
 
         try:
             result = tools.execute(

@@ -289,6 +289,7 @@ export type ManagedProcess = {
 export type AgentTaskHistory = {
   id: string;
   project_id: string;
+  room_id: string | null;
   agent_id: string;
   agent_name: string;
   agent_role: string;
@@ -308,6 +309,7 @@ export type AgentTaskHistory = {
 export type BackgroundJob = {
   id: string;
   project_id: string;
+  room_id: string | null;
   agent_id: string;
   agent_name: string;
   agent_role: string;
@@ -325,6 +327,46 @@ export type BackgroundJob = {
   current_detail: string;
   current_next_step: string;
   updated_at: string;
+  stop_requested: boolean;
+};
+
+export type MeetingRoomMember = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  state: string;
+  position: number;
+  active: boolean;
+};
+
+export type MeetingRoomMessage = {
+  id: string;
+  sender_type: string;
+  sender_id: string | null;
+  sender_name: string;
+  kind: string;
+  content: string;
+  job_id: string | null;
+  created_at: string;
+};
+
+export type MeetingRoom = {
+  id: string;
+  project_id: string;
+  title: string;
+  objective: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  executive: {
+    id: string;
+    name: string;
+    role: string;
+    status: string;
+  };
+  members: MeetingRoomMember[];
+  messages: MeetingRoomMessage[];
+  jobs: BackgroundJob[];
 };
 
 
@@ -618,6 +660,59 @@ export const api = {
         "/background-jobs/" +
         jobId +
         "/approve",
+      { method: "POST" },
+    ),
+  stopBackgroundJob: (
+    projectId: string,
+    jobId: string,
+  ) =>
+    request<BackgroundJob>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/background-jobs/" +
+        jobId +
+        "/stop",
+      { method: "POST" },
+    ),
+  meetingRooms: (projectId: string) =>
+    request<MeetingRoom[]>(
+      "/api/meeting-rooms/projects/" + projectId,
+    ),
+  meetingRoom: (roomId: string) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId,
+    ),
+  createMeetingRoom: (payload: {
+    project_id: string;
+    title: string;
+    objective: string;
+    agent_ids: string[];
+  }) =>
+    request<MeetingRoom>("/api/meeting-rooms", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  instructMeetingRoom: (
+    roomId: string,
+    payload: {
+      agent_id: string;
+      instruction: string;
+      allow_terminal?: boolean;
+      allow_delete?: boolean;
+      allow_network?: boolean;
+      allow_hardware?: boolean;
+    },
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId + "/instructions",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+  closeMeetingRoom: (roomId: string) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId + "/close",
       { method: "POST" },
     ),
   reinforcementSummary: (projectId: string) =>

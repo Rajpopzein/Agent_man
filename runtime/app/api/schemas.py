@@ -296,6 +296,7 @@ class MainAgentChatRequest(BaseModel):
 class BackgroundJobView(BaseModel):
     id: str
     project_id: str
+    room_id: str | None = None
     agent_id: str
     agent_name: str
     agent_role: str
@@ -313,6 +314,64 @@ class BackgroundJobView(BaseModel):
     current_detail: str
     current_next_step: str
     updated_at: str
+    stop_requested: bool = False
+
+
+class MeetingRoomCreate(BaseModel):
+    project_id: str
+    title: str = Field(min_length=1, max_length=180)
+    objective: str = Field(default="", max_length=20_000)
+    agent_ids: list[str] = Field(min_length=1, max_length=8)
+
+
+class MeetingRoomInstructionInput(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=120)
+    instruction: str = Field(min_length=1, max_length=20_000)
+    allow_terminal: bool = False
+    allow_delete: bool = False
+    allow_network: bool = False
+    allow_hardware: bool = False
+
+
+class MeetingRoomExecutiveView(BaseModel):
+    id: str
+    name: str
+    role: str
+    status: str
+
+
+class MeetingRoomMemberView(BaseModel):
+    agent_id: str
+    agent_name: str
+    role: str
+    state: str
+    position: int
+    active: bool
+
+
+class MeetingRoomMessageView(BaseModel):
+    id: str
+    sender_type: str
+    sender_id: str | None
+    sender_name: str
+    kind: str
+    content: str
+    job_id: str | None
+    created_at: datetime
+
+
+class MeetingRoomView(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    objective: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    executive: MeetingRoomExecutiveView
+    members: list[MeetingRoomMemberView]
+    messages: list[MeetingRoomMessageView]
+    jobs: list[BackgroundJobView]
 
 
 class MainAgentMessageView(BaseModel):
@@ -491,6 +550,7 @@ class ConnectorView(BaseModel):
 class AgentTaskHistoryView(BaseModel):
     id: str
     project_id: str
+    room_id: str | None = None
     agent_id: str
     agent_name: str
     agent_role: str

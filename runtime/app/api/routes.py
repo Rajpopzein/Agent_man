@@ -20,6 +20,7 @@ from app.persistence.models import (
     AgentToolRecord,
     MultiAgentMessageRecord,
     MultiAgentParticipantRecord,
+    MeetingRoomMemberRecord,
     ProjectRecord,
     WorkflowNodeRecord,
     WorkflowRunStepRecord,
@@ -59,6 +60,8 @@ def health():
             "reinforcement_user_feedback": True,
             "skill_packages": True,
             "connector_framework": True,
+            "meeting_rooms": True,
+            "manual_agent_stop": True,
         },
     }
 
@@ -149,6 +152,12 @@ def delete_agent(agent_id: str, db: Session = Depends(get_session)):
         .limit(1)
     ):
         dependencies.append("multi-agent messages")
+    if db.scalar(
+        select(MeetingRoomMemberRecord.agent_id)
+        .where(MeetingRoomMemberRecord.agent_id == agent_id)
+        .limit(1)
+    ):
+        dependencies.append("meeting room membership")
     if db.scalar(
         select(WorkflowNodeRecord.id)
         .where(WorkflowNodeRecord.agent_id == agent_id)
