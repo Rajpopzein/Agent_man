@@ -487,3 +487,22 @@ class ConnectorView(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+class AgentTaskHistoryView(BaseModel):
+    id: str
+    project_id: str
+    agent_id: str
+    agent_name: str
+    agent_role: str
+    task: str
+    status: str
+    current_action: str
+    current_tool: str
+    result_text: str
+    error: str
+    step_count: int
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime
+
