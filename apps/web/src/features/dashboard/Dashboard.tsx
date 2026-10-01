@@ -495,10 +495,7 @@ export default function Dashboard() {
   const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
-  const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
-  const [allowNetwork, setAllowNetwork] = useState(false);
-  const [allowHardware, setAllowHardware] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processingStartedAt, setProcessingStartedAt] =
     useState<number | null>(null);
@@ -1329,10 +1326,10 @@ export default function Dashboard() {
       result = await api.chatMainAgent(
         project.id,
         command,
-        allowTerminal,
+        false,
         allowDelete,
-        allowNetwork,
-        allowHardware,
+        false,
+        false,
       );
       setRun(result);
     } catch (error) {
@@ -2158,32 +2155,24 @@ export default function Dashboard() {
 
                 <div className="missionGateLegend">
                   <span>
-                    Tool assignment controls what Agent Man can see.
+                    Assigned Executive tools are available immediately.
                   </span>
                   <span>
-                    Run approval arms risky actions for this mission.
+                    Only destructive actions require separate approval.
                   </span>
                 </div>
 
                 <div className="permissionReadout">
-                  <button
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.exec > 0
-                        ? "available "
-                        : "") +
-                      (allowTerminal ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowTerminal((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.exec === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.exec +
-                      " assigned Executive tools require terminal.execute approval"
+                      " assigned Executive terminal tools are automatically authorized"
                     }
                   >
                     <TerminalSquare size={13} />
@@ -2191,29 +2180,20 @@ export default function Dashboard() {
                       EXEC
                       <small>
                         {executiveGateCounts.exec} TOOL
-                        {executiveGateCounts.exec === 1 ? "" : "S"} ·{" "}
-                        {allowTerminal ? "ARMED" : "ASK"}
+                        {executiveGateCounts.exec === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
-                  <button
+                  </div>
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.net > 0
-                        ? "available "
-                        : "") +
-                      (allowNetwork ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowNetwork((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.net === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.net +
-                      " assigned Executive tools require network.internet approval"
+                      " assigned Executive network tools are automatically authorized"
                     }
                   >
                     <Globe2 size={13} />
@@ -2221,29 +2201,20 @@ export default function Dashboard() {
                       NET
                       <small>
                         {executiveGateCounts.net} TOOL
-                        {executiveGateCounts.net === 1 ? "" : "S"} ·{" "}
-                        {allowNetwork ? "ARMED" : "ASK"}
+                        {executiveGateCounts.net === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
-                  <button
+                  </div>
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.hw > 0
-                        ? "available "
-                        : "") +
-                      (allowHardware ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowHardware((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.hw === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.hw +
-                      " assigned Executive tools require hardware.serial approval"
+                      " assigned Executive hardware tools are automatically authorized"
                     }
                   >
                     <Cpu size={13} />
@@ -2251,11 +2222,10 @@ export default function Dashboard() {
                       HW
                       <small>
                         {executiveGateCounts.hw} TOOL
-                        {executiveGateCounts.hw === 1 ? "" : "S"} ·{" "}
-                        {allowHardware ? "ARMED" : "ASK"}
+                        {executiveGateCounts.hw === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
+                  </div>
                   <button
                     className={
                       "permissionChip danger " +
