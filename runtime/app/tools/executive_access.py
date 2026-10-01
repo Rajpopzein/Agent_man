@@ -29,6 +29,25 @@ _APPROVAL_GATE_BY_TOOL: dict[str, tuple[str, Permission]] = {
 }
 
 
+def automatic_approvals_for_tools(
+    tool_names: set[str] | tuple[str, ...],
+) -> set[str]:
+    """Assigned tools authorize non-destructive gated capabilities.
+
+    Destructive permissions remain explicit per mission.
+    """
+    approvals: set[str] = set()
+    for name in tool_names:
+        item = _APPROVAL_GATE_BY_TOOL.get(name)
+        if item is None:
+            continue
+        gate, permission = item
+        if gate == "delete":
+            continue
+        approvals.add(permission.value)
+    return approvals
+
+
 def _approval_metadata(name: str) -> tuple[str | None, str | None]:
     item = _APPROVAL_GATE_BY_TOOL.get(name)
     if item is None:
