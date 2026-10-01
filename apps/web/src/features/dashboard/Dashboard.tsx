@@ -1463,9 +1463,9 @@ export default function Dashboard() {
         (tool) => tool.approval_gate === "delete",
       ).length ?? 0,
   };
-  const safeToolCount =
+  const automaticToolCount =
     executiveAccess?.tools.filter(
-      (tool) => !tool.approval_gate,
+      (tool) => tool.approval_gate !== "delete",
     ).length ?? 0;
 
   const providerLabel = useMemo(() => {
@@ -2106,8 +2106,8 @@ export default function Dashboard() {
                         " ENABLED"
                       : "VERIFYING..."}
                   </b>
-                  <span>SAFE AUTO TOOLS</span>
-                  <b>{safeToolCount} READY WITHOUT RUN APPROVAL</b>
+                  <span>AUTO-AUTHORIZED TOOLS</span>
+                  <b>{automaticToolCount} READY IMMEDIATELY</b>
                   <span>ACTIVE WORKER</span>
                   <b>
                     {activeWorker
