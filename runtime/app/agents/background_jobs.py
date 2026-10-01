@@ -515,8 +515,7 @@ class BackgroundJobSupervisor:
                         if approval_permission
                         else ""
                     )
-                    + ". Approve it in Mission Control, then ask Agent Man "
-                    "to retry the worker."
+                    + ". Approve it to continue the same background task."
                 )
                 events.emit(
                     "background_job.approval_required",
@@ -590,6 +589,110 @@ class BackgroundJobSupervisor:
                 error=updated["error"],
                 message=f"{updated['agent_name']} background job failed.",
             )
+
+    def approve_and_resume(
+        self,
+        job_id: str,
+    ) -> dict[str, object]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise LookupError("Background job not found")
+            if str(job.get("status", "")) != "waiting_approval":
+                raise ValueError(
+                    "Only a job waiting for approval can be resumed"
+                )
+            agent_id = str(job.get("agent_id") or "")
+            if agent_id.startswith("workflow:"):
+                raise ValueError(
+                    "Workflow approval resume is not supported yet"
+                )
+
+            permission = str(
+                job.get("current_detail") or ""
+            ).strip()
+            allow_terminal = permission == "terminal.execute"
+            allow_delete = permission == "project.files.delete"
+            allow_network = permission == "network.internet"
+            allow_hardware = permission == "hardware.serial"
+            if not any(
+                (
+                    allow_terminal,
+                    allow_delete,
+                    allow_network,
+                    allow_hardware,
+                )
+            ):
+                raise ValueError(
+                    "Waiting job does not expose a resumable permission"
+                )
+
+            project_id = str(job["project_id"])
+            task = str(job["task"])
+            agent_name = str(job["agent_name"])
+            agent_role = str(job["agent_role"])
+            job.update(
+                {
+                    "status": "queued",
+                    "completed_at": None,
+                    "result_text": "",
+                    "error": "",
+                    "current_phase": "queued",
+                    "current_action": (
+                        "Approval received. Resuming the assigned task."
+                    ),
+                    "current_detail": permission,
+                    "current_next_step": "",
+                    "updated_at": _now(),
+                }
+            )
+            self._futures[job_id] = self._executor.submit(
+                self._run_agent,
+                job_id,
+                project_id,
+                agent_id,
+                task,
+                allow_terminal,
+                allow_delete,
+                allow_network,
+                allow_hardware,
+            )
+            snapshot = dict(job)
+
+        events.emit(
+            "background_job.resumed",
+            project_id=project_id,
+            job_id=job_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            status="queued",
+            permission=permission,
+            current_phase="queued",
+            current_action=snapshot["current_action"],
+            current_tool=snapshot["current_tool"],
+            current_detail=permission,
+            current_next_step="",
+            updated_at=snapshot["updated_at"],
+            message=(
+                agent_name
+                + " received approval and is resuming the task."
+            ),
+        )
+        events.emit(
+            "executive.activity",
+            project_id=project_id,
+            agent_id="main-agent:" + project_id,
+            agent_name="Agent Man",
+            phase="approval",
+            status="approved",
+            label=agent_name,
+            message=(
+                agent_name
+                + " received approval and is resuming work."
+            ),
+        )
+        return snapshot
 
     def get(
         self,
