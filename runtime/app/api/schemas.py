@@ -550,6 +550,7 @@ class ConnectorView(BaseModel):
 class AgentTaskHistoryView(BaseModel):
     id: str
     project_id: str
+    room_id: str | None = None
     agent_id: str
     agent_name: str
     agent_role: str
