@@ -301,3 +301,47 @@ class SelfUpgradeProposalRecord(Base):
         onupdate=_now,
     )
 
+
+class ReinforcementEventRecord(Base):
+    __tablename__ = "reinforcement_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        index=True,
+    )
+    agent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agents.id"),
+        nullable=True,
+        index=True,
+    )
+    agent_name: Mapped[str] = mapped_column(String(160), default="")
+    tool_name: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+        index=True,
+    )
+    source: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        index=True,
+    )
+    outcome: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        index=True,
+    )
+    reward_milli: Mapped[int] = mapped_column(Integer, nullable=False)
+    task: Mapped[str] = mapped_column(Text, default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    reference_id: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        index=True,
+    )
+
