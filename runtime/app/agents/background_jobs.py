@@ -19,7 +19,7 @@ from app.persistence.models import (
 from app.providers.connections import bind_agent_connection
 
 
-ACTIVE_STATUSES = {"queued", "running", "stopping"}
+ACTIVE_STATUSES = {"queued", "running", "stopping", "waiting_approval", "waiting_capability"}
 
 
 def _now() -> str:
