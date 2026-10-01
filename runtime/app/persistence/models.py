@@ -393,3 +393,45 @@ class ConnectorRecord(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
+
+class AgentTaskHistoryRecord(Base):
+    __tablename__ = "agent_task_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id"),
+        index=True,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(120),
+        index=True,
+    )
+    agent_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    agent_role: Mapped[str] = mapped_column(String(120), default="")
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    current_action: Mapped[str] = mapped_column(Text, default="")
+    current_tool: Mapped[str] = mapped_column(String(160), default="")
+    result_text: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    step_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        index=True,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_now,
+        onupdate=_now,
+        index=True,
+    )
+
