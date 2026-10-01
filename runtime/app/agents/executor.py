@@ -38,6 +38,8 @@ def _set_agent_state(
     events.emit(
         "agent.state.changed",
         agent_id=agent.id,
+        agent_name=agent.name,
+        agent_role=agent.role,
         project_id=project_id,
         state=state,
         **payload,
