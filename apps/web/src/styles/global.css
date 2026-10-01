@@ -2417,3 +2417,201 @@ input,textarea,select{font-size:13px}
   .commandConsoleLine{font-size:9px}
 }
 
+/* Navigation alignment pass */
+@media(min-width:761px){
+  .jarvisShell{
+    grid-template-columns:196px minmax(0,1fr)
+  }
+  .commandRail{
+    align-items:stretch;
+    padding:18px 14px 14px;
+    gap:0
+  }
+  .coreMark{
+    width:100%;
+    min-height:48px;
+    margin:0 0 20px;
+    padding:4px 8px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    gap:10px;
+    border-radius:10px;
+    text-align:left
+  }
+  .coreMark:hover{
+    background:#151b23
+  }
+  .coreMarkRing{
+    width:38px;
+    height:38px;
+    flex:0 0 38px;
+    border-radius:9px
+  }
+  .coreMarkLabel{
+    min-width:0;
+    display:grid;
+    gap:2px
+  }
+  .coreMarkLabel strong{
+    color:#e6ebf2;
+    font-size:13px;
+    font-weight:600;
+    line-height:1.1;
+    white-space:nowrap
+  }
+  .coreMarkLabel small{
+    color:#748191;
+    font-family:var(--mono);
+    font-size:9px;
+    line-height:1.1;
+    letter-spacing:.25px;
+    text-transform:uppercase
+  }
+
+  .railNav{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    width:100%
+  }
+  .railButton{
+    width:100%;
+    height:44px;
+    padding:0 10px;
+    display:grid;
+    grid-template-columns:24px minmax(0,1fr);
+    align-items:center;
+    justify-items:start;
+    gap:10px;
+    border-radius:9px
+  }
+  .railButton span{
+    width:24px;
+    height:24px;
+    display:grid;
+    place-items:center
+  }
+  .railButton svg{
+    width:18px;
+    height:18px
+  }
+  .railButton small{
+    min-width:0;
+    display:block;
+    font-size:11px;
+    line-height:1;
+    letter-spacing:0;
+    text-transform:none;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis
+  }
+  .railButton.active{
+    box-shadow:inset 3px 0 0 var(--cyan)
+  }
+  .railButton.active:after{
+    display:none
+  }
+
+  .railFooter{
+    width:100%;
+    margin-top:auto;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    padding-top:14px;
+    border-top:1px solid var(--line)
+  }
+  .railQuick{
+    width:100%;
+    height:38px;
+    border-radius:9px
+  }
+  .railQuick svg{
+    width:17px;
+    height:17px
+  }
+
+  .hudTopbar{
+    grid-template-columns:minmax(220px,1fr) minmax(260px,520px) auto;
+    align-items:center
+  }
+  .systemIdentity,
+  .topCommand,
+  .topControls{
+    min-height:36px
+  }
+  .topControls{
+    align-self:center;
+    justify-self:end
+  }
+  .voiceCoreButton,
+  .consoleCoreButton,
+  .runtimeBadge{
+    height:36px;
+    box-sizing:border-box
+  }
+}
+
+@media(max-width:1180px) and (min-width:761px){
+  .hudTopbar{
+    grid-template-columns:minmax(220px,1fr) auto
+  }
+  .topCommand{
+    display:none
+  }
+}
+
+@media(max-width:760px){
+  .commandRail{
+    align-items:center
+  }
+  .coreMarkLabel{
+    display:none
+  }
+  .railNav{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    overflow-x:auto;
+    overflow-y:hidden;
+    scrollbar-width:none
+  }
+  .railNav::-webkit-scrollbar{
+    display:none
+  }
+  .railButton{
+    flex:0 0 76px;
+    width:76px;
+    height:50px;
+    padding:4px 3px;
+    display:grid;
+    grid-template-rows:22px 14px;
+    align-content:center;
+    justify-items:center;
+    gap:2px
+  }
+  .railButton span{
+    width:22px;
+    height:22px;
+    display:grid;
+    place-items:center
+  }
+  .railButton svg{
+    width:17px;
+    height:17px
+  }
+  .railButton small{
+    width:100%;
+    font-size:8px;
+    line-height:1;
+    letter-spacing:0;
+    text-transform:none;
+    text-align:center;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis
+  }
+}
+
