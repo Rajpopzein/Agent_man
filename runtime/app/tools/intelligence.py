@@ -555,3 +555,116 @@ def _semantic_tool_match(
 
     ranked.sort(key=lambda item: (-item[0], item[1]))
     return tuple(name for _, name in ranked[:4])
+
+
+_DEFAULT_PROMPT_TOOLS: tuple[str, ...] = (
+    "list_files",
+    "search_files",
+    "read_file",
+    "edit_file",
+    "write_file",
+    "run_tests",
+    "run_build",
+    "lint",
+    "run_command",
+    "git_status",
+    "git_diff",
+)
+
+_INTENT_PROMPT_COMPANIONS: dict[str, tuple[str, ...]] = {
+    "filesystem": (
+        "list_files",
+        "search_files",
+        "read_file",
+        "edit_file",
+        "write_file",
+        "run_tests",
+    ),
+    "development_validation": (
+        "list_files",
+        "search_files",
+        "read_file",
+        "run_tests",
+        "run_build",
+        "lint",
+    ),
+    "git": (
+        "git_status",
+        "git_diff",
+        "git_commit",
+        "read_file",
+    ),
+    "runtime_process": (
+        "list_processes",
+        "start_process",
+        "read_process_output",
+        "stop_process",
+    ),
+    "runtime_port": (
+        "check_port",
+        "allocate_port",
+    ),
+    "serial_hardware": (
+        "list_serial_ports",
+        "serial_open",
+        "serial_read",
+        "serial_write",
+        "serial_close",
+    ),
+    "network": ("http_get",),
+}
+
+
+def prompt_tool_names(
+    objective: str,
+    allowed_names: set[str],
+    *,
+    plan: ToolPlan | None = None,
+    max_tools: int = 12,
+) -> tuple[str, ...]:
+    """Choose the small tool schema set worth placing in the prompt.
+
+    Runtime authorization still uses the complete allowed_names set. This only
+    controls which verbose tool definitions consume model context.
+    """
+    if max_tools <= 0 or not allowed_names:
+        return ()
+
+    resolved_plan = plan or plan_tools(
+        objective,
+        allowed_names,
+    )
+    selected: list[str] = []
+
+    def add(names: tuple[str, ...] | list[str]) -> None:
+        for name in names:
+            if (
+                name in allowed_names
+                and name not in selected
+                and len(selected) < max_tools
+            ):
+                selected.append(name)
+
+    if resolved_plan.requires_tool:
+        add(list(resolved_plan.recommended_tools))
+        add(list(resolved_plan.sequence))
+        add(
+            list(
+                _INTENT_PROMPT_COMPANIONS.get(
+                    resolved_plan.intent,
+                    (),
+                )
+            )
+        )
+    else:
+        add(
+            list(
+                _semantic_tool_match(
+                    objective,
+                    allowed_names,
+                )
+            )
+        )
+        add(list(_DEFAULT_PROMPT_TOOLS))
+
+    return tuple(selected)
