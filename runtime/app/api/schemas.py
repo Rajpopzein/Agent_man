@@ -581,3 +581,18 @@ class AgentTaskHistoryView(BaseModel):
     completed_at: datetime | None
     updated_at: datetime
 
+
+
+
+class ProjectFileWrite(BaseModel):
+    path: str = Field(min_length=1, max_length=2048)
+    content: str = Field(default="", max_length=500_000)
+
+
+class ProjectDirectoryCreate(BaseModel):
+    path: str = Field(min_length=1, max_length=2048)
+
+
+class ProjectPathMove(BaseModel):
+    source: str = Field(min_length=1, max_length=2048)
+    destination: str = Field(min_length=1, max_length=2048)

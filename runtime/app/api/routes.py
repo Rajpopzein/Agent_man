@@ -1,16 +1,18 @@
 import asyncio
+import io
 import json
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.agents.configuration import agent_view, update_configuration
 from app.agents.executor import execute_agent
 from app.agents.runner import run_agent
-from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentUpdate, AgentView, ProjectCreate, ProjectView
+from app.api.schemas import AgentCreate, AgentPrompt, AgentReply, AgentRunReply, AgentRunRequest, AgentUpdate, AgentView, ProjectCreate, ProjectDirectoryCreate, ProjectFileWrite, ProjectPathMove, ProjectView
 from app.core.config import settings
 from app.events.bus import events
 from app.persistence.database import get_session
@@ -64,6 +66,9 @@ def health():
             "collaborative_meeting_rooms": True,
             "meeting_room_agent_kick": True,
             "manual_agent_stop": True,
+            "project_workbench": True,
+            "project_file_download": True,
+            "project_zip_export": True,
         },
     }
 
@@ -203,6 +208,179 @@ def list_project_files(project_id: str, path: str = ".", db: Session = Depends(g
         raise HTTPException(404, "Project not found")
     try:
         return ProjectFilesystem(project.workspace_path).list_files(path)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/projects/{project_id}/files/content")
+def read_project_file(project_id: str, path: str, db: Session = Depends(get_session)):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        content = ProjectFilesystem(project.workspace_path).read_file(path)
+        return {"path": path, "content": content}
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/api/projects/{project_id}/files/content")
+def write_project_file(
+    project_id: str,
+    body: ProjectFileWrite,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        return ProjectFilesystem(project.workspace_path).write_file(
+            body.path,
+            body.content,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/projects/{project_id}/files/directory")
+def create_project_directory(
+    project_id: str,
+    body: ProjectDirectoryCreate,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        return ProjectFilesystem(project.workspace_path).create_directory(
+            body.path
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/projects/{project_id}/files/move")
+def move_project_path(
+    project_id: str,
+    body: ProjectPathMove,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        return ProjectFilesystem(project.workspace_path).move_path(
+            body.source,
+            body.destination,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/api/projects/{project_id}/files")
+def delete_project_path(
+    project_id: str,
+    path: str,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        return ProjectFilesystem(project.workspace_path).delete_path(
+            path,
+            approvals={"project.files.delete"},
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/api/projects/{project_id}/files/upload")
+async def upload_project_file(
+    project_id: str,
+    request: Request,
+    path: str,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        content = await request.body()
+        return ProjectFilesystem(project.workspace_path).write_bytes(
+            path,
+            content,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/projects/{project_id}/files/download")
+def download_project_file(
+    project_id: str,
+    path: str,
+    db: Session = Depends(get_session),
+):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        target = ProjectFilesystem(project.workspace_path).download_target(path)
+        return FileResponse(
+            target,
+            filename=target.name,
+            media_type="application/octet-stream",
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/projects/{project_id}/export")
+def export_project(project_id: str, db: Session = Depends(get_session)):
+    project = db.get(ProjectRecord, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+
+    fs = ProjectFilesystem(project.workspace_path)
+    root = fs.guard.root
+    excluded = {".git", "node_modules", ".venv", "venv", "dist", "__pycache__"}
+    buffer = io.BytesIO()
+    total_bytes = 0
+    max_export_bytes = 100_000_000
+
+    try:
+        with zipfile.ZipFile(
+            buffer,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as archive:
+            for item in root.rglob("*"):
+                relative = item.relative_to(root)
+                if any(part in excluded for part in relative.parts):
+                    continue
+                if item.is_symlink() or not item.is_file():
+                    continue
+                total_bytes += item.stat().st_size
+                if total_bytes > max_export_bytes:
+                    raise ValueError(
+                        "Project export exceeds the 100 MB Workbench limit"
+                    )
+                archive.write(item, arcname=str(relative))
+        buffer.seek(0)
+        safe_name = "".join(
+            character
+            if character.isalnum() or character in {"-", "_"}
+            else "-"
+            for character in project.name
+        ).strip("-") or "agent-man-project"
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition":
+                    'attachment; filename="' + safe_name + '.zip"'
+            },
+        )
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
