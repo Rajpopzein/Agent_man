@@ -146,7 +146,7 @@ def test_voice_sanitizes_markdown_json_and_special_characters_before_tts():
     assert "propose_upgrade" in executive
     assert "natural conversational" in executive
 
-def test_runtime_status_voice_is_queued_and_background_reply_is_spoken():
+def test_voice_narrates_only_delegation_start_and_final_outcome():
     root = Path(__file__).resolve().parents[2]
     hook = (
         root
@@ -167,15 +167,29 @@ def test_runtime_status_voice_is_queued_and_background_reply_is_spoken():
         / "Dashboard.tsx"
     ).read_text(encoding="utf-8")
 
+    speech = dashboard.split(
+        "function runtimeSpeechAnnouncement(", 1
+    )[1].split("function consoleLineFromEvent(", 1)[0]
+
     assert "speechQueueRef" in hook
     assert "queueSpeakAsync" in hook
     assert "requestAgentSpeech(speech)" in dashboard
-    assert "runtimeSpeechAnnouncement" in dashboard
-    assert '"background_job.started"' in dashboard
-    assert '"background_job.progress"' in dashboard
-    assert '"background_job.completed"' in dashboard
-    assert '"background_job.error"' in dashboard
-    assert '"completed", "background"' in dashboard
+
+    # Exactly the start transition and terminal outcomes are narrated.
+    assert 'runtimeEvent.phase === "delegation"' in speech
+    assert '"background_job.completed"' in speech
+    assert '"background_job.error"' in speech
+
+    # Intermediate worker lifecycle remains visual-only.
+    assert '"background_job.started"' not in speech
+    assert '"background_job.progress"' not in speech
+    assert '"background_job.approval_required"' not in speech
+    assert '"background_job.resumed"' not in speech
+    assert 'runtimeEvent.phase === "next_step"' not in speech
+
+    # A background acknowledgement is not a final result and must stay silent.
+    assert 'result.status === "completed"' in dashboard
+    assert '"completed", "background"' not in dashboard
     assert "voice.queueSpeakAsync(result.text)" in dashboard
     assert 'setConsoleOpen(true);' in dashboard
 
@@ -207,7 +221,7 @@ def test_worker_monitor_exposes_safe_progress_not_private_chain_of_thought():
     assert '"[redacted]"' in dashboard
     assert '" · tool: "' in dashboard
 
-def test_worker_approval_interrupts_user_with_text_and_voice():
+def test_worker_approval_interrupts_user_with_text_only():
     root = Path(__file__).resolve().parents[2]
     dashboard = (
         root
