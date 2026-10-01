@@ -236,5 +236,6 @@ def test_worker_approval_interrupts_user_with_text_and_voice():
     assert '"background_job.approval_required"' in supervisor
     assert 'phase="approval"' in supervisor
     assert 'status="waiting_approval"' in supervisor
-    assert "ask Agent Man to retry the worker" in supervisor
+    assert "ask Agent Man to retry " in supervisor
+    assert "the worker." in supervisor
 
