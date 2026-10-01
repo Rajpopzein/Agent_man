@@ -317,13 +317,20 @@ class BackgroundJobSupervisor:
 
     def _progress_callback(self, job_id: str):
         def update_progress(payload: dict[str, object]) -> None:
+            previous = self.get(job_id) or {}
+            previous_next = str(
+                previous.get("current_next_step") or ""
+            ).strip()
+            next_step = str(
+                payload.get("next_step") or ""
+            ).strip()[:500]
             updated = self._update(
                 job_id,
                 current_phase=str(payload.get("phase") or "working"),
                 current_action=str(payload.get("action") or "")[:500],
                 current_tool=str(payload.get("tool") or "")[:160],
                 current_detail=str(payload.get("detail") or "")[:2000],
-                current_next_step=str(payload.get("next_step") or "")[:500],
+                current_next_step=next_step,
             )
             events.emit(
                 "background_job.progress",
@@ -341,6 +348,23 @@ class BackgroundJobSupervisor:
                 updated_at=updated["updated_at"],
                 message=updated["current_action"],
             )
+            if next_step and next_step != previous_next:
+                events.emit(
+                    "executive.activity",
+                    project_id=updated["project_id"],
+                    agent_id="main-agent:" + str(updated["project_id"]),
+                    agent_name="Agent Man",
+                    phase="next_step",
+                    status="working",
+                    label=updated["agent_name"],
+                    message=(
+                        str(updated["agent_name"])
+                        + " next: "
+                        + next_step
+                    ),
+                    worker_agent_id=updated["agent_id"],
+                    next_step=next_step,
+                )
 
         return update_progress
 
