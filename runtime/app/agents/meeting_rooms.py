@@ -280,3 +280,41 @@ def close_meeting_room(
     )
     db.refresh(room)
     return room
+
+
+
+def meeting_room_context(
+    db: Session,
+    project_id: str,
+    *,
+    limit: int = 5,
+) -> str:
+    rooms = [
+        room
+        for room in list_meeting_rooms(db, project_id)
+        if room.status == "active"
+    ][: max(1, limit)]
+    if not rooms:
+        return "(none)"
+
+    lines: list[str] = []
+    for room in rooms:
+        members = room_member_agents(db, room.id)
+        member_text = ", ".join(
+            agent.name + " (" + agent.role + ")"
+            for member, agent in members
+            if member.active
+        ) or "(no active workers)"
+        objective = " ".join((room.objective or "").split())[:500]
+        lines.append(
+            "- "
+            + room.id
+            + ": "
+            + room.title
+            + " ["
+            + room.status
+            + "] workers="
+            + member_text
+            + (("; objective=" + objective) if objective else "")
+        )
+    return "\n".join(lines)
