@@ -325,12 +325,8 @@ class MeetingRoomCreate(BaseModel):
 
 
 class MeetingRoomInstructionInput(BaseModel):
-    agent_id: str = Field(min_length=1, max_length=120)
     instruction: str = Field(min_length=1, max_length=20_000)
-    allow_terminal: bool = False
     allow_delete: bool = False
-    allow_network: bool = False
-    allow_hardware: bool = False
 
 
 class MeetingRoomExecutiveView(BaseModel):
@@ -360,6 +356,24 @@ class MeetingRoomMessageView(BaseModel):
     created_at: datetime
 
 
+class MeetingRoomCollaborationParticipantView(BaseModel):
+    agent_id: str
+    agent_name: str
+    role: str
+    status: str
+    last_round: int
+
+
+class MeetingRoomCollaborationView(BaseModel):
+    id: str
+    status: str
+    prompt: str
+    current_round: int
+    created_at: datetime
+    completed_at: datetime | None
+    participants: list[MeetingRoomCollaborationParticipantView]
+
+
 class MeetingRoomView(BaseModel):
     id: str
     project_id: str
@@ -372,6 +386,7 @@ class MeetingRoomView(BaseModel):
     members: list[MeetingRoomMemberView]
     messages: list[MeetingRoomMessageView]
     jobs: list[BackgroundJobView]
+    collaborations: list[MeetingRoomCollaborationView]
 
 
 class MainAgentMessageView(BaseModel):
