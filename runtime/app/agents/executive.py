@@ -37,7 +37,10 @@ from app.tools.capabilities import (
     CAPABILITY_TOOLS,
     detect_missing_capability,
 )
-from app.tools.executive_access import executive_tool_access
+from app.tools.executive_access import (
+    automatic_approvals_for_tools,
+    executive_tool_access,
+)
 from app.tools.intelligence import (
     plan_tools,
     preflight_tool,
@@ -612,7 +615,9 @@ def run_main_agent(
     allowed_tools = set(tool_access.names)
     tool_plan = plan_tools(message, allowed_tools)
 
-    approvals: set[str] = set()
+    approvals: set[str] = automatic_approvals_for_tools(
+        allowed_tools
+    )
     if allow_terminal:
         approvals.add(Permission.TERMINAL_EXECUTE.value)
     if allow_delete:
