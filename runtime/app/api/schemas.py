@@ -327,6 +327,40 @@ class MainAgentChatReply(BaseModel):
     steps: list[dict[str, Any]]
 
 
+
+
+class ReinforcementFeedbackInput(BaseModel):
+    value: int = Field(ge=-1, le=1)
+    agent_id: str | None = None
+    agent_name: str = Field(default="", max_length=160)
+    tool_name: str | None = Field(default=None, max_length=120)
+    task: str = Field(default="", max_length=8_000)
+    note: str = Field(default="", max_length=4_000)
+    reference_id: str | None = Field(default=None, max_length=120)
+
+
+class ReinforcementEventView(BaseModel):
+    id: str
+    project_id: str
+    agent_id: str | None
+    agent_name: str
+    tool_name: str | None
+    source: str
+    outcome: str
+    reward: float
+    task: str
+    note: str
+    reference_id: str | None
+    created_at: datetime
+
+
+class ReinforcementSummaryView(BaseModel):
+    events: int
+    overall: dict[str, Any]
+    agents: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+
+
 class SelfUpgradeProposalView(BaseModel):
     id: str
     project_id: str
