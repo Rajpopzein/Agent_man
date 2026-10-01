@@ -19,7 +19,6 @@ import {
 
 import {
   api,
-  Agent,
   BackgroundJob,
   MeetingRoom,
   Project,
@@ -27,7 +26,6 @@ import {
 
 type Props = {
   project: Project | null;
-  agents: Agent[];
   backgroundJobs: BackgroundJob[];
 };
 
@@ -56,7 +54,6 @@ function statusIcon(status: string) {
 
 export default function MeetingRoomsPage({
   project,
-  agents,
   backgroundJobs,
 }: Props) {
   const [rooms, setRooms] = useState<MeetingRoom[]>([]);
