@@ -8,6 +8,7 @@ from app.agents.background_jobs import background_jobs
 from app.agents.executive import run_main_agent
 from app.agents.reinforcement import project_summary, record_reward
 from app.api.schemas import (
+    AgentTaskHistoryView,
     BackgroundJobView,
     MainAgentChatReply,
     MainAgentChatRequest,
@@ -22,6 +23,7 @@ from app.api.schemas import (
 from app.persistence.database import get_session
 from app.persistence.models import (
     AIConnectionRecord,
+    AgentTaskHistoryRecord,
     MainAgentConfigRecord,
     MainAgentMessageRecord,
     ProjectRecord,
@@ -133,6 +135,37 @@ def background_job_status(
     if db.get(ProjectRecord, project_id) is None:
         raise HTTPException(404, "Project not found")
     return background_jobs.list_project(project_id)
+
+
+@router.get(
+    "/projects/{project_id}/task-history",
+    response_model=list[AgentTaskHistoryView],
+)
+def task_history(
+    project_id: str,
+    agent_id: str | None = None,
+    status: str | None = None,
+    limit: int = 300,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    query = (
+        select(AgentTaskHistoryRecord)
+        .where(AgentTaskHistoryRecord.project_id == project_id)
+        .order_by(AgentTaskHistoryRecord.created_at.desc())
+        .limit(max(1, min(limit, 1000)))
+    )
+    if agent_id:
+        query = query.where(
+            AgentTaskHistoryRecord.agent_id == agent_id
+        )
+    if status:
+        query = query.where(
+            AgentTaskHistoryRecord.status == status
+        )
+    return db.scalars(query).all()
 
 
 @router.post(
