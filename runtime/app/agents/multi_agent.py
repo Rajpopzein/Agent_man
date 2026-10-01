@@ -129,7 +129,15 @@ def _format_transcript(
             if message.agent_id
             else None
         )
-        author = agent.name if agent else "Runtime"
+        author = (
+            agent.name
+            if agent
+            else (
+                "User"
+                if message.kind == "user_instruction"
+                else "Runtime"
+            )
+        )
         lines.append(
             f"[round {message.round_number}] "
             f"{author} / {message.kind}: {message.content}"
