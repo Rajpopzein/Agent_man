@@ -2,6 +2,7 @@ import {
   FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -68,6 +69,7 @@ export default function MeetingRoomsPage({
   const [allowDelete, setAllowDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   async function loadRooms(preferredRoomId?: string) {
     if (!project) {
@@ -145,6 +147,20 @@ export default function MeetingRoomsPage({
     void refreshRoom(activeRoomId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomJobVersion]);
+
+  const latestMessageId =
+    room?.messages[room.messages.length - 1]?.id || "";
+
+  useEffect(() => {
+    const node = messagesRef.current;
+    if (!node) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [room?.id, latestMessageId]);
 
   const activeCollaboration = useMemo(() => {
     if (!room) return null;
@@ -514,7 +530,10 @@ export default function MeetingRoomsPage({
                     </div>
                   </div>
 
-                  <div className="meetingMessages">
+                  <div
+                    className="meetingMessages"
+                    ref={messagesRef}
+                  >
                     {room.messages.length === 0 && (
                       <p className="muted">No room messages yet.</p>
                     )}
