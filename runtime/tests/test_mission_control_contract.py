@@ -30,7 +30,9 @@ def test_mission_control_uses_executive_effective_access():
     assert 'tool.approval_gate === "delete"' in dashboard
 
     assert "Tool assignment controls what Agent Man can see." in dashboard
-    assert "Run approval arms risky actions for this mission." in dashboard
+    assert "Assigned Executive tools are available immediately." in dashboard
+    assert "Only destructive actions require separate approval." in dashboard
+    assert " · AUTO" in dashboard
 
     # Returning from Settings/Tools to Command Core refreshes the
     # authoritative runtime access instead of using stale local data.
