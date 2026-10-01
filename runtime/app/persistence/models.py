@@ -97,6 +97,11 @@ class MultiAgentTaskRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    room_id: Mapped[str | None] = mapped_column(
+        ForeignKey("meeting_rooms.id"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="created")
