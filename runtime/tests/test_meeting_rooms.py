@@ -91,6 +91,31 @@ def _create_room(project, workers):
     return created.json()
 
 
+def _wait_for_room_message(
+    room_id: str,
+    kind: str,
+    timeout: float = 2.0,
+):
+    deadline = time() + timeout
+    latest = None
+    while time() < deadline:
+        response = client.get("/api/meeting-rooms/" + room_id)
+        assert response.status_code == 200
+        latest = response.json()
+        if any(
+            message["kind"] == kind
+            for message in latest["messages"]
+        ):
+            return latest
+        sleep(0.02)
+    raise AssertionError(
+        "Room message kind "
+        + repr(kind)
+        + " did not appear; latest="
+        + repr(latest)
+    )
+
+
 def _wait_for_collaboration(
     room_id: str,
     statuses: set[str],
@@ -291,6 +316,10 @@ def test_room_instruction_runs_all_peers_until_stable_completion(monkeypatch):
     assert any(
         message["kind"] == "peer_final"
         for message in completed["messages"]
+    )
+    completed = _wait_for_room_message(
+        room["id"],
+        "collaboration_completed",
     )
     assert any(
         message["kind"] == "collaboration_completed"
