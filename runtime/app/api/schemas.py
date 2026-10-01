@@ -429,3 +429,60 @@ class ElevenLabsVoiceView(BaseModel):
 
 class VoiceSpeechInput(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
+
+
+class SkillCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    slug: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=4000)
+    content: str = Field(min_length=1, max_length=40_000)
+
+
+class SkillUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    slug: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4000)
+    content: str | None = Field(default=None, min_length=1, max_length=40_000)
+
+
+class SkillView(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    slug: str
+    description: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConnectorCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    kind: str = Field(min_length=1, max_length=120)
+    base_url: str = Field(default="", max_length=512)
+    config: dict[str, Any] = Field(default_factory=dict)
+    api_key: str | None = Field(default=None, max_length=4096)
+
+
+class ConnectorUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    kind: str | None = Field(default=None, min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, max_length=512)
+    config: dict[str, Any] | None = None
+    enabled: bool | None = None
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_secret: bool = False
+
+
+class ConnectorView(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    kind: str
+    base_url: str
+    config: dict[str, Any]
+    enabled: bool
+    has_secret: bool
+    created_at: datetime
+    updated_at: datetime
+
