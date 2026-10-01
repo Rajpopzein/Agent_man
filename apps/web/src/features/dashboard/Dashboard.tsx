@@ -127,6 +127,30 @@ function safeMonitorDetail(value: unknown) {
   return text.slice(0, 900);
 }
 
+function approvalActionLabel(
+  tool: string,
+  permission: string,
+) {
+  if (
+    permission === "terminal.execute" ||
+    ["run_command", "run_tests", "run_build", "lint"].includes(tool)
+  ) {
+    return "run a terminal command";
+  }
+  if (permission === "network.access") {
+    return "use network access";
+  }
+  if (permission === "serial.access") {
+    return "access connected hardware";
+  }
+  if (permission === "project.files.delete") {
+    return "perform a destructive project action";
+  }
+  return tool
+    ? "use " + tool.replaceAll("_", " ")
+    : "continue the task";
+}
+
 function runtimeSpeechAnnouncement(
   runtimeEvent: RuntimeEvent,
 ): string | null {
@@ -149,6 +173,22 @@ function runtimeSpeechAnnouncement(
     return name + " is working on the task now.";
   }
 
+  if (
+    runtimeEvent.type ===
+    "background_job.approval_required"
+  ) {
+    const tool = String(runtimeEvent.tool || "");
+    const permission = String(
+      runtimeEvent.permission || "",
+    );
+    return (
+      name +
+      " is waiting for your approval to " +
+      approvalActionLabel(tool, permission) +
+      ". Please approve it in Mission Control, then retry or resume the worker."
+    );
+  }
+
   if (runtimeEvent.type === "background_job.progress") {
     const phase = String(
       runtimeEvent.current_phase || "",
@@ -158,7 +198,6 @@ function runtimeSpeechAnnouncement(
         "tool",
         "verifying",
         "recovering",
-        "waiting_approval",
         "waiting_capability",
       ].includes(phase)
     ) {
@@ -649,6 +688,40 @@ export default function Dashboard() {
 
       if (runtimeEvent.type === "agent.delegated") {
         setConsoleOpen(true);
+      }
+
+      if (
+        runtimeEvent.type ===
+        "background_job.approval_required"
+      ) {
+        const workerName = String(
+          runtimeEvent.agent_name || "Worker",
+        );
+        const tool = String(runtimeEvent.tool || "");
+        const permission = String(
+          runtimeEvent.permission || "",
+        );
+        const action = approvalActionLabel(
+          tool,
+          permission,
+        );
+        const message =
+          workerName +
+          " is waiting for approval to " +
+          action +
+          ". Approve it in Mission Control, then retry or resume the worker.";
+
+        setConsoleOpen(true);
+        setView("dashboard");
+        setNotice({
+          title: "Agent Man needs your approval",
+          message,
+        });
+        setRun((current) => ({
+          status: "waiting_approval",
+          text: message,
+          steps: current?.steps || [],
+        }));
       }
 
       if (
