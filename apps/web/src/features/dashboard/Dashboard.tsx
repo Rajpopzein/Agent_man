@@ -1912,7 +1912,6 @@ export default function Dashboard() {
         ) : view === "meeting-rooms" ? (
           <MeetingRoomsPage
             project={project}
-            agents={agents}
             backgroundJobs={backgroundJobs}
           />
         ) : view === "tools" ? (
