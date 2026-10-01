@@ -397,7 +397,10 @@ export function useAgentVoice() {
           browserSpeechCancelRef.current = cancelThisSpeech;
 
           utterance.onstart = () => {
-            if (playbackGeneration !== browserPlaybackGenerationRef.current) {
+            if (
+              playbackGeneration !==
+              browserPlaybackGenerationRef.current
+            ) {
               synth.cancel();
               finish(false);
               return;
@@ -435,7 +438,8 @@ export function useAgentVoice() {
           speakTimer = window.setTimeout(() => {
             if (
               settled ||
-              playbackGeneration !== browserPlaybackGenerationRef.current
+              playbackGeneration !==
+              browserPlaybackGenerationRef.current
             ) {
               finish(false);
               return;
@@ -661,7 +665,7 @@ export function useAgentVoice() {
       const queued = speechQueueRef.current
         .catch(() => undefined)
         .then(async () => {
-          if (playbackGeneration !== browserPlaybackGenerationRef.current) {
+          if (generation !== speechGenerationRef.current) {
             return;
           }
           await speakAsync(text, force);
