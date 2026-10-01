@@ -887,18 +887,16 @@ label{color:#6f98a8}
   .voiceWave{height:32px}
 }
 
-/* Stable voice-state rendering: animate indicators, not large screen regions. */
-
-
-.interactionMonitor,
-
+/* Stable voice-state rendering */
 @media (prefers-reduced-motion: reduce){
   .voiceCoreButton>i,
   .statusPulse,
   .interactionBars i,
   .voiceWave i,
   .voiceOrb,
-  
+  .identityPulse span{
+    animation:none!important;
+  }
 }
 
 .executiveToolsNotice{
