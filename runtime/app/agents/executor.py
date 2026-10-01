@@ -1,6 +1,7 @@
 import json
 from typing import Any, Callable
 
+from app.agents.context_budget import compact_runtime_payload
 from app.agents.runner import run_messages
 from app.agents.skills import assigned_skill_context
 from app.agents.protocol import special_action
@@ -11,7 +12,11 @@ from app.tools.capabilities import (
     resolve_capability,
 )
 from app.tools.executive_access import automatic_approvals_for_tools
-from app.tools.intelligence import recovery_guidance
+from app.tools.intelligence import (
+    plan_tools,
+    prompt_tool_names,
+    recovery_guidance,
+)
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
@@ -198,6 +203,12 @@ def execute_agent(
     approvals.update(
         automatic_approvals_for_tools(allowed_names)
     )
+    tool_plan = plan_tools(prompt, allowed_names)
+    prompt_tools = prompt_tool_names(
+        prompt,
+        allowed_names,
+        plan=tool_plan,
+    )
     messages = [
         {
             "role": "system",
@@ -207,11 +218,20 @@ def execute_agent(
                     str(getattr(agent, "context", "")).strip()
                     or "(no custom context provided)"
                 ),
-                skills=assigned_skill_context(db, agent.id),
-                tools=catalog_for_prompt(allowed_names),
+                skills=assigned_skill_context(
+                    db,
+                    agent.id,
+                    max_chars=12_000,
+                ),
+                tools=catalog_for_prompt(set(prompt_tools)),
             ),
+            "_context_priority": "critical",
         },
-        {"role": "user", "content": prompt},
+        {
+            "role": "user",
+            "content": prompt,
+            "_context_priority": "critical",
+        },
     ]
     trace: list[dict[str, Any]] = []
     verification_pending = False
@@ -658,11 +678,7 @@ def execute_agent(
                 "role": "user",
                 "content": (
                     "TOOL RESULT:\n"
-                    + json.dumps(
-                        step,
-                        ensure_ascii=False,
-                        default=str,
-                    )
+                    + compact_runtime_payload(step)
                     + (
                         "\nSELF-CORRECTION CHECKPOINT: Re-plan from the "
                         "observable failure and recovery tools. Do not keep "
