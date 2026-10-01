@@ -61,6 +61,8 @@ def health():
             "skill_packages": True,
             "connector_framework": True,
             "meeting_rooms": True,
+            "collaborative_meeting_rooms": True,
+            "meeting_room_agent_kick": True,
             "manual_agent_stop": True,
         },
     }
