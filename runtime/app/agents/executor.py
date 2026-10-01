@@ -361,7 +361,7 @@ def execute_agent(
                         or "Checking the completed work before finishing."
                     ),
                     detail=message,
-                next_step=next_step_note,
+                    next_step=next_step_note,
                 )
                 _set_agent_state(
                     agent=agent,
@@ -471,7 +471,7 @@ def execute_agent(
                 or "Using " + tool_name + "."
             ),
             tool=tool_name,
-                next_step=next_step_note,
+            next_step=next_step_note,
             detail=json.dumps(
                 arguments,
                 ensure_ascii=False,
