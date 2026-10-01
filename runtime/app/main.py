@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.persistence.models  # noqa: F401
 from app.api.ai_connections import router as ai_router
+from app.api.extensions import router as extensions_router
 from app.api.multi_agent import router as multi_agent_router
 from app.api.main_agent import router as main_agent_router
 from app.api.llm_logs import router as llm_logs_router
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 app.include_router(router)
 app.include_router(ai_router)
+app.include_router(extensions_router)
 app.include_router(multi_agent_router)
 app.include_router(main_agent_router)
 app.include_router(llm_logs_router)
