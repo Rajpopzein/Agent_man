@@ -206,3 +206,35 @@ def test_worker_monitor_exposes_safe_progress_not_private_chain_of_thought():
     assert '"[redacted]"' in dashboard
     assert '" · tool: "' in dashboard
 
+def test_worker_approval_interrupts_user_with_text_and_voice():
+    root = Path(__file__).resolve().parents[2]
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+    supervisor = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "background_jobs.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"background_job.approval_required"' in dashboard
+    assert "approvalActionLabel" in dashboard
+    assert "Agent Man needs your approval" in dashboard
+    assert "requestAgentSpeech(speech)" in dashboard
+    assert "setConsoleOpen(true)" in dashboard
+    assert "setRun((current) => ({" in dashboard
+    assert '"waiting_approval"' in dashboard
+
+    assert '"background_job.approval_required"' in supervisor
+    assert 'phase="approval"' in supervisor
+    assert 'status="waiting_approval"' in supervisor
+    assert "ask Agent Man to retry the worker" in supervisor
+
