@@ -42,7 +42,10 @@ import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import BackgroundPage from "../agents/BackgroundPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
-import { useAgentVoice } from "../audio/useAgentVoice";
+import {
+  requestAgentSpeech,
+  useAgentVoice,
+} from "../audio/useAgentVoice";
 import { useWakeWord } from "../audio/useWakeWord";
 import AIConnections from "../settings/AIConnections";
 import LLMLogsPage from "../settings/LLMLogsPage";
@@ -108,6 +111,78 @@ type LiveModelCall = {
   error: string;
 };
 
+function safeMonitorDetail(value: unknown) {
+  const text = String(value || "")
+    .replace(
+      /("(?:api[_-]?key|password|secret|token)"\s*:\s*)"[^"]*"/gi,
+      '$1"[redacted]"',
+    )
+    .replace(
+      /\b(?:sk|key|token)-[A-Za-z0-9._-]{12,}\b/g,
+      "[redacted]",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text.slice(0, 900);
+}
+
+function runtimeSpeechAnnouncement(
+  runtimeEvent: RuntimeEvent,
+): string | null {
+  const name = String(
+    runtimeEvent.agent_name || "Worker",
+  );
+
+  if (
+    runtimeEvent.type === "executive.activity" &&
+    runtimeEvent.phase === "delegation" &&
+    runtimeEvent.status === "connecting"
+  ) {
+    return String(
+      runtimeEvent.message ||
+        "Connecting with " + name + ".",
+    );
+  }
+
+  if (runtimeEvent.type === "background_job.started") {
+    return name + " is working on the task now.";
+  }
+
+  if (runtimeEvent.type === "background_job.progress") {
+    const phase = String(
+      runtimeEvent.current_phase || "",
+    );
+    if (
+      ![
+        "tool",
+        "verifying",
+        "recovering",
+        "waiting_approval",
+        "waiting_capability",
+      ].includes(phase)
+    ) {
+      return null;
+    }
+
+    const action = String(
+      runtimeEvent.current_action || "",
+    ).trim();
+    if (!action) return null;
+    return name + ". " + action;
+  }
+
+  if (runtimeEvent.type === "background_job.completed") {
+    return name + " finished the assigned task.";
+  }
+
+  if (runtimeEvent.type === "background_job.error") {
+    return name + " ran into an error. Check the activity monitor.";
+  }
+
+  return null;
+}
+
 
 function consoleLineFromEvent(
   runtimeEvent: RuntimeEvent,
@@ -142,6 +217,24 @@ function consoleLineFromEvent(
   if (
     runtimeEvent.type.startsWith("background_job.")
   ) {
+    const phase = String(
+      runtimeEvent.current_phase ||
+        runtimeEvent.status ||
+        status,
+    );
+    const action = String(
+      runtimeEvent.current_action ||
+        runtimeEvent.message ||
+        runtimeEvent.task ||
+        runtimeEvent.type,
+    );
+    const tool = String(
+      runtimeEvent.current_tool || "",
+    );
+    const detail = safeMonitorDetail(
+      runtimeEvent.current_detail || "",
+    );
+
     return {
       id: runtimeEvent.id,
       timestamp,
@@ -149,12 +242,11 @@ function consoleLineFromEvent(
         runtimeEvent.agent_name ||
           "background worker",
       ),
-      status,
-      message: String(
-        runtimeEvent.message ||
-          runtimeEvent.task ||
-          runtimeEvent.type,
-      ),
+      status: phase,
+      message:
+        action +
+        (tool ? " · tool: " + tool : "") +
+        (detail ? " · " + detail : ""),
     };
   }
 
@@ -547,6 +639,16 @@ export default function Dashboard() {
         setConsoleLines((current) =>
           [...current, consoleLine].slice(-300),
         );
+      }
+
+      const speech =
+        runtimeSpeechAnnouncement(runtimeEvent);
+      if (speech) {
+        requestAgentSpeech(speech);
+      }
+
+      if (runtimeEvent.type === "agent.delegated") {
+        setConsoleOpen(true);
       }
 
       if (
@@ -1133,12 +1235,15 @@ export default function Dashboard() {
     }
 
     if (
-      result?.status === "completed" &&
+      result &&
+      ["completed", "background"].includes(
+        result.status,
+      ) &&
       result.text &&
       voice.settings.enabled &&
       voice.settings.autoSpeak
     ) {
-      await voice.speakAsync(result.text);
+      await voice.queueSpeakAsync(result.text);
     }
   }
 
