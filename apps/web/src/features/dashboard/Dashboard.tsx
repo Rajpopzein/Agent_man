@@ -1349,6 +1349,10 @@ export default function Dashboard() {
           <span className="coreMarkRing">
             <Sparkles size={18} />
           </span>
+          <span className="coreMarkLabel">
+            <strong>Agent Man</strong>
+            <small>Workspace</small>
+          </span>
         </button>
 
         <nav className="railNav">
