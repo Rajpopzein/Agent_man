@@ -146,3 +146,132 @@ def test_voice_sanitizes_markdown_json_and_special_characters_before_tts():
     assert "propose_upgrade" in executive
     assert "natural conversational" in executive
 
+def test_voice_narrates_only_delegation_start_and_final_outcome():
+    root = Path(__file__).resolve().parents[2]
+    hook = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "audio"
+        / "useAgentVoice.ts"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    speech = dashboard.split(
+        "function runtimeSpeechAnnouncement(", 1
+    )[1].split("function consoleLineFromEvent(", 1)[0]
+
+    assert "speechQueueRef" in hook
+    assert "queueSpeakAsync" in hook
+    assert "requestAgentSpeech(speech)" in dashboard
+
+    # Exactly the start transition and terminal outcomes are narrated.
+    assert 'runtimeEvent.phase === "delegation"' in speech
+    assert '"background_job.completed"' in speech
+    assert '"background_job.error"' in speech
+
+    # Intermediate worker lifecycle remains visual-only.
+    assert '"background_job.started"' not in speech
+    assert '"background_job.progress"' not in speech
+    assert '"background_job.approval_required"' not in speech
+    assert '"background_job.resumed"' not in speech
+    assert 'runtimeEvent.phase === "next_step"' not in speech
+
+    # A background acknowledgement is not a final result and must stay silent.
+    assert 'result.status === "completed"' in dashboard
+    assert '"completed", "background"' not in dashboard
+    assert "voice.queueSpeakAsync(result.text)" in dashboard
+    assert 'setConsoleOpen(true);' in dashboard
+
+
+def test_worker_monitor_exposes_safe_progress_not_private_chain_of_thought():
+    root = Path(__file__).resolve().parents[2]
+    worker = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "executor.py"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert '"progress" field and a short' in worker
+    assert '"next_step" field written for the user' in worker
+    assert "Do not expose private" in worker
+    assert 'phase="planning"' in worker
+    assert "safeMonitorDetail" in dashboard
+    assert '"[redacted]"' in dashboard
+    assert '" · tool: "' in dashboard
+
+def test_worker_approval_interrupts_user_with_text_only():
+    root = Path(__file__).resolve().parents[2]
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+    supervisor = (
+        root
+        / "runtime"
+        / "app"
+        / "agents"
+        / "background_jobs.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"background_job.approval_required"' in dashboard
+    assert "approvalActionLabel" in dashboard
+    assert "Agent Man needs your approval" in dashboard
+    assert "requestAgentSpeech(speech)" in dashboard
+    assert "setConsoleOpen(true)" in dashboard
+    assert "setRun((current) => ({" in dashboard
+    assert '"waiting_approval"' in dashboard
+
+    assert '"background_job.approval_required"' in supervisor
+    assert 'phase="approval"' in supervisor
+    assert 'status="waiting_approval"' in supervisor
+    assert "Approve it to continue " in supervisor
+    assert "the same background task." in supervisor
+    assert "Approve & Continue" in dashboard
+    assert "api.approveBackgroundJob" in dashboard
+    assert "approvalJobId" in dashboard
+    assert '"background_job.resumed"' in dashboard
+
+def test_agent_man_composer_clears_after_command_is_accepted():
+    root = Path(__file__).resolve().parents[2]
+    dashboard = (
+        root
+        / "apps"
+        / "web"
+        / "src"
+        / "features"
+        / "dashboard"
+        / "Dashboard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'setLastDirective(command);' in dashboard
+    assert 'setPrompt("");' in dashboard
+    assert 'recentJob?.task || lastDirective' in dashboard
+    assert 'setPrompt(command);\n    voice.stop();' not in dashboard
+

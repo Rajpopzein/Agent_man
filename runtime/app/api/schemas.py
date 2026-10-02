@@ -296,6 +296,7 @@ class MainAgentChatRequest(BaseModel):
 class BackgroundJobView(BaseModel):
     id: str
     project_id: str
+    room_id: str | None = None
     agent_id: str
     agent_name: str
     agent_role: str
@@ -311,7 +312,81 @@ class BackgroundJobView(BaseModel):
     current_action: str
     current_tool: str
     current_detail: str
+    current_next_step: str
     updated_at: str
+    stop_requested: bool = False
+
+
+class MeetingRoomCreate(BaseModel):
+    project_id: str
+    title: str = Field(min_length=1, max_length=180)
+    objective: str = Field(default="", max_length=20_000)
+    agent_ids: list[str] = Field(min_length=1, max_length=8)
+
+
+class MeetingRoomInstructionInput(BaseModel):
+    instruction: str = Field(min_length=1, max_length=20_000)
+    allow_delete: bool = False
+
+
+class MeetingRoomExecutiveView(BaseModel):
+    id: str
+    name: str
+    role: str
+    status: str
+
+
+class MeetingRoomMemberView(BaseModel):
+    agent_id: str
+    agent_name: str
+    role: str
+    state: str
+    position: int
+    active: bool
+
+
+class MeetingRoomMessageView(BaseModel):
+    id: str
+    sender_type: str
+    sender_id: str | None
+    sender_name: str
+    kind: str
+    content: str
+    job_id: str | None
+    created_at: datetime
+
+
+class MeetingRoomCollaborationParticipantView(BaseModel):
+    agent_id: str
+    agent_name: str
+    role: str
+    status: str
+    last_round: int
+
+
+class MeetingRoomCollaborationView(BaseModel):
+    id: str
+    status: str
+    prompt: str
+    current_round: int
+    created_at: datetime
+    completed_at: datetime | None
+    participants: list[MeetingRoomCollaborationParticipantView]
+
+
+class MeetingRoomView(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    objective: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    executive: MeetingRoomExecutiveView
+    members: list[MeetingRoomMemberView]
+    messages: list[MeetingRoomMessageView]
+    jobs: list[BackgroundJobView]
+    collaborations: list[MeetingRoomCollaborationView]
 
 
 class MainAgentMessageView(BaseModel):
@@ -325,6 +400,40 @@ class MainAgentChatReply(BaseModel):
     status: str
     text: str
     steps: list[dict[str, Any]]
+
+
+
+
+class ReinforcementFeedbackInput(BaseModel):
+    value: int = Field(ge=-1, le=1)
+    agent_id: str | None = None
+    agent_name: str = Field(default="", max_length=160)
+    tool_name: str | None = Field(default=None, max_length=120)
+    task: str = Field(default="", max_length=8_000)
+    note: str = Field(default="", max_length=4_000)
+    reference_id: str | None = Field(default=None, max_length=120)
+
+
+class ReinforcementEventView(BaseModel):
+    id: str
+    project_id: str
+    agent_id: str | None
+    agent_name: str
+    tool_name: str | None
+    source: str
+    outcome: str
+    reward: float
+    task: str
+    note: str
+    reference_id: str | None
+    created_at: datetime
+
+
+class ReinforcementSummaryView(BaseModel):
+    events: int
+    overall: dict[str, Any]
+    agents: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
 
 
 class SelfUpgradeProposalView(BaseModel):
@@ -395,3 +504,95 @@ class ElevenLabsVoiceView(BaseModel):
 
 class VoiceSpeechInput(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
+
+
+class SkillCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    slug: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=4000)
+    content: str = Field(min_length=1, max_length=40_000)
+
+
+class SkillUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    slug: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4000)
+    content: str | None = Field(default=None, min_length=1, max_length=40_000)
+
+
+class SkillView(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    slug: str
+    description: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConnectorCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    kind: str = Field(min_length=1, max_length=120)
+    base_url: str = Field(default="", max_length=512)
+    config: dict[str, Any] = Field(default_factory=dict)
+    api_key: str | None = Field(default=None, max_length=4096)
+
+
+class ConnectorUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    kind: str | None = Field(default=None, min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, max_length=512)
+    config: dict[str, Any] | None = None
+    enabled: bool | None = None
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_secret: bool = False
+
+
+class ConnectorView(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    kind: str
+    base_url: str
+    config: dict[str, Any]
+    enabled: bool
+    has_secret: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentTaskHistoryView(BaseModel):
+    id: str
+    project_id: str
+    room_id: str | None = None
+    agent_id: str
+    agent_name: str
+    agent_role: str
+    task: str
+    status: str
+    current_action: str
+    current_tool: str
+    result_text: str
+    error: str
+    step_count: int
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime
+
+
+
+
+class ProjectFileWrite(BaseModel):
+    path: str = Field(min_length=1, max_length=2048)
+    content: str = Field(default="", max_length=500_000)
+
+
+class ProjectDirectoryCreate(BaseModel):
+    path: str = Field(min_length=1, max_length=2048)
+
+
+class ProjectPathMove(BaseModel):
+    source: str = Field(min_length=1, max_length=2048)
+    destination: str = Field(min_length=1, max_length=2048)

@@ -1,7 +1,10 @@
+import hashlib
 import json
+import os
 from typing import Any, Callable
 
 from app.agents.runner import run_messages
+from app.agents.skills import assigned_skill_context
 from app.agents.protocol import special_action
 from app.core.permissions import ApprovalRequired, Permission
 from app.events.bus import events
@@ -9,13 +12,65 @@ from app.tools.capabilities import (
     detect_missing_capability,
     resolve_capability,
 )
+from app.tools.executive_access import automatic_approvals_for_tools
 from app.tools.intelligence import recovery_guidance
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
-MAX_TURNS = 30
+def _worker_turn_budget() -> int:
+    try:
+        configured = int(
+            os.getenv("AGENT_MAN_WORKER_MAX_TURNS", "60")
+        )
+    except ValueError:
+        configured = 60
+    return max(20, min(configured, 120))
+
+
+MAX_TURNS = _worker_turn_budget()
+NO_PROGRESS_REPEAT_LIMIT = 3
+NO_PROGRESS_CYCLE_LIMIT = 3
 
 VALIDATION_ROLES = ("tester", "test", "qa", "validator", "validation")
+
+
+def _stable_fingerprint(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        default=str,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _tool_signature(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> str:
+    return tool_name + ":" + _stable_fingerprint(arguments)
+
+
+def _repeated_no_progress_cycle(
+    history: list[tuple[str, str]],
+) -> set[str]:
+    if len(history) >= NO_PROGRESS_REPEAT_LIMIT:
+        tail = history[-NO_PROGRESS_REPEAT_LIMIT:]
+        if len(set(tail)) == 1:
+            return {tail[0][0]}
+
+    cycle_size = 2
+    required = cycle_size * NO_PROGRESS_CYCLE_LIMIT
+    if len(history) >= required:
+        tail = history[-required:]
+        pattern = tail[:cycle_size]
+        if all(
+            tail[index:index + cycle_size] == pattern
+            for index in range(0, required, cycle_size)
+        ):
+            return {signature for signature, _result in pattern}
+    return set()
 
 
 def _working_state(agent) -> str:
@@ -38,6 +93,8 @@ def _set_agent_state(
     events.emit(
         "agent.state.changed",
         agent_id=agent.id,
+        agent_name=agent.name,
+        agent_role=agent.role,
         project_id=project_id,
         state=state,
         **payload,
@@ -51,6 +108,7 @@ def _report_progress(
     action: str,
     tool: str = "",
     detail: str = "",
+    next_step: str = "",
     status: str = "running",
 ) -> None:
     if callback is None:
@@ -61,6 +119,7 @@ def _report_progress(
             "action": action[:500],
             "tool": tool[:160],
             "detail": detail[:2000],
+            "next_step": next_step[:500],
             "status": status,
         }
     )
@@ -82,13 +141,19 @@ AGENT CONTEXT:
 The agent context defines your responsibilities, scope, and operating behavior.
 It does not grant permissions or tools; only the runtime tool list below does.
 
+ASSIGNED SKILLS:
+{skills}
+
+Assigned skills are reusable SKILL.md instruction packages. Follow them when
+they are relevant to the task. They do not grant tools or permissions.
+
 Available tools:
 {tools}
 
 Return exactly one JSON object and no markdown.
 
-Use a tool:
-{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}}}}
+Start by inspecting the project when its file state is unknown:
+{{"type":"tool","tool":"list_files","args":{{"path":"."}},"progress":"Inspecting the project workspace before making assumptions.","next_step":"Use the actual workspace contents to decide whether to edit or bootstrap files."}}
 
 If you need a capability that is not currently usable, request it instead of
 stopping or saying you cannot do the task:
@@ -98,8 +163,21 @@ When you believe the job is finished:
 {{"type":"final","verified":true,"message":"What was completed and how it was verified."}}
 
 Rules:
+- Every action should include a short "progress" field and a short
+  "next_step" field written for the user. "progress" says what you are doing
+  now; "next_step" says the immediate next milestone. Keep both to one simple
+  sentence. Do not expose private chain-of-thought, hidden analysis, secrets,
+  or long reasoning.
 - Do not stop just because the first approach failed. Inspect the error and try
   another safe approach when one is available.
+- Never assume README.md, package.json, pyproject.toml, src/, or any other file
+  exists before the workspace has shown it.
+- If list_files on "." returns an empty list, the workspace is empty. For a
+  build/create/implement task, bootstrap the minimum required project files
+  with write_file; parent directories are created automatically. Do not keep
+  trying read_file, edit_file, or search_files against imagined files.
+- If the task is only to inspect an existing project and the workspace is
+  empty, report that observable state instead of inventing project contents.
 - Do not say you lack internet/web access if an internet tool is available.
   Use it. If a required capability is missing, emit capability_request.
 - Do not declare completion until you have checked the requested result.
@@ -166,6 +244,8 @@ def execute_agent(
     allow_network: bool = False,
     allow_hardware: bool = False,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    continuation_on_turn_limit: bool = False,
 ) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
@@ -178,6 +258,9 @@ def execute_agent(
         approvals.add(Permission.SERIAL_ACCESS.value)
 
     allowed_names = allowed_tool_names(db, agent.id)
+    approvals.update(
+        automatic_approvals_for_tools(allowed_names)
+    )
     messages = [
         {
             "role": "system",
@@ -187,6 +270,7 @@ def execute_agent(
                     str(getattr(agent, "context", "")).strip()
                     or "(no custom context provided)"
                 ),
+                skills=assigned_skill_context(db, agent.id),
                 tools=catalog_for_prompt(allowed_names),
             ),
         },
@@ -196,6 +280,37 @@ def execute_agent(
     verification_pending = False
     correction_count = 0
     active_correction: dict[str, Any] | None = None
+    observation_history: list[tuple[str, str]] = []
+    blocked_loop_signatures: set[str] = set()
+    workspace_empty: bool | None = None
+
+    def stopped_result() -> dict[str, Any]:
+        _set_agent_state(
+            agent=agent,
+            db=db,
+            project_id=project.id,
+            state="idle",
+            source="manual_stop",
+        )
+        _report_progress(
+            progress,
+            phase="stopped",
+            action="Stopped by the user.",
+            detail="The worker stopped at a safe execution boundary.",
+            status="stopped",
+        )
+        events.emit(
+            "agent.run.stopped",
+            agent_id=agent.id,
+            agent_name=agent.name,
+            project_id=project.id,
+            reason="manual_stop",
+        )
+        return {
+            "text": "Stopped by the user.",
+            "steps": trace,
+            "status": "stopped",
+        }
 
     _set_agent_state(
         agent=agent,
@@ -218,10 +333,13 @@ def execute_agent(
     )
 
     for turn_number in range(1, MAX_TURNS + 1):
+        if should_stop is not None and should_stop():
+            return stopped_result()
+
         _report_progress(
             progress,
-            phase="thinking",
-            action="Reviewing the next step.",
+            phase="planning",
+            action="Planning the next action.",
             detail=f"Turn {turn_number}",
         )
         try:
@@ -235,16 +353,29 @@ def execute_agent(
                 source="llm",
             )
             raise
+        if should_stop is not None and should_stop():
+            return stopped_result()
+
         action = _parse_action(raw)
         action_type = str(action.get("type", "message")).lower()
+        progress_note = " ".join(
+            str(action.get("progress", "")).split()
+        )[:500]
+        next_step_note = " ".join(
+            str(action.get("next_step", "")).split()
+        )[:500]
 
         if action_type == "capability_request":
             capability = str(action.get("capability", "")).strip().lower()
             _report_progress(
                 progress,
                 phase="capability",
-                action="Checking a required capability.",
+                action=(
+                    progress_note
+                    or "Checking a required capability."
+                ),
                 detail=capability,
+                next_step=next_step_note,
             )
             resolved = resolve_capability(
                 db,
@@ -329,8 +460,12 @@ def execute_agent(
                 _report_progress(
                     progress,
                     phase="verifying",
-                    action="Checking the completed work before finishing.",
+                    action=(
+                        progress_note
+                        or "Checking the completed work before finishing."
+                    ),
                     detail=message,
+                    next_step=next_step_note,
                 )
                 _set_agent_state(
                     agent=agent,
@@ -432,11 +567,122 @@ def execute_agent(
         if not isinstance(arguments, dict):
             arguments = {}
 
+        tool_signature = _tool_signature(tool_name, arguments)
+        requested_path = str(arguments.get("path", ".")).strip() or "."
+        if (
+            workspace_empty is True
+            and tool_name in {"read_file", "edit_file", "search_files"}
+        ):
+            guard_step = {
+                "turn": turn_number,
+                "type": "workspace_guard",
+                "status": "empty_workspace",
+                "tool": tool_name,
+                "arguments": arguments,
+                "reason": (
+                    "The project root was already observed to be empty, "
+                    "so this action cannot discover an existing file."
+                ),
+            }
+            trace.append(guard_step)
+            _report_progress(
+                progress,
+                phase="recovering",
+                action="Workspace is empty. Switching to project bootstrap.",
+                tool=tool_name,
+                detail=(
+                    "No project files exist yet. Do not read or edit "
+                    "imagined files."
+                ),
+                next_step=(
+                    "Create the minimum required files with write_file "
+                    "or finish by reporting that the workspace is empty."
+                ),
+                status="running",
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "EMPTY WORKSPACE GUARD: list_files on the project root "
+                        "already returned []. The requested existing-file action "
+                        "cannot succeed because no files exist. Do not assume "
+                        "README.md, package.json, src/, or other files exist. "
+                        "If the objective asks you to build, create, or implement "
+                        "something, bootstrap the minimum required files now with "
+                        "write_file. If the objective only asks you to inspect an "
+                        "existing project, return a verified final answer stating "
+                        "that the workspace is empty."
+                    ),
+                }
+            )
+            continue
+
+        if blocked_loop_signatures:
+            if tool_signature in blocked_loop_signatures:
+                loop_step = {
+                    "turn": turn_number,
+                    "type": "loop_guard",
+                    "status": "loop_detected",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "reason": (
+                        "The same no-progress action was proposed again "
+                        "after a forced re-plan."
+                    ),
+                }
+                trace.append(loop_step)
+                _set_agent_state(
+                    agent=agent,
+                    db=db,
+                    project_id=project.id,
+                    state="attention",
+                    source="loop_guard",
+                )
+                events.emit(
+                    "agent.loop_detected",
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                    project_id=project.id,
+                    tool=tool_name,
+                    status="loop_detected",
+                )
+                _report_progress(
+                    progress,
+                    phase="attention",
+                    action="Repeated no-progress loop detected.",
+                    tool=tool_name,
+                    detail=(
+                        "The worker repeated the same action after "
+                        "Agent Man asked it to change approach."
+                    ),
+                    next_step=(
+                        "Review the blocked action or give the worker "
+                        "a narrower instruction."
+                    ),
+                    status="loop_detected",
+                )
+                return {
+                    "text": (
+                        f"{agent.name} was stopped because it repeated "
+                        f"{tool_name} without producing new observable progress."
+                    ),
+                    "steps": trace,
+                    "status": "loop_detected",
+                }
+            blocked_loop_signatures.clear()
+            observation_history.clear()
+
         _report_progress(
             progress,
             phase="tool",
-            action="Using " + tool_name + ".",
+            action=(
+                progress_note
+                or "Using " + tool_name + "."
+            ),
             tool=tool_name,
+            next_step=next_step_note,
             detail=json.dumps(
                 arguments,
                 ensure_ascii=False,
@@ -444,11 +690,15 @@ def execute_agent(
             ),
         )
 
+        if should_stop is not None and should_stop():
+            return stopped_result()
+
         try:
             result = tools.execute(
                 name=tool_name,
                 arguments=arguments,
                 workspace_path=project.workspace_path,
+                project_id=project.id,
                 approvals=approvals,
                 allowed_names=allowed_names,
             )
@@ -459,6 +709,10 @@ def execute_agent(
                 "status": "ok",
                 "result": result,
             }
+            if tool_name == "list_files" and requested_path in {".", ""}:
+                workspace_empty = isinstance(result, list) and len(result) == 0
+            elif tool_name == "write_file":
+                workspace_empty = False
             _report_progress(
                 progress,
                 phase="tool_result",
@@ -525,8 +779,10 @@ def execute_agent(
             )
             return {
                 "text": (
-                    f"{agent.name} can continue automatically after approval "
-                    f"for {exc.permission.value}."
+                    f"{agent.name} is waiting for approval to use "
+                    f"{tool_name}. Required permission: "
+                    f"{exc.permission.value}. Approve it in Mission Control, "
+                    "then ask Agent Man to retry the worker."
                 ),
                 "steps": trace,
                 "status": "waiting_approval",
@@ -547,6 +803,73 @@ def execute_agent(
             }
 
         trace.append(step)
+
+        result_fingerprint = _stable_fingerprint({
+            "status": step.get("status"),
+            "result": step.get("result"),
+            "error": step.get("error"),
+        })
+        observation_history.append(
+            (tool_signature, result_fingerprint)
+        )
+        observation_history = observation_history[-8:]
+        repeated_signatures = _repeated_no_progress_cycle(
+            observation_history
+        )
+        if repeated_signatures:
+            blocked_loop_signatures = set(repeated_signatures)
+            loop_step = {
+                "turn": turn_number,
+                "type": "loop_guard",
+                "status": "replanning",
+                "tool": tool_name,
+                "repeat_count": len(observation_history),
+                "blocked_signatures": sorted(
+                    blocked_loop_signatures
+                ),
+            }
+            trace.append(loop_step)
+            events.emit(
+                "agent.loop_detected",
+                agent_id=agent.id,
+                agent_name=agent.name,
+                project_id=project.id,
+                tool=tool_name,
+                status="replanning",
+            )
+            _report_progress(
+                progress,
+                phase="recovering",
+                action=(
+                    "Repeated action produced no new result. "
+                    "Forcing a different approach."
+                ),
+                tool=tool_name,
+                detail=(
+                    "Agent Man detected repeated identical observable "
+                    "results and blocked that loop for the next turn."
+                ),
+                next_step=(
+                    "Choose a materially different tool, arguments, "
+                    "or completion path."
+                ),
+                status="running",
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "LOOP GUARD: You repeated the same action pattern "
+                        "without any observable change. Do not call the blocked "
+                        "tool with the same arguments again. Choose a materially "
+                        "different action, inspect a different source of evidence, "
+                        "change the implementation, or return a verified final "
+                        "answer if the objective is already complete."
+                    ),
+                }
+            )
+            continue
 
         if step["status"] == "error":
             _report_progress(
@@ -628,11 +951,60 @@ def execute_agent(
                         if step["status"] == "error"
                         else ""
                     )
+                    + (
+                        "\nWORKSPACE STATE: EMPTY. No existing project files "
+                        "were found at the root. For a build/create/implement "
+                        "objective, create the minimum required files with "
+                        "write_file instead of reading imagined files."
+                        if (
+                            tool_name == "list_files"
+                            and requested_path in {".", ""}
+                            and workspace_empty is True
+                        )
+                        else ""
+                    )
                     + "\nContinue the original task. If this approach failed, "
                     "revise the plan and try another safe approach."
                 ),
             }
         )
+
+    if continuation_on_turn_limit:
+        _set_agent_state(
+            agent=agent,
+            db=db,
+            project_id=project.id,
+            state=_working_state(agent),
+            source="cycle_limit",
+        )
+        events.emit(
+            "agent.run.cycle_limit",
+            agent_id=agent.id,
+            project_id=project.id,
+            turns=MAX_TURNS,
+        )
+        _report_progress(
+            progress,
+            phase="continuing",
+            action="Continuing the task in a fresh execution cycle.",
+            detail=(
+                f"The worker completed {MAX_TURNS} turns in this cycle. "
+                "Agent Man will continue automatically."
+            ),
+            next_step=(
+                "Resume from the current workspace state without "
+                "repeating completed work."
+            ),
+            status="running",
+        )
+        return {
+            "text": (
+                f"Execution cycle reached {MAX_TURNS} turns and is ready "
+                "to continue."
+            ),
+            "steps": trace,
+            "status": "turn_limit",
+        }
 
     _set_agent_state(
         agent=agent,

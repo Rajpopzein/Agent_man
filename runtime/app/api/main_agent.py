@@ -6,21 +6,28 @@ from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
 from app.agents.executive import run_main_agent
+from app.agents.reinforcement import project_summary, record_reward
 from app.api.schemas import (
+    AgentTaskHistoryView,
     BackgroundJobView,
     MainAgentChatReply,
     MainAgentChatRequest,
     MainAgentConfigInput,
     MainAgentConfigView,
     MainAgentMessageView,
+    ReinforcementEventView,
+    ReinforcementFeedbackInput,
+    ReinforcementSummaryView,
     SelfUpgradeProposalView,
 )
 from app.persistence.database import get_session
 from app.persistence.models import (
     AIConnectionRecord,
+    AgentTaskHistoryRecord,
     MainAgentConfigRecord,
     MainAgentMessageRecord,
     ProjectRecord,
+    ReinforcementEventRecord,
     SelfUpgradeProposalRecord,
 )
 
@@ -128,6 +135,143 @@ def background_job_status(
     if db.get(ProjectRecord, project_id) is None:
         raise HTTPException(404, "Project not found")
     return background_jobs.list_project(project_id)
+
+
+@router.get(
+    "/projects/{project_id}/task-history",
+    response_model=list[AgentTaskHistoryView],
+)
+def task_history(
+    project_id: str,
+    agent_id: str | None = None,
+    status: str | None = None,
+    limit: int = 300,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+
+    query = (
+        select(AgentTaskHistoryRecord)
+        .where(AgentTaskHistoryRecord.project_id == project_id)
+        .order_by(AgentTaskHistoryRecord.created_at.desc())
+        .limit(max(1, min(limit, 1000)))
+    )
+    if agent_id:
+        query = query.where(
+            AgentTaskHistoryRecord.agent_id == agent_id
+        )
+    if status:
+        query = query.where(
+            AgentTaskHistoryRecord.status == status
+        )
+    return db.scalars(query).all()
+
+
+@router.post(
+    "/projects/{project_id}/background-jobs/{job_id}/stop",
+    response_model=BackgroundJobView,
+)
+def stop_background_job(
+    project_id: str,
+    job_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    job = background_jobs.get(job_id)
+    if job is None or str(job.get("project_id")) != project_id:
+        raise HTTPException(404, "Background job not found")
+    try:
+        return background_jobs.stop(job_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post(
+    "/projects/{project_id}/background-jobs/{job_id}/approve",
+    response_model=BackgroundJobView,
+)
+def approve_background_job(
+    project_id: str,
+    job_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    job = background_jobs.get(job_id)
+    if job is None or str(job.get("project_id")) != project_id:
+        raise HTTPException(404, "Background job not found")
+    try:
+        return background_jobs.approve_and_resume(job_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+
+
+def _reinforcement_view(row: ReinforcementEventRecord) -> ReinforcementEventView:
+    return ReinforcementEventView(
+        id=row.id,
+        project_id=row.project_id,
+        agent_id=row.agent_id,
+        agent_name=row.agent_name,
+        tool_name=row.tool_name,
+        source=row.source,
+        outcome=row.outcome,
+        reward=row.reward_milli / 1000,
+        task=row.task,
+        note=row.note,
+        reference_id=row.reference_id,
+        created_at=row.created_at,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/reinforcement/feedback",
+    response_model=ReinforcementEventView,
+)
+def reinforcement_feedback(
+    project_id: str,
+    body: ReinforcementFeedbackInput,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    if body.value == 0:
+        raise HTTPException(422, "Feedback must be positive or negative")
+
+    outcome = "user_positive" if body.value > 0 else "user_negative"
+    row = record_reward(
+        db,
+        project_id=project_id,
+        outcome=outcome,
+        agent_id=body.agent_id,
+        agent_name=body.agent_name,
+        tool_name=body.tool_name,
+        source="user",
+        task=body.task,
+        note=body.note,
+        reference_id=body.reference_id,
+    )
+    return _reinforcement_view(row)
+
+
+@router.get(
+    "/projects/{project_id}/reinforcement/summary",
+    response_model=ReinforcementSummaryView,
+)
+def reinforcement_summary(
+    project_id: str,
+    db: Session = Depends(get_session),
+):
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    return project_summary(db, project_id)
 
 
 @router.get(

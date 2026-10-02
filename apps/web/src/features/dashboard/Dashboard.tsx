@@ -9,7 +9,7 @@ import {
   Activity,
   Bot,
   Boxes,
-  CircleDot,
+  BrainCircuit,
   Clock3,
   Cpu,
   GitBranch,
@@ -23,14 +23,18 @@ import {
   Search,
   Server,
   FileText,
+  FolderTree,
   Settings2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Volume2,
   VolumeX,
+  WandSparkles,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -39,17 +43,22 @@ import HudModal from "../../components/HudModal";
 import CommandConsole, {
   CommandConsoleLine,
 } from "./CommandConsole";
-import HolographicField from "./HolographicField";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
+import MeetingRoomsPage from "../agents/MeetingRoomsPage";
 import BackgroundPage from "../agents/BackgroundPage";
+import ExtensionsPage from "../extensions/ExtensionsPage";
 import OrchestrationPage from "../agents/OrchestrationPage";
 import VoiceControl from "../audio/VoiceControl";
-import { useAgentVoice } from "../audio/useAgentVoice";
+import {
+  requestAgentSpeech,
+  useAgentVoice,
+} from "../audio/useAgentVoice";
 import { useWakeWord } from "../audio/useWakeWord";
 import AIConnections from "../settings/AIConnections";
 import LLMLogsPage from "../settings/LLMLogsPage";
 import SettingsPage from "../settings/SettingsPage";
 import ToolsPage from "../tools/ToolsPage";
+import WorkbenchPage from "../workbench/WorkbenchPage";
 import {
   api,
   Agent,
@@ -60,6 +69,7 @@ import {
   MainAgentConfig,
   MainAgentReply,
   Project,
+  ReinforcementSummary,
   RuntimeEvent,
   Tool,
 } from "../../services/api";
@@ -67,10 +77,13 @@ import {
 type View =
   | "background"
   | "dashboard"
+  | "workbench"
   | "orchestration"
   | "multi-agent"
+  | "meeting-rooms"
   | "tools"
   | "connections"
+  | "extensions"
   | "logs"
   | "settings";
 
@@ -78,6 +91,8 @@ type Notice = {
   title: string;
   message: string;
   tone?: "default" | "danger";
+  approvalJobId?: string;
+  approvalPermission?: string;
 };
 
 type LiveResponse = {
@@ -110,6 +125,89 @@ type LiveModelCall = {
   error: string;
 };
 
+function safeMonitorDetail(value: unknown) {
+  const text = String(value || "")
+    .replace(
+      /("(?:api[_-]?key|password|secret|token)"\s*:\s*)"[^"]*"/gi,
+      '$1"[redacted]"',
+    )
+    .replace(
+      /\b(?:sk|key|token)-[A-Za-z0-9._-]{12,}\b/g,
+      "[redacted]",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text.slice(0, 900);
+}
+
+function approvalActionLabel(
+  tool: string,
+  permission: string,
+) {
+  if (
+    permission === "terminal.execute" ||
+    ["run_command", "run_tests", "run_build", "lint"].includes(tool)
+  ) {
+    return "run a terminal command";
+  }
+  if (permission === "network.internet") {
+    return "use network access";
+  }
+  if (permission === "hardware.serial") {
+    return "access connected hardware";
+  }
+  if (permission === "project.files.delete") {
+    return "perform a destructive project action";
+  }
+  return tool
+    ? "use " + tool.replaceAll("_", " ")
+    : "continue the task";
+}
+
+function runtimeSpeechAnnouncement(
+  runtimeEvent: RuntimeEvent,
+): string | null {
+  const name = String(
+    runtimeEvent.agent_name || "Worker",
+  );
+
+  // Narration policy:
+  // 1. Speak once when delegation begins.
+  // 2. Stay silent during worker progress, approvals, resume, tools,
+  //    verification, and next-step updates.
+  // 3. Speak the final result or terminal error once.
+  if (
+    runtimeEvent.type === "executive.activity" &&
+    runtimeEvent.phase === "delegation" &&
+    runtimeEvent.status === "connecting"
+  ) {
+    return String(
+      runtimeEvent.message ||
+        "Connecting with " + name + ".",
+    );
+  }
+
+  if (runtimeEvent.type === "background_job.completed") {
+    const result = String(
+      runtimeEvent.result_text || "",
+    ).trim();
+    return result
+      ? name + " finished the task. " + result
+      : name + " finished the assigned task.";
+  }
+
+  if (runtimeEvent.type === "background_job.error") {
+    const error = String(
+      runtimeEvent.error || "",
+    ).trim();
+    return error
+      ? name + " could not complete the task. " + error
+      : name + " could not complete the assigned task.";
+  }
+
+  return null;
+}
 
 function consoleLineFromEvent(
   runtimeEvent: RuntimeEvent,
@@ -144,6 +242,24 @@ function consoleLineFromEvent(
   if (
     runtimeEvent.type.startsWith("background_job.")
   ) {
+    const phase = String(
+      runtimeEvent.current_phase ||
+        runtimeEvent.status ||
+        status,
+    );
+    const action = String(
+      runtimeEvent.current_action ||
+        runtimeEvent.message ||
+        runtimeEvent.task ||
+        runtimeEvent.type,
+    );
+    const tool = String(
+      runtimeEvent.current_tool || "",
+    );
+    const detail = safeMonitorDetail(
+      runtimeEvent.current_detail || "",
+    );
+
     return {
       id: runtimeEvent.id,
       timestamp,
@@ -151,12 +267,11 @@ function consoleLineFromEvent(
         runtimeEvent.agent_name ||
           "background worker",
       ),
-      status,
-      message: String(
-        runtimeEvent.message ||
-          runtimeEvent.task ||
-          runtimeEvent.type,
-      ),
+      status: phase,
+      message:
+        action +
+        (tool ? " · tool: " + tool : "") +
+        (detail ? " · " + detail : ""),
     };
   }
 
@@ -286,42 +401,57 @@ const VIEW_META: Record<
 > = {
   background: {
     label: "Background Activity",
-    eyebrow: "SYSTEM / BACKGROUND WORK",
+    eyebrow: "WORKSPACE / BACKGROUND",
     description: "Monitor agent jobs, running processes, and output.",
   },
   dashboard: {
-    label: "Command Core",
-    eyebrow: "SYSTEM / OVERVIEW",
-    description: "Live agent command, execution and system awareness.",
+    label: "Overview",
+    eyebrow: "WORKSPACE / OVERVIEW",
+    description: "Monitor agents, tasks, tools, and runtime activity from one place.",
+  },
+  workbench: {
+    label: "Workbench",
+    eyebrow: "WORKSPACE / PROJECT",
+    description: "Browse, edit, preview, download, and coordinate work on project files.",
   },
   orchestration: {
-    label: "Orchestration Grid",
-    eyebrow: "SYSTEM / WORKFLOWS",
+    label: "Workflows",
+    eyebrow: "WORKSPACE / WORKFLOWS",
     description: "Deterministic stage handoffs with success and failure routing.",
   },
   "multi-agent": {
-    label: "Peer Intelligence",
-    eyebrow: "SYSTEM / MULTI-AGENT",
+    label: "Agents",
+    eyebrow: "WORKSPACE / AGENTS",
     description: "Shared task context with independent peer reasoning.",
   },
+  "meeting-rooms": {
+    label: "Meeting Rooms",
+    eyebrow: "WORKSPACE / MEETING ROOMS",
+    description: "Direct worker sessions hosted and tracked by Agent Man.",
+  },
   tools: {
-    label: "Capability Matrix",
-    eyebrow: "SYSTEM / TOOLS",
+    label: "Tools & Permissions",
+    eyebrow: "WORKSPACE / TOOLS",
     description: "Control which runtime capabilities each agent can access.",
   },
   connections: {
-    label: "AI Uplink",
-    eyebrow: "SYSTEM / PROVIDERS",
+    label: "AI Connections",
+    eyebrow: "WORKSPACE / CONNECTIONS",
     description: "Configure local and cloud model connections.",
+  },
+  extensions: {
+    label: "Extensions",
+    eyebrow: "WORKSPACE / EXTENSIONS",
+    description: "Build reusable SKILL.md packages and governed connectors.",
   },
   logs: {
     label: "LLM Logs",
-    eyebrow: "SYSTEM / MODEL ACTIVITY",
+    eyebrow: "WORKSPACE / MODEL ACTIVITY",
     description: "Inspect model requests, responses, latency, and failures.",
   },
   settings: {
     label: "Settings",
-    eyebrow: "SYSTEM / CONFIGURATION",
+    eyebrow: "WORKSPACE / SETTINGS",
     description: "Configure Agent Man executive behavior and runtime preferences.",
   },
 };
@@ -344,6 +474,7 @@ export default function Dashboard() {
     useState<EffectiveToolAccess | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [lastDirective, setLastDirective] = useState("");
   const [run, setRun] = useState<MainAgentReply | null>(null);
   const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
   const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
@@ -352,16 +483,18 @@ export default function Dashboard() {
   const [serverLogs, setServerLogs] = useState<LLMLog[]>([]);
   const [backgroundJobs, setBackgroundJobs] =
     useState<BackgroundJob[]>([]);
+  const [reinforcement, setReinforcement] =
+    useState<ReinforcementSummary | null>(null);
+  const [feedbackSent, setFeedbackSent] =
+    useState<-1 | 1 | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleLines, setConsoleLines] =
     useState<CommandConsoleLine[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
   const [mainConfig, setMainConfig] = useState<MainAgentConfig | null>(null);
   const [online, setOnline] = useState(false);
-  const [allowTerminal, setAllowTerminal] = useState(false);
   const [allowDelete, setAllowDelete] = useState(false);
-  const [allowNetwork, setAllowNetwork] = useState(false);
-  const [allowHardware, setAllowHardware] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processingStartedAt, setProcessingStartedAt] =
     useState<number | null>(null);
@@ -425,17 +558,20 @@ export default function Dashboard() {
           effectiveAccess,
           recentServerLogs,
           recentBackgroundJobs,
+          reinforcementSummary,
         ] = await Promise.all([
           api.agents(currentProject.id),
           api.mainAgentConfig(currentProject.id),
           api.effectiveMainAgentTools(currentProject.id),
           api.llmLogs(currentProject.id, 12),
           api.backgroundJobs(currentProject.id),
+          api.reinforcementSummary(currentProject.id),
         ]);
         setMainConfig(executiveConfig);
         setExecutiveAccess(effectiveAccess);
         setServerLogs(recentServerLogs);
         setBackgroundJobs(recentBackgroundJobs);
+        setReinforcement(reinforcementSummary);
         setAgents(loadedAgents);
         setAgent((current) =>
           loadedAgents.find((item) => item.id === current?.id) ||
@@ -449,6 +585,7 @@ export default function Dashboard() {
         setExecutiveAccess(null);
         setServerLogs([]);
         setBackgroundJobs([]);
+        setReinforcement(null);
       }
     } catch {
       setOnline(false);
@@ -490,6 +627,23 @@ export default function Dashboard() {
       setServerLogs(await api.llmLogs(id, 12));
     } catch {
       // Keep the last known server log snapshot.
+    }
+  }
+
+  async function refreshReinforcement(
+    projectId?: string,
+  ) {
+    const id = projectId || project?.id;
+    if (!id) {
+      setReinforcement(null);
+      return;
+    }
+    try {
+      setReinforcement(
+        await api.reinforcementSummary(id),
+      );
+    } catch {
+      // Keep the previous learning snapshot.
     }
   }
 
@@ -551,6 +705,91 @@ export default function Dashboard() {
         );
       }
 
+      const speech =
+        runtimeSpeechAnnouncement(runtimeEvent);
+      if (speech) {
+        requestAgentSpeech(speech);
+      }
+
+      if (runtimeEvent.type === "agent.delegated") {
+        setConsoleOpen(true);
+      }
+
+      if (
+        runtimeEvent.type ===
+        "background_job.approval_required"
+      ) {
+        const workerName = String(
+          runtimeEvent.agent_name || "Worker",
+        );
+        const tool = String(runtimeEvent.tool || "");
+        const permission = String(
+          runtimeEvent.permission || "",
+        );
+        const action = approvalActionLabel(
+          tool,
+          permission,
+        );
+        const message =
+          workerName +
+          " is waiting for approval to " +
+          action +
+          ". Approve it to continue the same background task.";
+
+        setConsoleOpen(true);
+        setView("dashboard");
+        setNotice({
+          title: "Agent Man needs your approval",
+          message,
+          approvalJobId: String(runtimeEvent.job_id || ""),
+          approvalPermission: permission,
+        });
+        setRun((current) => ({
+          status: "waiting_approval",
+          text: message,
+          steps: current?.steps || [],
+        }));
+      }
+
+      if (
+        [
+          "background_job.resumed",
+          "background_job.started",
+          "background_job.completed",
+          "background_job.error",
+          "background_job.stopped",
+        ].includes(runtimeEvent.type) &&
+        runtimeEvent.job_id
+      ) {
+        const changedJobId = String(runtimeEvent.job_id);
+        setNotice((current) =>
+          current?.approvalJobId === changedJobId
+            ? null
+            : current,
+        );
+        if (runtimeEvent.type === "background_job.resumed") {
+          setRun((current) => ({
+            status: "background",
+            text: String(
+              runtimeEvent.message ||
+                "Approval received. Worker is resuming.",
+            ),
+            steps: current?.steps || [],
+          }));
+        }
+      }
+
+      if (runtimeEvent.type === "meeting_room.created") {
+        setView("meeting-rooms");
+      }
+
+      if (
+        runtimeEvent.type ===
+        "reinforcement.reward.recorded"
+      ) {
+        void refreshReinforcement(project.id);
+      }
+
       if (
         runtimeEvent.type === "ui.command_console"
       ) {
@@ -585,6 +824,10 @@ export default function Dashboard() {
                 existing?.project_id ||
                 project.id,
             ),
+            room_id:
+              runtimeEvent.room_id != null
+                ? String(runtimeEvent.room_id)
+                : existing?.room_id || null,
             agent_id: String(
               runtimeEvent.agent_id ||
                 existing?.agent_id ||
@@ -624,7 +867,9 @@ export default function Dashboard() {
               runtimeEvent.type ===
                 "background_job.completed" ||
               runtimeEvent.type ===
-                "background_job.error"
+                "background_job.error" ||
+              runtimeEvent.type ===
+                "background_job.stopped"
                 ? String(
                     runtimeEvent.timestamp || "",
                   )
@@ -666,12 +911,23 @@ export default function Dashboard() {
                 existing?.current_detail ||
                 "",
             ),
+            current_next_step: String(
+              runtimeEvent.current_next_step ||
+                existing?.current_next_step ||
+                "",
+            ),
             updated_at: String(
               runtimeEvent.updated_at ||
                 runtimeEvent.timestamp ||
                 existing?.updated_at ||
                 "",
             ),
+            stop_requested:
+              runtimeEvent.type ===
+                "background_job.stop_requested" ||
+              runtimeEvent.status === "stopping" ||
+              existing?.stop_requested ||
+              false,
           };
           return (
             existing
@@ -1099,11 +1355,13 @@ export default function Dashboard() {
     }
 
     setView("dashboard");
-    setPrompt(command);
+    setLastDirective(command);
+    setPrompt("");
     voice.stop();
     setBusy(true);
     setProcessingStartedAt(Date.now());
     setRun(null);
+    setFeedbackSent(null);
     setLiveResponses([]);
     setLiveActivities([]);
     setLiveModelCalls([]);
@@ -1114,10 +1372,10 @@ export default function Dashboard() {
       result = await api.chatMainAgent(
         project.id,
         command,
-        allowTerminal,
+        false,
         allowDelete,
-        allowNetwork,
-        allowHardware,
+        false,
+        false,
       );
       setRun(result);
     } catch (error) {
@@ -1135,12 +1393,104 @@ export default function Dashboard() {
     }
 
     if (
-      result?.status === "completed" &&
+      result &&
+      result.status === "completed" &&
       result.text &&
       voice.settings.enabled &&
       voice.settings.autoSpeak
     ) {
-      await voice.speakAsync(result.text);
+      await voice.queueSpeakAsync(result.text);
+    }
+  }
+
+  async function submitReinforcementFeedback(
+    value: -1 | 1,
+  ) {
+    if (!project || !run || feedbackSent !== null) {
+      return;
+    }
+
+    const recentJob =
+      backgroundJobs.length > 0
+        ? backgroundJobs[0]
+        : null;
+
+    try {
+      await api.reinforcementFeedback(project.id, {
+        value,
+        agent_id: recentJob?.agent_id || null,
+        agent_name:
+          recentJob?.agent_name || "Agent Man",
+        tool_name:
+          recentJob?.current_tool || null,
+        task:
+          recentJob?.task || lastDirective,
+        note:
+          value > 0
+            ? "User confirmed this result was useful."
+            : "User indicated this result needs improvement.",
+        reference_id: recentJob?.id || null,
+      });
+      setFeedbackSent(value);
+      await refreshReinforcement(project.id);
+      setNotice({
+        title:
+          value > 0
+            ? "Feedback learned"
+            : "Correction recorded",
+        message:
+          value > 0
+            ? "Agent Man will treat this outcome as positive evidence."
+            : "Agent Man will reduce confidence in this approach and use the feedback on future choices.",
+      });
+    } catch (error) {
+      setNotice({
+        title: "Feedback could not be saved",
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+        tone: "danger",
+      });
+    }
+  }
+
+  async function approveWaitingJob(jobId: string) {
+    if (!project || !jobId || approvalBusy) {
+      return;
+    }
+
+    setApprovalBusy(true);
+    try {
+      const resumed = await api.approveBackgroundJob(
+        project.id,
+        jobId,
+      );
+      setBackgroundJobs((current) =>
+        current.map((item) =>
+          item.id === resumed.id ? resumed : item,
+        ),
+      );
+      setRun((current) => ({
+        status: "background",
+        text:
+          resumed.agent_name +
+          " received approval and is resuming the task.",
+        steps: current?.steps || [],
+      }));
+      setNotice(null);
+      setAllowDelete(false);
+    } catch (error) {
+      setNotice({
+        title: "Approval could not continue the worker",
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+        tone: "danger",
+      });
+    } finally {
+      setApprovalBusy(false);
     }
   }
 
@@ -1196,9 +1546,9 @@ export default function Dashboard() {
         (tool) => tool.approval_gate === "delete",
       ).length ?? 0,
   };
-  const safeToolCount =
+  const automaticToolCount =
     executiveAccess?.tools.filter(
-      (tool) => !tool.approval_gate,
+      (tool) => tool.approval_gate !== "delete",
     ).length ?? 0;
 
   const providerLabel = useMemo(() => {
@@ -1212,12 +1562,16 @@ export default function Dashboard() {
 
   const activeBackgroundJobs =
     backgroundJobs.filter((item) =>
-      ["queued", "running"].includes(item.status),
+      ["queued", "running", "stopping"].includes(item.status),
     );
   const activeBackgroundJob =
     activeBackgroundJobs.length > 0
       ? activeBackgroundJobs[0]
       : null;
+  const waitingApprovalJob =
+    backgroundJobs.find(
+      (item) => item.status === "waiting_approval",
+    ) || null;
   const completedBackgroundJobs =
     backgroundJobs.filter(
       (item) => item.status === "completed",
@@ -1341,15 +1695,6 @@ export default function Dashboard() {
 
   return (
     <div className="jarvisShell">
-      <HolographicField
-        active={
-          busy ||
-          voice.speaking ||
-          activeBackgroundJobs.length > 0
-        }
-      />
-      <div className="ambientGrid" aria-hidden="true" />
-      <div className="scanline" aria-hidden="true" />
 
       <aside className="commandRail">
         <button
@@ -1359,6 +1704,10 @@ export default function Dashboard() {
         >
           <span className="coreMarkRing">
             <Sparkles size={18} />
+          </span>
+          <span className="coreMarkLabel">
+            <strong>Agent Man</strong>
+            <small>Workspace</small>
           </span>
         </button>
 
@@ -1371,21 +1720,33 @@ export default function Dashboard() {
           />
           <RailButton
             active={view === "dashboard"}
-            label="Core"
+            label="Overview"
             icon={<Home />}
             onClick={() => setView("dashboard")}
           />
           <RailButton
+            active={view === "workbench"}
+            label="Workbench"
+            icon={<FolderTree />}
+            onClick={() => setView("workbench")}
+          />
+          <RailButton
             active={view === "orchestration"}
-            label="Flow"
+            label="Workflows"
             icon={<GitBranch />}
             onClick={() => setView("orchestration")}
           />
           <RailButton
             active={view === "multi-agent"}
-            label="Peers"
+            label="Agents"
             icon={<Network />}
             onClick={() => setView("multi-agent")}
+          />
+          <RailButton
+            active={view === "meeting-rooms"}
+            label="Rooms"
+            icon={<Radio />}
+            onClick={() => setView("meeting-rooms")}
           />
           <RailButton
             active={view === "tools"}
@@ -1395,9 +1756,15 @@ export default function Dashboard() {
           />
           <RailButton
             active={view === "connections"}
-            label="Uplink"
+            label="Connections"
             icon={<Plug />}
             onClick={() => setView("connections")}
+          />
+          <RailButton
+            active={view === "extensions"}
+            label="Extensions"
+            icon={<WandSparkles />}
+            onClick={() => setView("extensions")}
           />
           <RailButton
             active={view === "logs"}
@@ -1439,7 +1806,7 @@ export default function Dashboard() {
               <span />
             </div>
             <div>
-              <small>AGENT MAN / WINDOWS INTELLIGENCE RUNTIME</small>
+              <small>AGENT MAN / LOCAL AGENT RUNTIME</small>
               <strong>{meta.label}</strong>
             </div>
           </div>
@@ -1502,8 +1869,8 @@ export default function Dashboard() {
               }
             >
               <Radio size={14} />
-              <span>{online ? "RUNTIME ONLINE" : "RUNTIME OFFLINE"}</span>
-              <b>{online ? "LIVE" : "DOWN"}</b>
+              <span>{online ? "Online" : "Offline"}</span>
+              <b>{online ? "Live" : "Down"}</b>
             </div>
           </div>
         </header>
@@ -1516,7 +1883,7 @@ export default function Dashboard() {
           </div>
 
           <div className="projectReadout">
-            <small>ACTIVE SANDBOX</small>
+            <small>ACTIVE PROJECT</small>
             <strong>{project?.name || "UNASSIGNED"}</strong>
             <code>
               {project?.workspace_path ||
@@ -1527,10 +1894,20 @@ export default function Dashboard() {
 
         {view === "background" ? (
           <BackgroundPage project={project} />
+        ) : view === "workbench" ? (
+          <WorkbenchPage
+            project={project}
+            backgroundJobs={backgroundJobs}
+          />
         ) : view === "connections" ? (
           <AIConnections
             connections={connections}
             onChanged={reloadConnections}
+          />
+        ) : view === "extensions" ? (
+          <ExtensionsPage
+            project={project}
+            agents={agents}
           />
         ) : view === "logs" ? (
           <LLMLogsPage project={project} />
@@ -1551,6 +1928,11 @@ export default function Dashboard() {
           <OrchestrationPage project={project} agents={agents} />
         ) : view === "multi-agent" ? (
           <MultiAgentWorkspace project={project} agents={agents} />
+        ) : view === "meeting-rooms" ? (
+          <MeetingRoomsPage
+            project={project}
+            backgroundJobs={backgroundJobs}
+          />
         ) : view === "tools" ? (
           <ToolsPage
             project={project}
@@ -1585,6 +1967,20 @@ export default function Dashboard() {
                 detail={`${globallyEnabledTools} RUNTIME ENABLED`}
               />
               <Telemetry
+                icon={<BrainCircuit />}
+                label="Learning"
+                value={
+                  reinforcement
+                    ? reinforcement.overall.average_reward.toFixed(2)
+                    : "0.00"
+                }
+                detail={
+                  reinforcement
+                    ? reinforcement.events + " REWARD EVENTS"
+                    : "NO FEEDBACK YET"
+                }
+              />
+              <Telemetry
                 icon={<ShieldCheck />}
                 label="Sandbox"
                 value={project ? "LOCKED" : "IDLE"}
@@ -1594,7 +1990,7 @@ export default function Dashboard() {
 
             <section className="coreGrid">
               <div className="hudPanel agentMatrix">
-                <PanelLabel icon={<Boxes />} label="AGENT MATRIX" />
+                <PanelLabel icon={<Boxes />} label="AGENTS" />
 
                 <div className="executiveAgentCard">
                   <div className="executiveAgentIdentity">
@@ -1619,7 +2015,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="workerDivider">
-                  <span>WORKER AGENTS</span>
+                  <span>WORKERS</span>
                   <i />
                 </div>
 
@@ -1672,56 +2068,127 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className={"intelligenceCore phase-" + interactionPhase}>
-                <div className="coreBackdrop" />
-                <div className="orbit orbitOne">
-                  <span />
-                  <span />
-                  <span />
+              <div className="executiveOverview">
+                <div className="executiveOverviewHeader">
+                  <div className="executiveAvatar">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <small>EXECUTIVE AGENT</small>
+                    <h2>Agent Man</h2>
+                    <p>
+                      Coordinates requests, delegates work, and reports live progress.
+                    </p>
+                  </div>
+                  <span
+                    className={
+                      online
+                        ? "professionalStatus online"
+                        : "professionalStatus offline"
+                    }
+                  >
+                    {online ? "Online" : "Offline"}
+                  </span>
                 </div>
-                <div className="orbit orbitTwo">
-                  <span />
-                  <span />
-                </div>
-                <div className="orbit orbitThree" />
-                <div className="coreHalo">
-                  <div className="coreSphere">
-                    <Zap size={34} />
-                    <span>AGENT</span>
-                    <b>MAN</b>
-                    <small>{online ? "CORE ACTIVE" : "CORE STANDBY"}</small>
+
+                <div className="executiveSummaryGrid">
+                  <div>
+                    <span>Current state</span>
+                    <strong>{interactionLabel}</strong>
+                  </div>
+                  <div>
+                    <span>Background jobs</span>
+                    <strong>{activeBackgroundJobs.length}</strong>
+                  </div>
+                  <div>
+                    <span>Available tools</span>
+                    <strong>{activeTools}</strong>
+                  </div>
+                  <div>
+                    <span>Workers</span>
+                    <strong>{agents.length}</strong>
                   </div>
                 </div>
 
-                {agents.slice(0, 6).map((item, index) => (
-                  <button
-                    key={item.id}
-                    className={`orbitalAgent orbitalAgent${index + 1} ${
-                      agent?.id === item.id ? "selected" : ""
-                    }`}
-                    onClick={() => setAgent(item)}
-                    title={item.name}
-                  >
+                <div className="currentWorkCard">
+                  <div className="currentWorkHeader">
+                    <div>
+                      <small>CURRENT PROCESS</small>
+                      <strong>
+                        {activeBackgroundJob
+                          ? activeBackgroundJob.agent_name
+                          : busy
+                            ? "Agent Man"
+                            : "No active task"}
+                      </strong>
+                    </div>
                     <span>
-                      <Bot size={14} />
+                      {activeBackgroundJob
+                        ? activeBackgroundJob.current_phase || activeBackgroundJob.status
+                        : busy
+                          ? "Working"
+                          : "Ready"}
                     </span>
-                    <b>{item.name}</b>
-                    <small>{item.role}</small>
-                  </button>
-                ))}
+                  </div>
+                  <p>
+                    {activeBackgroundJob
+                      ? activeBackgroundJob.current_action ||
+                        activeBackgroundJob.task
+                      : busy
+                        ? liveOutputText || "Processing your request."
+                        : "Agent Man is ready for your next instruction."}
+                  </p>
+                </div>
 
-                <div className="coreCaption">
-                  <CircleDot size={13} />
-                  <span>
-                    {agent
-                      ? `${agent.name.toUpperCase()} / ${providerLabel}`
-                      : "SELECT AN AGENT"}
-                  </span>
+                <div className="selectedWorkerCard">
+                  <div className="selectedWorkerTitle">
+                    <span>SELECTED WORKER</span>
+                    {agent && (
+                      <button
+                        type="button"
+                        onClick={openAgentContextDialog}
+                      >
+                        Edit context
+                      </button>
+                    )}
+                  </div>
+                  {agent ? (
+                    <>
+                      <div className="selectedWorkerIdentity">
+                        <div className="workerAvatar">
+                          <Bot size={17} />
+                        </div>
+                        <div>
+                          <strong>{agent.name}</strong>
+                          <span>{agent.role}</span>
+                        </div>
+                        <em className={"workerState state-" + agent.state}>
+                          {agent.state === "assigned"
+                            ? "connecting"
+                            : agent.state}
+                        </em>
+                      </div>
+                      <div className="selectedWorkerMeta">
+                        <div>
+                          <span>Provider</span>
+                          <strong>{providerLabel}</strong>
+                        </div>
+                        <div>
+                          <span>Model</span>
+                          <strong>{agent.llm.model}</strong>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="professionalEmpty">
+                      Select a worker to view its configuration and status.
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="hudPanel missionPanel">
-                <PanelLabel icon={<Activity />} label="MISSION CONTROL" />
+                <PanelLabel icon={<Activity />} label="RUNTIME STATUS" />
                 <div className="missionStatus">
                   <span
                     className={
@@ -1748,8 +2215,8 @@ export default function Dashboard() {
                         " ENABLED"
                       : "VERIFYING..."}
                   </b>
-                  <span>SAFE AUTO TOOLS</span>
-                  <b>{safeToolCount} READY WITHOUT RUN APPROVAL</b>
+                  <span>AUTO-AUTHORIZED TOOLS</span>
+                  <b>{automaticToolCount} READY IMMEDIATELY</b>
                   <span>ACTIVE WORKER</span>
                   <b>
                     {activeWorker
@@ -1797,32 +2264,24 @@ export default function Dashboard() {
 
                 <div className="missionGateLegend">
                   <span>
-                    Tool assignment controls what Agent Man can see.
+                    Assigned Executive tools are available immediately.
                   </span>
                   <span>
-                    Run approval arms risky actions for this mission.
+                    Only destructive actions require separate approval.
                   </span>
                 </div>
 
                 <div className="permissionReadout">
-                  <button
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.exec > 0
-                        ? "available "
-                        : "") +
-                      (allowTerminal ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowTerminal((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.exec === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.exec +
-                      " assigned Executive tools require terminal.execute approval"
+                      " assigned Executive terminal tools are automatically authorized"
                     }
                   >
                     <TerminalSquare size={13} />
@@ -1830,29 +2289,20 @@ export default function Dashboard() {
                       EXEC
                       <small>
                         {executiveGateCounts.exec} TOOL
-                        {executiveGateCounts.exec === 1 ? "" : "S"} ·{" "}
-                        {allowTerminal ? "ARMED" : "ASK"}
+                        {executiveGateCounts.exec === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
-                  <button
+                  </div>
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.net > 0
-                        ? "available "
-                        : "") +
-                      (allowNetwork ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowNetwork((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.net === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.net +
-                      " assigned Executive tools require network.internet approval"
+                      " assigned Executive network tools are automatically authorized"
                     }
                   >
                     <Globe2 size={13} />
@@ -1860,29 +2310,20 @@ export default function Dashboard() {
                       NET
                       <small>
                         {executiveGateCounts.net} TOOL
-                        {executiveGateCounts.net === 1 ? "" : "S"} ·{" "}
-                        {allowNetwork ? "ARMED" : "ASK"}
+                        {executiveGateCounts.net === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
-                  <button
+                  </div>
+                  <div
                     className={
                       "permissionChip " +
                       (executiveGateCounts.hw > 0
-                        ? "available "
-                        : "") +
-                      (allowHardware ? "active" : "")
-                    }
-                    onClick={() =>
-                      setAllowHardware((value) => !value)
-                    }
-                    disabled={
-                      busy ||
-                      executiveGateCounts.hw === 0
+                        ? "available active"
+                        : "")
                     }
                     title={
                       executiveGateCounts.hw +
-                      " assigned Executive tools require hardware.serial approval"
+                      " assigned Executive hardware tools are automatically authorized"
                     }
                   >
                     <Cpu size={13} />
@@ -1890,11 +2331,10 @@ export default function Dashboard() {
                       HW
                       <small>
                         {executiveGateCounts.hw} TOOL
-                        {executiveGateCounts.hw === 1 ? "" : "S"} ·{" "}
-                        {allowHardware ? "ARMED" : "ASK"}
+                        {executiveGateCounts.hw === 1 ? "" : "S"} · AUTO
                       </small>
                     </span>
-                  </button>
+                  </div>
                   <button
                     className={
                       "permissionChip danger " +
@@ -1903,11 +2343,21 @@ export default function Dashboard() {
                         : "") +
                       (allowDelete ? "active" : "")
                     }
-                    onClick={() =>
-                      setAllowDelete((value) => !value)
-                    }
+                    onClick={() => {
+                      const shouldApproveWaitingJob =
+                        !allowDelete &&
+                        waitingApprovalJob?.current_detail ===
+                          "project.files.delete";
+                      setAllowDelete((value) => !value);
+                      if (shouldApproveWaitingJob) {
+                        void approveWaitingJob(
+                          waitingApprovalJob.id,
+                        );
+                      }
+                    }}
                     disabled={
                       busy ||
+                      approvalBusy ||
                       executiveGateCounts.delete === 0
                     }
                     title={
@@ -2042,7 +2492,7 @@ export default function Dashboard() {
               <div className={"commandOutput " + (streamActive ? "streaming" : "")}>
                 <div className="outputRail">
                   <span />
-                  <small>{streamActive ? "LIVE" : "OUTPUT"}</small>
+                  <small>{streamActive ? "Live" : "OUTPUT"}</small>
                 </div>
                 <div className="outputBody">
                   <div className="outputStreamHeader">
@@ -2090,6 +2540,44 @@ export default function Dashboard() {
                       />
                     )}
                   </div>
+
+                  {run && !busy && (
+                    <div className="reinforcementFeedback">
+                      <span>Was this outcome useful?</span>
+                      <button
+                        type="button"
+                        className={
+                          feedbackSent === 1
+                            ? "positive active"
+                            : "positive"
+                        }
+                        onClick={() =>
+                          void submitReinforcementFeedback(1)
+                        }
+                        disabled={feedbackSent !== null}
+                        title="Positive reinforcement"
+                      >
+                        <ThumbsUp size={15} />
+                        Helpful
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          feedbackSent === -1
+                            ? "negative active"
+                            : "negative"
+                        }
+                        onClick={() =>
+                          void submitReinforcementFeedback(-1)
+                        }
+                        disabled={feedbackSent !== null}
+                        title="Negative reinforcement"
+                      >
+                        <ThumbsDown size={15} />
+                        Needs work
+                      </button>
+                    </div>
+                  )}
 
                   {busy && liveActivities.length > 0 && (
                     <div className="liveActivityFeed">
@@ -2193,7 +2681,7 @@ export default function Dashboard() {
                             <Clock3 size={10} />
                             {item.durationMs === null
                               ? item.live
-                                ? "LIVE"
+                                ? "Live"
                                 : "—"
                               : item.durationMs < 1000
                                 ? item.durationMs + " ms"
@@ -2241,7 +2729,7 @@ export default function Dashboard() {
         open={projectDialog}
         onClose={() => setProjectDialog(false)}
         title="Initialize Project"
-        eyebrow="COMMAND / NEW SANDBOX"
+        eyebrow="PROJECT / NEW"
         footer={
           <>
             <button
@@ -2293,7 +2781,7 @@ export default function Dashboard() {
         open={agentDialog}
         onClose={() => setAgentDialog(false)}
         title="Deploy Agent"
-        eyebrow="COMMAND / AGENT CONFIGURATION"
+        eyebrow="AGENT / CONFIGURATION"
         footer={
           <>
             <button
@@ -2444,7 +2932,7 @@ export default function Dashboard() {
         open={agentContextDialog}
         onClose={() => setAgentContextDialog(false)}
         title="Agent Context"
-        eyebrow="COMMAND / WORKER ROLE"
+        eyebrow="AGENT / CONTEXT"
         footer={
           <>
             <button
@@ -2544,12 +3032,38 @@ export default function Dashboard() {
         }
         tone={notice?.tone}
         footer={
-          <button
-            className="primaryButton"
-            onClick={() => setNotice(null)}
-          >
-            Acknowledge
-          </button>
+          notice?.approvalJobId ? (
+            <>
+              <button
+                className="secondaryButton"
+                onClick={() => setNotice(null)}
+                disabled={approvalBusy}
+              >
+                Not now
+              </button>
+              <button
+                className="primaryButton"
+                onClick={() =>
+                  void approveWaitingJob(
+                    notice.approvalJobId || "",
+                  )
+                }
+                disabled={approvalBusy}
+              >
+                <ShieldCheck size={14} />
+                {approvalBusy
+                  ? "Continuing..."
+                  : "Approve & Continue"}
+              </button>
+            </>
+          ) : (
+            <button
+              className="primaryButton"
+              onClick={() => setNotice(null)}
+            >
+              Acknowledge
+            </button>
+          )
         }
       >
         <p className="systemMessage">{notice?.message}</p>

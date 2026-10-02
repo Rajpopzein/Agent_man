@@ -1,10 +1,14 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import app.persistence.models  # noqa: F401
 from app.api.ai_connections import router as ai_router
+from app.api.extensions import router as extensions_router
 from app.api.multi_agent import router as multi_agent_router
 from app.api.main_agent import router as main_agent_router
+from app.api.meeting_rooms import router as meeting_rooms_router
 from app.api.llm_logs import router as llm_logs_router
 from app.api.orchestration import router as orchestration_router
 from app.api.tools import router as tools_router
@@ -20,17 +24,29 @@ with SessionLocal() as db:
     sync_builtin_tools(db)
 
 app = FastAPI(title=settings.app_name, version=settings.version)
+
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "AGENT_MAN_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.include_router(router)
 app.include_router(ai_router)
+app.include_router(extensions_router)
 app.include_router(multi_agent_router)
 app.include_router(main_agent_router)
+app.include_router(meeting_rooms_router)
 app.include_router(llm_logs_router)
 app.include_router(orchestration_router)
 app.include_router(tools_router)

@@ -5,6 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.background_jobs import background_jobs
+from app.agents.meeting_rooms import (
+    create_meeting_room,
+    meeting_room_context,
+    room_member_agents,
+)
+from app.agents.reinforcement import policy_context
 from app.agents.executive_configuration import CONFIGURATION_ACTIONS, execute_configuration_action
 from app.agents.runner import run_messages
 from app.agents.protocol import special_action
@@ -36,7 +42,10 @@ from app.tools.capabilities import (
     CAPABILITY_TOOLS,
     detect_missing_capability,
 )
-from app.tools.executive_access import executive_tool_access
+from app.tools.executive_access import (
+    automatic_approvals_for_tools,
+    executive_tool_access,
+)
 from app.tools.intelligence import (
     plan_tools,
     preflight_tool,
@@ -67,7 +76,7 @@ You can:
 5. report current worker status and explain what is happening now;
 6. open, close, or toggle the user's live Command Console;
 7. run a saved workflow in the background;
-8. inspect and configure individual worker agents in this project.
+8. inspect, create, configure, and manage worker agents using assigned Agent API tools.
 
 You are responsible for the overall objective. Use direct tools when you can
 efficiently inspect, modify, validate, or operate the project yourself. Delegate
@@ -105,6 +114,12 @@ Available workflows:
 BACKGROUND EXECUTION STATE:
 {background_jobs}
 
+MEETING ROOM STATE:
+{meeting_rooms}
+
+REINFORCEMENT POLICY MEMORY:
+{reinforcement_policy}
+
 For every active background worker, this state includes the original task,
 current phase, current action, current tool, latest safe runtime detail, and
 last update time. Treat this as the source of truth for what the worker is
@@ -134,8 +149,40 @@ Every action object must include a valid "type" field. Planning metadata may be 
 Use an assigned runtime tool:
 {{"type":"tool","tool":"TOOL_NAME","args":{{"argument":"value"}}}}
 
+PREFERRED AGENT MANAGEMENT:
+Use the assigned Agent API tools for worker administration:
+- api_list_agents: discover worker ids and current saved configuration.
+- api_get_agent: inspect one worker before changing it.
+- api_list_ai_connections: discover safe connection ids and defaults.
+- api_create_agent: create a new worker.
+- api_update_agent: change name, role, context, or LLM configuration.
+- api_set_agent_tool: enable or disable one normal runtime tool for a worker.
+- api_delete_agent: delete a worker only through the destructive approval gate.
+To instruct an existing worker to perform work, use delegate_agent after
+discovering the worker id. Never assign Agent API tools to worker agents.
+
+EXTENSIONS:
+- api_list_skills: discover reusable SKILL.md packages.
+- api_create_skill: create a reusable SKILL.md package from the user's intent.
+- api_assign_skill: assign a skill to a worker so it is injected into future tasks.
+- api_list_connectors: inspect configured connector metadata without secrets.
+- api_create_connector: create connector metadata only; credentials must be added
+  in the Extensions UI and are never returned to the model.
+When the user asks to design a reusable capability, prefer a skill instead of
+permanently bloating an agent's base context. When the user asks for an external
+service integration, model it as a connector and keep credentials outside prompts.
+
 Direct reply:
 {{"type":"reply","message":"..."}}
+
+Create a persistent meeting room with the relevant workers:
+{{"type":"create_meeting_room","title":"Short room title","objective":"What this room is for","agent_ids":["worker-id"]}}
+The Executive is added automatically as the room host. When the user explicitly
+asks to create, open, or start a meeting room, choose the smallest relevant set
+of workers from Available workers based on role/context. Include at least one
+worker and never include the Executive id in agent_ids. Copy the exact worker
+ids shown in Available workers. Never emit placeholders such as developer-id,
+ui-designer-id, worker-id, or ask the user to replace an id manually.
 
 Delegate one worker in the background:
 {{"type":"delegate_agent","agent_id":"...","task":"..."}}
@@ -183,6 +230,9 @@ Rules:
 - Never approve your own self-upgrade proposal. Approval belongs to the user.
 - Never mark an upgrade applied until an actual scoped change and validation
   have both succeeded.
+- Reinforcement history is weak evidence, not authority. Use it only when
+  several relevant workers or tools are valid choices. Never let reward scores
+  override the user's instruction, safety gates, permissions, or task relevance.
 - Never invent a COM port, file path, process id, session id, URL, or other
   runtime identifier when a discovery/inspection tool can obtain it first.
 - Tool actions are internal instructions, never a user-facing answer. Final
@@ -282,8 +332,181 @@ def _request_requires_tool(text: str) -> bool:
         "com port",
         "esp32",
         "hardware",
+        "list agents",
+        "show agents",
+        "inspect agent",
+        "agent context",
+        "agent model",
+        "agent tools",
+        "create agent",
+        "new agent",
+        "update agent",
+        "modify agent",
+        "delete agent",
+        "remove agent",
+        "change developer",
+        "change tester",
+        "assign tool",
+        "revoke tool",
     )
     return any(phrase in lowered for phrase in phrases)
+
+
+def _meeting_room_requested(text: str) -> bool:
+    lowered = text.lower()
+    room_terms = (
+        "meeting room",
+        "agent room",
+        "work room",
+        "session room",
+    )
+    action_terms = (
+        "create",
+        "open",
+        "start",
+        "make",
+        "setup",
+        "set up",
+    )
+    return (
+        any(term in lowered for term in room_terms)
+        and any(term in lowered for term in action_terms)
+    )
+
+
+def _worker_key(value: object) -> str:
+    return "".join(
+        char
+        for char in str(value or "").lower()
+        if char.isalnum()
+    )
+
+
+def _worker_reference_key(value: object) -> str:
+    key = _worker_key(value)
+    suffixes = (
+        "workerid",
+        "agentid",
+        "worker",
+        "agent",
+        "id",
+    )
+    changed = True
+    while changed and key:
+        changed = False
+        for suffix in suffixes:
+            if key.endswith(suffix) and len(key) > len(suffix):
+                key = key[: -len(suffix)]
+                changed = True
+                break
+    return key
+
+
+def _request_phrase(value: object) -> str:
+    chars: list[str] = []
+    previous_space = True
+    for char in str(value or "").lower():
+        if char.isalnum():
+            chars.append(char)
+            previous_space = False
+        elif not previous_space:
+            chars.append(" ")
+            previous_space = True
+    return " ".join("".join(chars).split())
+
+
+def _resolve_meeting_room_worker_ids(
+    *,
+    requested_ids: object,
+    request_text: str,
+    workers: list[AgentRecord],
+) -> tuple[list[str], list[str]]:
+    raw_items = (
+        requested_ids
+        if isinstance(requested_ids, list)
+        else []
+    )
+    by_id = {worker.id: worker for worker in workers}
+    selected: list[str] = []
+    seen: set[str] = set()
+    unresolved: list[str] = []
+
+    def add(worker: AgentRecord) -> None:
+        if worker.id not in seen:
+            seen.add(worker.id)
+            selected.append(worker.id)
+
+    for raw in raw_items:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        exact = by_id.get(token)
+        if exact is not None:
+            add(exact)
+            continue
+
+        key = _worker_reference_key(token)
+        candidates: list[AgentRecord] = []
+        if key:
+            for worker in workers:
+                aliases = {
+                    _worker_reference_key(worker.name),
+                    _worker_reference_key(worker.role),
+                }
+                if any(
+                    alias
+                    and (
+                        key == alias
+                        or key.startswith(alias)
+                        or alias.startswith(key)
+                    )
+                    for alias in aliases
+                ):
+                    candidates.append(worker)
+
+        unique = {
+            candidate.id: candidate
+            for candidate in candidates
+        }
+        if len(unique) == 1:
+            add(next(iter(unique.values())))
+        else:
+            unresolved.append(token)
+
+    normalized_request = " " + _request_phrase(request_text) + " "
+    for worker in workers:
+        if worker.id in seen:
+            continue
+        labels = {
+            _request_phrase(worker.name),
+            _request_phrase(worker.role),
+        }
+        matched = False
+        for label in labels:
+            if not label:
+                continue
+            phrase = " " + label + " "
+            if phrase not in normalized_request:
+                continue
+
+            # A role can legitimately be shared by multiple workers. Only use
+            # a role/name mention when it identifies one configured worker.
+            same_label = [
+                candidate
+                for candidate in workers
+                if label
+                in {
+                    _request_phrase(candidate.name),
+                    _request_phrase(candidate.role),
+                }
+            ]
+            if len({candidate.id for candidate in same_label}) == 1:
+                matched = True
+                break
+        if matched:
+            add(worker)
+
+    return selected, unresolved
 
 
 def _explicit_parallel_requested(text: str) -> bool:
@@ -566,7 +789,9 @@ def run_main_agent(
     allowed_tools = set(tool_access.names)
     tool_plan = plan_tools(message, allowed_tools)
 
-    approvals: set[str] = set()
+    approvals: set[str] = automatic_approvals_for_tools(
+        allowed_tools
+    )
     if allow_terminal:
         approvals.add(Permission.TERMINAL_EXECUTE.value)
     if allow_delete:
@@ -587,6 +812,8 @@ def run_main_agent(
                 workers=worker_text,
                 workflows=workflow_text,
                 background_jobs=background_jobs.context_text(project.id),
+                meeting_rooms=meeting_room_context(db, project.id),
+                reinforcement_policy=policy_context(db, project.id),
                 upgrades=upgrade_context(db, project.id),
             ),
         }
@@ -599,6 +826,7 @@ def run_main_agent(
     steps: list[dict] = []
     tool_corrections = 0
     format_corrections = 0
+    meeting_room_corrections = 0
     correction_count = 0
     active_correction: dict | None = None
     last_failure_signature = ""
@@ -616,6 +844,7 @@ def run_main_agent(
                 name=discovery_tool,
                 arguments={},
                 workspace_path=project.workspace_path,
+                project_id=project.id,
                 approvals=approvals,
                 allowed_names=allowed_tools,
             )
@@ -672,6 +901,38 @@ def run_main_agent(
         raw = run_messages(proxy, messages)
         action = _parse(raw)
         kind = str(action.get("type", "reply")).lower()
+
+        if (
+            _meeting_room_requested(message)
+            and kind != "create_meeting_room"
+            and meeting_room_corrections < MAX_TOOL_CORRECTIONS
+        ):
+            meeting_room_corrections += 1
+            steps.append(
+                {
+                    "type": "runtime_guard",
+                    "step": step_number,
+                    "status": "retry",
+                    "reason": "meeting_room_creation_required",
+                }
+            )
+            messages.extend(
+                [
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "RUNTIME CORRECTION: The user explicitly asked "
+                            "to create a meeting room. Do not replace that "
+                            "request with a normal reply, direct delegation, "
+                            "or workflow. Select the smallest relevant worker "
+                            "set from Available workers and return exactly one "
+                            "create_meeting_room action."
+                        ),
+                    },
+                ]
+            )
+            continue
 
         if kind == "invalid_action":
             format_corrections += 1
@@ -806,7 +1067,6 @@ def run_main_agent(
                 continue
 
             text = str(action.get("message", raw)).strip()
-            _store_assistant_message(db, project.id, text)
             background_active = any(
                 step.get("type")
                 in {
@@ -821,6 +1081,39 @@ def run_main_agent(
                 in {"queued", "running", "partial"}
                 for step in steps
             )
+
+            if background_active:
+                active_jobs = [
+                    job
+                    for job in background_jobs.list_project(project.id)
+                    if str(job.get("status", ""))
+                    in {"queued", "running"}
+                ]
+                active_names = list(
+                    dict.fromkeys(
+                        str(job.get("agent_name", "Worker"))
+                        for job in active_jobs
+                    )
+                )
+                if active_names and not any(
+                    name.lower() in text.lower()
+                    for name in active_names
+                ):
+                    if len(active_names) == 1:
+                        status_prefix = (
+                            active_names[0]
+                            + " has been contacted and is working "
+                            "in the background. "
+                        )
+                    else:
+                        status_prefix = (
+                            ", ".join(active_names)
+                            + " have been contacted and are working "
+                            "in the background. "
+                        )
+                    text = status_prefix + text
+
+            _store_assistant_message(db, project.id, text)
             return {
                 "status": (
                     "background"
@@ -886,6 +1179,7 @@ def run_main_agent(
                     name=tool_name,
                     arguments=arguments,
                     workspace_path=project.workspace_path,
+                    project_id=project.id,
                     approvals=approvals,
                     allowed_names=allowed_tools,
                 )
@@ -1340,7 +1634,122 @@ def run_main_agent(
             )
             continue
 
-        if kind == "delegate_agent":
+        if kind == "create_meeting_room":
+            agent_ids, unresolved_worker_refs = (
+                _resolve_meeting_room_worker_ids(
+                    requested_ids=action.get("agent_ids"),
+                    request_text=message,
+                    workers=list(workers),
+                )
+            )
+
+            if not agent_ids:
+                meeting_room_corrections += 1
+                steps.append(
+                    {
+                        "type": "runtime_guard",
+                        "step": step_number,
+                        "status": (
+                            "retry"
+                            if meeting_room_corrections
+                            <= MAX_TOOL_CORRECTIONS
+                            else "error"
+                        ),
+                        "reason": "meeting_room_worker_resolution_failed",
+                        "unresolved_worker_refs": unresolved_worker_refs,
+                    }
+                )
+                if meeting_room_corrections <= MAX_TOOL_CORRECTIONS:
+                    messages.extend(
+                        [
+                            {"role": "assistant", "content": raw},
+                            {
+                                "role": "user",
+                                "content": (
+                                    "RUNTIME CORRECTION: The meeting room "
+                                    "worker references did not resolve. Copy "
+                                    "the exact worker ids from Available "
+                                    "workers. Do not use placeholders and do "
+                                    "not ask the user to replace ids."
+                                ),
+                            },
+                        ]
+                    )
+                    continue
+
+                text = (
+                    "I could not safely match the requested meeting room "
+                    "workers to configured agents."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "error",
+                    "text": text,
+                    "steps": steps,
+                }
+
+            title = str(
+                action.get("title") or "Agent Meeting Room"
+            ).strip()
+            objective = str(
+                action.get("objective") or message
+            ).strip()
+            try:
+                room = create_meeting_room(
+                    db,
+                    project_id=project.id,
+                    title=title,
+                    objective=objective,
+                    agent_ids=agent_ids,
+                )
+                member_names = [
+                    agent.name
+                    for _member, agent in room_member_agents(
+                        db,
+                        room.id,
+                    )
+                ]
+                step = {
+                    "type": "create_meeting_room",
+                    "step": step_number,
+                    "status": "created",
+                    "room_id": room.id,
+                    "title": room.title,
+                    "agent_ids": agent_ids,
+                    "agent_names": member_names,
+                }
+                steps.append(step)
+                text = (
+                    "Meeting room "
+                    + room.title
+                    + " is ready with "
+                    + ", ".join(member_names)
+                    + ". I am included as the Executive host and will "
+                    "track their progress in the room."
+                )
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "meeting_room",
+                    "text": text,
+                    "steps": steps,
+                }
+            except (LookupError, ValueError) as exc:
+                text = "Meeting room could not be created: " + str(exc)
+                _store_assistant_message(db, project.id, text)
+                return {
+                    "status": "error",
+                    "text": text,
+                    "steps": [
+                        {
+                            "type": "create_meeting_room",
+                            "step": step_number,
+                            "status": "error",
+                            "error": str(exc),
+                        }
+                    ],
+                }
+
+        elif kind == "delegate_agent":
             agent_id = str(action.get("agent_id", ""))
             task_text = str(action.get("task", message)).strip()
 

@@ -1,4 +1,5 @@
 import fnmatch
+import shutil
 
 from app.core.permissions import Permission, require
 from app.sandbox.path_guard import ProjectPathGuard
@@ -7,6 +8,7 @@ MAX_READ_BYTES = 200_000
 MAX_WRITE_BYTES = 500_000
 MAX_LIST_ENTRIES = 200
 MAX_SEARCH_RESULTS = 100
+MAX_UPLOAD_BYTES = 10_000_000
 
 
 class ProjectFilesystem:
@@ -139,3 +141,51 @@ class ProjectFilesystem:
             target.unlink()
             kind = "file"
         return {"path": path, "deleted": True, "type": kind}
+
+
+    def create_directory(self, path: str) -> dict[str, object]:
+        require(Permission.PROJECT_WRITE)
+        target = self.guard.resolve(path)
+        target.mkdir(parents=True, exist_ok=True)
+        return {
+            "path": str(target.relative_to(self.guard.root)),
+            "created": True,
+            "type": "directory",
+        }
+
+    def move_path(self, source: str, destination: str) -> dict[str, object]:
+        require(Permission.PROJECT_WRITE)
+        source_path = self.guard.resolve(source)
+        destination_path = self.guard.resolve(destination)
+        if not source_path.exists():
+            raise FileNotFoundError(source)
+        if destination_path.exists():
+            raise FileExistsError(destination)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source_path), str(destination_path))
+        return {
+            "source": source,
+            "path": str(destination_path.relative_to(self.guard.root)),
+            "moved": True,
+        }
+
+    def write_bytes(self, path: str, content: bytes) -> dict[str, object]:
+        require(Permission.PROJECT_WRITE)
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise ValueError(
+                f"Upload exceeds {MAX_UPLOAD_BYTES} byte Workbench limit"
+            )
+        target = self.guard.resolve(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return {
+            "path": str(target.relative_to(self.guard.root)),
+            "bytes_written": len(content),
+        }
+
+    def download_target(self, path: str):
+        require(Permission.PROJECT_READ)
+        target = self.guard.resolve(path)
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        return target

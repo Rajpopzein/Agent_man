@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -129,7 +129,15 @@ def _format_transcript(
             if message.agent_id
             else None
         )
-        author = agent.name if agent else "Runtime"
+        author = (
+            agent.name
+            if agent
+            else (
+                "User"
+                if message.kind == "user_instruction"
+                else "Runtime"
+            )
+        )
         lines.append(
             f"[round {message.round_number}] "
             f"{author} / {message.kind}: {message.content}"
@@ -177,17 +185,41 @@ def _run_peer_turn(
     db: Session,
     agents: dict[str, AgentRecord],
     approvals: set[str],
+    continuous: bool = False,
 ) -> dict[str, Any]:
     allowed_names = allowed_tool_names(db, agent.id)
     transcript = _format_transcript(
         _transcript(db, task.id),
         agents,
     )
+    active_peer_ids = set(
+        db.scalars(
+            select(MultiAgentParticipantRecord.agent_id).where(
+                MultiAgentParticipantRecord.task_id == task.id,
+                MultiAgentParticipantRecord.status.notin_(
+                    {"failed", "kicked", "stopped"}
+                ),
+            )
+        ).all()
+    )
     peers = ", ".join(
         f"{peer.name} ({peer.role})"
         for peer in agents.values()
-        if peer.id != agent.id
+        if peer.id != agent.id and peer.id in active_peer_ids
     )
+    round_context = (
+        (
+            f"Current collaboration round: {round_number}. "
+            "This room session has no fixed round ceiling; "
+            "keep collaborating until the shared objective is complete."
+        )
+        if continuous
+        else (
+            f"Current collaboration round: {round_number} of "
+            f"safety ceiling {task.max_rounds}."
+        )
+    )
+
     messages = [
         {
             "role": "system",
@@ -206,9 +238,7 @@ def _run_peer_turn(
                 f"Shared task: {task.prompt}\n"
                 f"Your role: {agent.role}\n"
                 f"Peer agents: {peers or '(none)'}\n"
-                f"Current collaboration round: "
-                f"{round_number} of safety ceiling "
-                f"{task.max_rounds}\n\n"
+                f"{round_context}\n\n"
                 f"Shared discussion:\n{transcript}\n\n"
                 "Take one useful peer turn now. Inspect the project "
                 "with tools when that is needed to verify the shared job."
@@ -311,6 +341,7 @@ def _run_peer_turn(
                 name=tool_name,
                 arguments=arguments,
                 workspace_path=project.workspace_path,
+                project_id=project.id,
                 approvals=approvals,
                 allowed_names=allowed_names,
             )
@@ -378,6 +409,33 @@ def _run_peer_turn(
     }
 
 
+def _mark_peer_task_stopped(
+    *,
+    task: MultiAgentTaskRecord,
+    participants: list[MultiAgentParticipantRecord],
+    agents: dict[str, AgentRecord],
+    db: Session,
+    reason: str,
+) -> MultiAgentTaskRecord:
+    task.status = "stopped"
+    task.completed_at = datetime.now(timezone.utc)
+    for participant in participants:
+        if participant.status not in {"failed", "kicked"}:
+            participant.status = "stopped"
+        agent = agents.get(participant.agent_id)
+        if agent is not None:
+            agent.state = "idle"
+    db.commit()
+    events.emit(
+        "multi_agent.task.stopped",
+        task_id=task.id,
+        project_id=task.project_id,
+        room_id=task.room_id,
+        reason=reason,
+    )
+    return task
+
+
 def run_peer_task(
     *,
     task: MultiAgentTaskRecord,
@@ -386,6 +444,8 @@ def run_peer_task(
     allow_delete: bool = False,
     allow_network: bool = False,
     allow_hardware: bool = False,
+    should_stop: Callable[[], bool] | None = None,
+    on_message: Callable[[AgentRecord, str, str, int], None] | None = None,
 ) -> MultiAgentTaskRecord:
     project = db.get(
         ProjectRecord,
@@ -419,6 +479,8 @@ def run_peer_task(
         bind_agent_connection(agent, db)
         agents[agent.id] = agent
 
+    continuous = bool(task.room_id)
+
     approvals: set[str] = set()
     if allow_terminal:
         approvals.add(
@@ -441,6 +503,7 @@ def run_peer_task(
         "completed",
         "completed_with_errors",
         "failed",
+        "stopped",
     }:
         return task
 
@@ -465,19 +528,47 @@ def run_peer_task(
         project_id=task.project_id,
         participants=len(participants),
         start_round=start_round,
-        max_rounds=task.max_rounds,
+        max_rounds=(None if continuous else task.max_rounds),
+        continuous=continuous,
+        room_id=task.room_id,
     )
 
-    for round_number in range(
-        start_round,
-        task.max_rounds + 1,
-    ):
+    round_number = start_round
+    while continuous or round_number <= task.max_rounds:
+        participants = list(
+            db.scalars(
+                select(MultiAgentParticipantRecord)
+                .where(
+                    MultiAgentParticipantRecord.task_id == task.id
+                )
+                .order_by(MultiAgentParticipantRecord.position)
+            ).all()
+        )
+
+        if should_stop is not None and should_stop():
+            return _mark_peer_task_stopped(
+                task=task,
+                participants=participants,
+                agents=agents,
+                db=db,
+                reason="manual_stop",
+            )
+
         task.current_round = round_number
         db.commit()
 
         for participant in participants:
-            if participant.status == "failed":
+            db.refresh(participant)
+            if participant.status in {"failed", "kicked", "stopped"}:
                 continue
+            if should_stop is not None and should_stop():
+                return _mark_peer_task_stopped(
+                    task=task,
+                    participants=participants,
+                    agents=agents,
+                    db=db,
+                    reason="manual_stop",
+                )
             if participant.last_round >= round_number:
                 continue
 
@@ -503,6 +594,7 @@ def run_peer_task(
                     db=db,
                     agents=agents,
                     approvals=approvals,
+                    continuous=continuous,
                 )
             except Exception as exc:
                 participant.status = "failed"
@@ -523,6 +615,19 @@ def run_peer_task(
                     task_id=task.id,
                     agent_id=agent.id,
                     error=str(exc)[:500],
+                )
+                continue
+
+            db.refresh(participant)
+            if participant.status == "kicked":
+                agent.state = "idle"
+                db.commit()
+                events.emit(
+                    "multi_agent.agent.kicked",
+                    task_id=task.id,
+                    project_id=task.project_id,
+                    room_id=task.room_id,
+                    agent_id=agent.id,
                 )
                 continue
 
@@ -572,6 +677,14 @@ def run_peer_task(
             agent.state = "idle"
             db.commit()
 
+            if on_message is not None:
+                on_message(
+                    agent,
+                    kind,
+                    str(result["content"]).strip(),
+                    round_number,
+                )
+
             events.emit(
                 "multi_agent.message",
                 task_id=task.id,
@@ -580,13 +693,24 @@ def run_peer_task(
                 round=round_number,
             )
 
+        for participant in participants:
+            db.refresh(participant)
+
         healthy_ids = {
             participant.agent_id
             for participant in participants
-            if participant.status != "failed"
+            if participant.status not in {"failed", "kicked", "stopped"}
         }
 
         if not healthy_ids:
+            if continuous:
+                return _mark_peer_task_stopped(
+                    task=task,
+                    participants=participants,
+                    agents=agents,
+                    db=db,
+                    reason="no_active_members",
+                )
             task.status = "failed"
             task.completed_at = (
                 datetime.now(timezone.utc)
@@ -616,7 +740,11 @@ def run_peer_task(
                 for participant in participants
             )
             for participant in participants:
-                if participant.status != "failed":
+                if participant.status not in {
+                    "failed",
+                    "kicked",
+                    "stopped",
+                }:
                     participant.status = "completed"
             task.status = (
                 "completed_with_errors"
@@ -632,6 +760,8 @@ def run_peer_task(
                 task_id=task.id,
                 status=task.status,
                 stable_rounds=STABLE_COMPLETION_ROUNDS,
+                project_id=task.project_id,
+                room_id=task.room_id,
             )
             return task
 
@@ -646,6 +776,8 @@ def run_peer_task(
         events.emit(
             "multi_agent.round.completed",
             task_id=task.id,
+            project_id=task.project_id,
+            room_id=task.room_id,
             round=round_number,
             all_final=current_all_final,
             stable=(
@@ -653,6 +785,7 @@ def run_peer_task(
                 and previous_all_final
             ),
         )
+        round_number += 1
 
     task.status = "round_limit"
     task.completed_at = datetime.now(timezone.utc)
