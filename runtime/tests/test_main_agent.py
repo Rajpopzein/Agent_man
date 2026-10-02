@@ -2435,3 +2435,94 @@ def test_worker_does_not_flag_same_tool_when_result_changes(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
+
+
+
+def test_empty_workspace_redirects_worker_to_bootstrap(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    replies = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "list_files",
+            "args": {"path": "."},
+            "progress": "Inspecting the project workspace.",
+            "next_step": "Identify the files to change.",
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_file",
+            "args": {"path": "README.md"},
+            "progress": "Reading the README.",
+            "next_step": "Understand the project.",
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "write_file",
+            "args": {
+                "path": "main.py",
+                "content": "print('bootstrapped')\n",
+            },
+            "progress": "Bootstrapping the empty project.",
+            "next_step": "Verify the created file.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Created the initial project file.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Created and verified the initial project file.",
+        }),
+    ])
+    executed = []
+
+    def fake_tools_execute(**kwargs):
+        executed.append((kwargs["name"], kwargs["arguments"]))
+        if kwargs["name"] == "list_files":
+            return []
+        if kwargs["name"] == "write_file":
+            return {
+                "path": kwargs["arguments"]["path"],
+                "bytes_written": 24,
+            }
+        raise AssertionError(
+            "Empty-workspace guard should block " + kwargs["name"]
+        )
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: next(replies),
+    )
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        fake_tools_execute,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Build a small Python application from scratch."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert [name for name, _args in executed] == [
+        "list_files",
+        "write_file",
+    ]
+    assert any(
+        step.get("type") == "workspace_guard"
+        and step.get("status") == "empty_workspace"
+        for step in body["steps"]
+    )
+
+
+def test_worker_prompt_does_not_assume_readme_exists():
+    from app.agents.executor import SYSTEM_PROMPT
+
+    assert '"tool":"list_files"' in SYSTEM_PROMPT
+    assert "Never assume README.md" in SYSTEM_PROMPT
+    assert "workspace is empty" in SYSTEM_PROMPT
