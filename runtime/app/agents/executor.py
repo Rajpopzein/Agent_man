@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any, Callable
 
 from app.agents.runner import run_messages
@@ -15,7 +16,17 @@ from app.tools.intelligence import recovery_guidance
 from app.tools.registry import catalog_for_prompt, tools
 from app.tools.service import allowed_tool_names
 
-MAX_TURNS = 30
+def _worker_turn_budget() -> int:
+    try:
+        configured = int(
+            os.getenv("AGENT_MAN_WORKER_MAX_TURNS", "60")
+        )
+    except ValueError:
+        configured = 60
+    return max(20, min(configured, 120))
+
+
+MAX_TURNS = _worker_turn_budget()
 
 VALIDATION_ROLES = ("tester", "test", "qa", "validator", "validation")
 
@@ -184,6 +195,7 @@ def execute_agent(
     allow_hardware: bool = False,
     progress: Callable[[dict[str, Any]], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    continuation_on_turn_limit: bool = False,
 ) -> dict[str, Any]:
     approvals: set[str] = set()
     if allow_terminal:
@@ -713,6 +725,43 @@ def execute_agent(
                 ),
             }
         )
+
+    if continuation_on_turn_limit:
+        _set_agent_state(
+            agent=agent,
+            db=db,
+            project_id=project.id,
+            state=_working_state(agent),
+            source="cycle_limit",
+        )
+        events.emit(
+            "agent.run.cycle_limit",
+            agent_id=agent.id,
+            project_id=project.id,
+            turns=MAX_TURNS,
+        )
+        _report_progress(
+            progress,
+            phase="continuing",
+            action="Continuing the task in a fresh execution cycle.",
+            detail=(
+                f"The worker completed {MAX_TURNS} turns in this cycle. "
+                "Agent Man will continue automatically."
+            ),
+            next_step=(
+                "Resume from the current workspace state without "
+                "repeating completed work."
+            ),
+            status="running",
+        )
+        return {
+            "text": (
+                f"Execution cycle reached {MAX_TURNS} turns and is ready "
+                "to continue."
+            ),
+            "steps": trace,
+            "status": "turn_limit",
+        }
 
     _set_agent_state(
         agent=agent,
