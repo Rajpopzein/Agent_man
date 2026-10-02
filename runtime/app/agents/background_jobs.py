@@ -641,6 +641,7 @@ class BackgroundJobSupervisor:
                     "waiting_approval",
                     "waiting_capability",
                     "turn_limit",
+                    "loop_detected",
                     "error",
                     "stopped",
                 }
@@ -683,9 +684,13 @@ class BackgroundJobSupervisor:
                             "Worker reached the bounded execution budget "
                             "before verified completion."
                             if terminal_status == "turn_limit"
-                            else "Worker stopped with status "
+                            else (
+                                "Worker stopped after repeated no-progress actions."
+                                if terminal_status == "loop_detected"
+                                else "Worker stopped with status "
                             + terminal_status
                             + "."
+                            )
                         )
                     )
                 ),
