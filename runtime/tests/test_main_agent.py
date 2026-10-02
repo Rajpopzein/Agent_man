@@ -2251,3 +2251,84 @@ def test_background_approval_endpoint_rejects_non_waiting_job(monkeypatch):
     assert response.status_code == 409
     assert "waiting for approval" in response.json()["detail"]
 
+
+
+
+def test_background_worker_continues_after_turn_limit(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append(kwargs["prompt"])
+        if len(calls) == 1:
+            return {
+                "status": "turn_limit",
+                "text": "Reached cycle limit.",
+                "steps": [{"turn": 30, "status": "ok"}],
+            }
+        return {
+            "status": "completed",
+            "text": "Feature completed and verified.",
+            "steps": [{"turn": 1, "status": "ok"}],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Build the requested feature.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "completed"
+    assert finished["step_count"] == 2
+    assert len(calls) == 2
+    assert calls[0] == "Build the requested feature."
+    assert "CONTINUATION CYCLE" in calls[1]
+    assert "do not restart completed work" in calls[1]
+
+
+def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
+    from app.agents.background_jobs import (
+        MAX_EXECUTION_CYCLES,
+        background_jobs,
+    )
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append(kwargs["prompt"])
+        return {
+            "status": "turn_limit",
+            "text": "Still incomplete.",
+            "steps": [{"turn": 30, "status": "ok"}],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Complete a very large task.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "turn_limit"
+    assert len(calls) == MAX_EXECUTION_CYCLES
+    assert finished["step_count"] == MAX_EXECUTION_CYCLES
