@@ -20,6 +20,7 @@ from app.providers.connections import bind_agent_connection
 
 
 ACTIVE_STATUSES = {"queued", "running", "stopping", "waiting_approval", "waiting_capability"}
+MAX_EXECUTION_CYCLES = 3
 
 
 def _now() -> str:
@@ -507,18 +508,92 @@ class BackgroundJobSupervisor:
                     raise ValueError("Worker agent not found")
 
                 bind_agent_connection(agent, db)
-                result = execute_agent(
-                    agent=agent,
-                    project=project,
-                    prompt=task,
-                    db=db,
-                    allow_terminal=allow_terminal,
-                    allow_delete=allow_delete,
-                    allow_network=allow_network,
-                    allow_hardware=allow_hardware,
-                    progress=self._progress_callback(job_id),
-                    should_stop=lambda: self.stop_requested(job_id),
-                )
+                cycle_prompt = task
+                result = {
+                    "status": "turn_limit",
+                    "text": "",
+                    "steps": [],
+                }
+                accumulated_steps: list[dict[str, object]] = []
+
+                for cycle_number in range(1, MAX_EXECUTION_CYCLES + 1):
+                    result = execute_agent(
+                        agent=agent,
+                        project=project,
+                        prompt=cycle_prompt,
+                        db=db,
+                        allow_terminal=allow_terminal,
+                        allow_delete=allow_delete,
+                        allow_network=allow_network,
+                        allow_hardware=allow_hardware,
+                        progress=self._progress_callback(job_id),
+                        should_stop=lambda: self.stop_requested(job_id),
+                    )
+                    accumulated_steps.extend(
+                        list(result.get("steps", []))
+                    )
+
+                    if str(result.get("status", "")) != "turn_limit":
+                        break
+                    if cycle_number >= MAX_EXECUTION_CYCLES:
+                        break
+                    if self.stop_requested(job_id):
+                        break
+
+                    continuation_number = cycle_number + 1
+                    updated = self._update(
+                        job_id,
+                        status="running",
+                        completed_at=None,
+                        result_text="",
+                        step_count=len(accumulated_steps),
+                        current_phase="continuing",
+                        current_action=(
+                            "Worker reached the per-cycle turn limit. "
+                            "Continuing the same task automatically."
+                        ),
+                        current_detail=(
+                            "Execution cycle "
+                            + str(continuation_number)
+                            + " of "
+                            + str(MAX_EXECUTION_CYCLES)
+                        ),
+                        current_next_step=(
+                            "Inspect the existing workspace state and continue "
+                            "from the work already completed."
+                        ),
+                    )
+                    events.emit(
+                        "background_job.continued",
+                        project_id=project_id,
+                        job_id=job_id,
+                        agent_id=agent_id,
+                        agent_name=updated["agent_name"],
+                        agent_role=updated["agent_role"],
+                        room_id=updated.get("room_id"),
+                        status="running",
+                        cycle=continuation_number,
+                        current_phase="continuing",
+                        current_action=updated["current_action"],
+                        current_detail=updated["current_detail"],
+                        current_next_step=updated["current_next_step"],
+                        message=(
+                            str(updated["agent_name"])
+                            + " is continuing the task in a new execution cycle."
+                        ),
+                    )
+                    cycle_prompt = (
+                        task
+                        + "\n\nCONTINUATION CYCLE: The previous execution cycle "
+                        "reached its turn safety limit before verified completion. "
+                        "Continue the same objective from the current project "
+                        "workspace state. Inspect existing files and outputs first, "
+                        "do not restart completed work, and finish plus verify the "
+                        "remaining work."
+                    )
+
+                result = dict(result)
+                result["steps"] = accumulated_steps
 
             status = str(result.get("status", "completed"))
             if status == "stopped":
