@@ -1,4 +1,5 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+import json
 from datetime import datetime, timezone
 from threading import RLock
 from uuid import uuid4
@@ -20,11 +21,35 @@ from app.providers.connections import bind_agent_connection
 
 
 ACTIVE_STATUSES = {"queued", "running", "stopping", "waiting_approval", "waiting_capability"}
-MAX_EXECUTION_CYCLES = 3
+MAX_EXECUTION_CYCLES = 4
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _continuation_observations(
+    steps: list[dict[str, object]],
+) -> str:
+    rows: list[dict[str, object]] = []
+    for step in steps[-16:]:
+        row: dict[str, object] = {}
+        for key in ("turn", "type", "tool", "status"):
+            value = step.get(key)
+            if value not in (None, ""):
+                row[key] = value
+        arguments = step.get("arguments")
+        if isinstance(arguments, dict):
+            path = arguments.get("path")
+            if path:
+                row["path"] = str(path)[:500]
+        if row:
+            rows.append(row)
+    return json.dumps(
+        rows,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )[-6000:]
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -528,6 +553,7 @@ class BackgroundJobSupervisor:
                         allow_hardware=allow_hardware,
                         progress=self._progress_callback(job_id),
                         should_stop=lambda: self.stop_requested(job_id),
+                        continuation_on_turn_limit=True,
                     )
                     accumulated_steps.extend(
                         list(result.get("steps", []))
@@ -582,14 +608,23 @@ class BackgroundJobSupervisor:
                             + " is continuing the task in a new execution cycle."
                         ),
                     )
+                    observations = _continuation_observations(
+                        accumulated_steps
+                    )
                     cycle_prompt = (
                         task
                         + "\n\nCONTINUATION CYCLE: The previous execution cycle "
-                        "reached its turn safety limit before verified completion. "
+                        "reached its bounded turn budget before verified completion. "
                         "Continue the same objective from the current project "
                         "workspace state. Inspect existing files and outputs first, "
                         "do not restart completed work, and finish plus verify the "
                         "remaining work."
+                        + (
+                            "\nRecent observable actions from earlier cycles: "
+                            + observations
+                            if observations
+                            else ""
+                        )
                     )
 
                 result = dict(result)
@@ -644,9 +679,14 @@ class BackgroundJobSupervisor:
                         + "."
                         if terminal_status == "waiting_approval"
                         and approval_tool
-                        else "Worker stopped with status "
-                        + terminal_status
-                        + "."
+                        else (
+                            "Worker reached the bounded execution budget "
+                            "before verified completion."
+                            if terminal_status == "turn_limit"
+                            else "Worker stopped with status "
+                            + terminal_status
+                            + "."
+                        )
                     )
                 ),
                 current_tool=(

@@ -2262,7 +2262,7 @@ def test_background_worker_continues_after_turn_limit(monkeypatch):
     calls = []
 
     def fake_execute_agent(**kwargs):
-        calls.append(kwargs["prompt"])
+        calls.append(kwargs)
         if len(calls) == 1:
             return {
                 "status": "turn_limit",
@@ -2292,9 +2292,11 @@ def test_background_worker_continues_after_turn_limit(monkeypatch):
     assert finished["status"] == "completed"
     assert finished["step_count"] == 2
     assert len(calls) == 2
-    assert calls[0] == "Build the requested feature."
-    assert "CONTINUATION CYCLE" in calls[1]
-    assert "do not restart completed work" in calls[1]
+    assert calls[0]["prompt"] == "Build the requested feature."
+    assert calls[0]["continuation_on_turn_limit"] is True
+    assert "CONTINUATION CYCLE" in calls[1]["prompt"]
+    assert "do not restart completed work" in calls[1]["prompt"]
+    assert "Recent observable actions" in calls[1]["prompt"]
 
 
 def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
@@ -2308,7 +2310,7 @@ def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
     calls = []
 
     def fake_execute_agent(**kwargs):
-        calls.append(kwargs["prompt"])
+        calls.append(kwargs)
         return {
             "status": "turn_limit",
             "text": "Still incomplete.",
@@ -2331,4 +2333,8 @@ def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
 
     assert finished["status"] == "turn_limit"
     assert len(calls) == MAX_EXECUTION_CYCLES
+    assert all(
+        call["continuation_on_turn_limit"] is True
+        for call in calls
+    )
     assert finished["step_count"] == MAX_EXECUTION_CYCLES
