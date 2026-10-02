@@ -152,8 +152,8 @@ Available tools:
 
 Return exactly one JSON object and no markdown.
 
-Use a tool:
-{{"type":"tool","tool":"read_file","args":{{"path":"README.md"}},"progress":"Reading the project overview before making changes.","next_step":"Identify the files that need to change."}}
+Start by inspecting the project when its file state is unknown:
+{{"type":"tool","tool":"list_files","args":{{"path":"."}},"progress":"Inspecting the project workspace before making assumptions.","next_step":"Use the actual workspace contents to decide whether to edit or bootstrap files."}}
 
 If you need a capability that is not currently usable, request it instead of
 stopping or saying you cannot do the task:
@@ -170,6 +170,14 @@ Rules:
   or long reasoning.
 - Do not stop just because the first approach failed. Inspect the error and try
   another safe approach when one is available.
+- Never assume README.md, package.json, pyproject.toml, src/, or any other file
+  exists before the workspace has shown it.
+- If list_files on "." returns an empty list, the workspace is empty. For a
+  build/create/implement task, bootstrap the minimum required project files
+  with write_file; parent directories are created automatically. Do not keep
+  trying read_file, edit_file, or search_files against imagined files.
+- If the task is only to inspect an existing project and the workspace is
+  empty, report that observable state instead of inventing project contents.
 - Do not say you lack internet/web access if an internet tool is available.
   Use it. If a required capability is missing, emit capability_request.
 - Do not declare completion until you have checked the requested result.
@@ -274,6 +282,7 @@ def execute_agent(
     active_correction: dict[str, Any] | None = None
     observation_history: list[tuple[str, str]] = []
     blocked_loop_signatures: set[str] = set()
+    workspace_empty: bool | None = None
 
     def stopped_result() -> dict[str, Any]:
         _set_agent_state(
@@ -559,6 +568,57 @@ def execute_agent(
             arguments = {}
 
         tool_signature = _tool_signature(tool_name, arguments)
+        requested_path = str(arguments.get("path", ".")).strip() or "."
+        if (
+            workspace_empty is True
+            and tool_name in {"read_file", "edit_file", "search_files"}
+        ):
+            guard_step = {
+                "turn": turn_number,
+                "type": "workspace_guard",
+                "status": "empty_workspace",
+                "tool": tool_name,
+                "arguments": arguments,
+                "reason": (
+                    "The project root was already observed to be empty, "
+                    "so this action cannot discover an existing file."
+                ),
+            }
+            trace.append(guard_step)
+            _report_progress(
+                progress,
+                phase="recovering",
+                action="Workspace is empty. Switching to project bootstrap.",
+                tool=tool_name,
+                detail=(
+                    "No project files exist yet. Do not read or edit "
+                    "imagined files."
+                ),
+                next_step=(
+                    "Create the minimum required files with write_file "
+                    "or finish by reporting that the workspace is empty."
+                ),
+                status="running",
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "EMPTY WORKSPACE GUARD: list_files on the project root "
+                        "already returned []. The requested existing-file action "
+                        "cannot succeed because no files exist. Do not assume "
+                        "README.md, package.json, src/, or other files exist. "
+                        "If the objective asks you to build, create, or implement "
+                        "something, bootstrap the minimum required files now with "
+                        "write_file. If the objective only asks you to inspect an "
+                        "existing project, return a verified final answer stating "
+                        "that the workspace is empty."
+                    ),
+                }
+            )
+            continue
+
         if blocked_loop_signatures:
             if tool_signature in blocked_loop_signatures:
                 loop_step = {
@@ -649,6 +709,10 @@ def execute_agent(
                 "status": "ok",
                 "result": result,
             }
+            if tool_name == "list_files" and requested_path in {".", ""}:
+                workspace_empty = isinstance(result, list) and len(result) == 0
+            elif tool_name == "write_file":
+                workspace_empty = False
             _report_progress(
                 progress,
                 phase="tool_result",
@@ -885,6 +949,18 @@ def execute_agent(
                         "observable failure and recovery tools. Do not keep "
                         "repeating an unchanged failing action."
                         if step["status"] == "error"
+                        else ""
+                    )
+                    + (
+                        "\nWORKSPACE STATE: EMPTY. No existing project files "
+                        "were found at the root. For a build/create/implement "
+                        "objective, create the minimum required files with "
+                        "write_file instead of reading imagined files."
+                        if (
+                            tool_name == "list_files"
+                            and requested_path in {".", ""}
+                            and workspace_empty is True
+                        )
                         else ""
                     )
                     + "\nContinue the original task. If this approach failed, "
