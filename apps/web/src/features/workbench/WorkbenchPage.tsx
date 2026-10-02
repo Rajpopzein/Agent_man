@@ -82,6 +82,7 @@ export default function WorkbenchPage({
   const [previewUrl, setPreviewUrl] = useState("");
   const uploadRef = useRef<HTMLInputElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<HTMLPreElement | null>(null);
 
   const dirty = selected?.type === "file" && content !== savedContent;
 
@@ -151,6 +152,12 @@ export default function WorkbenchPage({
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [chat.length]);
+
+  useEffect(() => {
+    const node = terminalRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [terminalOutput, selectedProcess]);
 
   useEffect(() => {
     if (!selectedProcess || !project) {
@@ -621,7 +628,7 @@ export default function WorkbenchPage({
               ))}
             </select>
           </div>
-          <pre>
+          <pre ref={terminalRef}>
             {selectedProcess
               ? terminalOutput || "No output yet."
               : "Start a project process through Agent Man to inspect its output here."}
