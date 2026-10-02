@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/*.exe
