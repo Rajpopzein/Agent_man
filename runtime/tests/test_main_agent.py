@@ -2338,3 +2338,100 @@ def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
         for call in calls
     )
     assert finished["step_count"] == MAX_EXECUTION_CYCLES
+
+
+
+def test_worker_breaks_repeated_identical_tool_loop(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    tool_calls = []
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: json.dumps({
+            "type": "tool",
+            "tool": "read_file",
+            "args": {"path": "README.md"},
+            "progress": "Checking the same file.",
+            "next_step": "Check it again.",
+        }),
+    )
+
+    def fake_execute(**kwargs):
+        tool_calls.append((kwargs["name"], kwargs["arguments"]))
+        return {"content": "unchanged"}
+
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        fake_execute,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Inspect README and finish the task."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "loop_detected"
+    assert len(tool_calls) == 3
+    assert any(
+        step.get("type") == "loop_guard"
+        and step.get("status") == "replanning"
+        for step in body["steps"]
+    )
+    assert body["steps"][-1]["status"] == "loop_detected"
+
+
+def test_worker_does_not_flag_same_tool_when_result_changes(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    replies = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Process output changed and the task is complete.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Process output changed and the task is complete.",
+        }),
+    ])
+    outputs = iter([
+        {"output": "step 1"},
+        {"output": "step 2"},
+        {"output": "step 3"},
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: next(replies),
+    )
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        lambda **kwargs: next(outputs),
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Follow the process until it finishes."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"

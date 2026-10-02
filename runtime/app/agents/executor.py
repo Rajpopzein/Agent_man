@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from typing import Any, Callable
@@ -27,8 +28,49 @@ def _worker_turn_budget() -> int:
 
 
 MAX_TURNS = _worker_turn_budget()
+NO_PROGRESS_REPEAT_LIMIT = 3
+NO_PROGRESS_CYCLE_LIMIT = 3
 
 VALIDATION_ROLES = ("tester", "test", "qa", "validator", "validation")
+
+
+def _stable_fingerprint(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        default=str,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _tool_signature(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> str:
+    return tool_name + ":" + _stable_fingerprint(arguments)
+
+
+def _repeated_no_progress_cycle(
+    history: list[tuple[str, str]],
+) -> set[str]:
+    if len(history) >= NO_PROGRESS_REPEAT_LIMIT:
+        tail = history[-NO_PROGRESS_REPEAT_LIMIT:]
+        if len(set(tail)) == 1:
+            return {tail[0][0]}
+
+    cycle_size = 2
+    required = cycle_size * NO_PROGRESS_CYCLE_LIMIT
+    if len(history) >= required:
+        tail = history[-required:]
+        pattern = tail[:cycle_size]
+        if all(
+            tail[index:index + cycle_size] == pattern
+            for index in range(0, required, cycle_size)
+        ):
+            return {signature for signature, _result in pattern}
+    return set()
 
 
 def _working_state(agent) -> str:
@@ -230,6 +272,8 @@ def execute_agent(
     verification_pending = False
     correction_count = 0
     active_correction: dict[str, Any] | None = None
+    observation_history: list[tuple[str, str]] = []
+    blocked_loop_signatures: set[str] = set()
 
     def stopped_result() -> dict[str, Any]:
         _set_agent_state(
@@ -514,6 +558,62 @@ def execute_agent(
         if not isinstance(arguments, dict):
             arguments = {}
 
+        tool_signature = _tool_signature(tool_name, arguments)
+        if blocked_loop_signatures:
+            if tool_signature in blocked_loop_signatures:
+                loop_step = {
+                    "turn": turn_number,
+                    "type": "loop_guard",
+                    "status": "loop_detected",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "reason": (
+                        "The same no-progress action was proposed again "
+                        "after a forced re-plan."
+                    ),
+                }
+                trace.append(loop_step)
+                _set_agent_state(
+                    agent=agent,
+                    db=db,
+                    project_id=project.id,
+                    state="attention",
+                    source="loop_guard",
+                )
+                events.emit(
+                    "agent.loop_detected",
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                    project_id=project.id,
+                    tool=tool_name,
+                    status="loop_detected",
+                )
+                _report_progress(
+                    progress,
+                    phase="attention",
+                    action="Repeated no-progress loop detected.",
+                    tool=tool_name,
+                    detail=(
+                        "The worker repeated the same action after "
+                        "Agent Man asked it to change approach."
+                    ),
+                    next_step=(
+                        "Review the blocked action or give the worker "
+                        "a narrower instruction."
+                    ),
+                    status="loop_detected",
+                )
+                return {
+                    "text": (
+                        f"{agent.name} was stopped because it repeated "
+                        f"{tool_name} without producing new observable progress."
+                    ),
+                    "steps": trace,
+                    "status": "loop_detected",
+                }
+            blocked_loop_signatures.clear()
+            observation_history.clear()
+
         _report_progress(
             progress,
             phase="tool",
@@ -639,6 +739,73 @@ def execute_agent(
             }
 
         trace.append(step)
+
+        result_fingerprint = _stable_fingerprint({
+            "status": step.get("status"),
+            "result": step.get("result"),
+            "error": step.get("error"),
+        })
+        observation_history.append(
+            (tool_signature, result_fingerprint)
+        )
+        observation_history = observation_history[-8:]
+        repeated_signatures = _repeated_no_progress_cycle(
+            observation_history
+        )
+        if repeated_signatures:
+            blocked_loop_signatures = set(repeated_signatures)
+            loop_step = {
+                "turn": turn_number,
+                "type": "loop_guard",
+                "status": "replanning",
+                "tool": tool_name,
+                "repeat_count": len(observation_history),
+                "blocked_signatures": sorted(
+                    blocked_loop_signatures
+                ),
+            }
+            trace.append(loop_step)
+            events.emit(
+                "agent.loop_detected",
+                agent_id=agent.id,
+                agent_name=agent.name,
+                project_id=project.id,
+                tool=tool_name,
+                status="replanning",
+            )
+            _report_progress(
+                progress,
+                phase="recovering",
+                action=(
+                    "Repeated action produced no new result. "
+                    "Forcing a different approach."
+                ),
+                tool=tool_name,
+                detail=(
+                    "Agent Man detected repeated identical observable "
+                    "results and blocked that loop for the next turn."
+                ),
+                next_step=(
+                    "Choose a materially different tool, arguments, "
+                    "or completion path."
+                ),
+                status="running",
+            )
+            messages.append({"role": "assistant", "content": raw})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "LOOP GUARD: You repeated the same action pattern "
+                        "without any observable change. Do not call the blocked "
+                        "tool with the same arguments again. Choose a materially "
+                        "different action, inspect a different source of evidence, "
+                        "change the implementation, or return a verified final "
+                        "answer if the objective is already complete."
+                    ),
+                }
+            )
+            continue
 
         if step["status"] == "error":
             _report_progress(
