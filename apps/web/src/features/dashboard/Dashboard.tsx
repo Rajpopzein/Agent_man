@@ -46,6 +46,7 @@ import CommandConsole, {
 import JarvisCore, {
   JarvisOrbState,
 } from "./JarvisCore";
+import JarvisPage from "./JarvisPage";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import MeetingRoomsPage from "../agents/MeetingRoomsPage";
 import BackgroundPage from "../agents/BackgroundPage";
@@ -79,6 +80,7 @@ import {
 
 type View =
   | "background"
+  | "jarvis"
   | "dashboard"
   | "workbench"
   | "orchestration"
@@ -402,15 +404,20 @@ const VIEW_META: Record<
   View,
   { label: string; eyebrow: string; description: string }
 > = {
+  jarvis: {
+    label: "JARVIS",
+    eyebrow: "ASSISTANT / DIRECT ACCESS",
+    description: "Your personal AI assistant. Speak, send commands, and follow live missions.",
+  },
   background: {
     label: "Background Activity",
     eyebrow: "WORKSPACE / BACKGROUND",
     description: "Monitor agent jobs, running processes, and output.",
   },
   dashboard: {
-    label: "JARVIS",
-    eyebrow: "JARVIS / COMMAND CENTER",
-    description: "Talk to JARVIS directly and watch its live AI state, agents, tools, and missions.",
+    label: "Overview",
+    eyebrow: "WORKSPACE / OVERVIEW",
+    description: "Monitor agents, tasks, tools and runtime activity.",
   },
   workbench: {
     label: "Workbench",
@@ -467,7 +474,7 @@ const AGENT_CONTEXT_TEMPLATES = {
 } as const;
 
 export default function Dashboard() {
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>("jarvis");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -478,6 +485,9 @@ export default function Dashboard() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [prompt, setPrompt] = useState("");
   const [lastDirective, setLastDirective] = useState("");
+  const [jarvisHistory, setJarvisHistory] = useState<
+    { id: string; command: string; response: string; status: string }[]
+  >([]);
   const [run, setRun] = useState<MainAgentReply | null>(null);
   const [liveResponses, setLiveResponses] = useState<LiveResponse[]>([]);
   const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
@@ -740,7 +750,7 @@ export default function Dashboard() {
           ". Approve it to continue the same background task.";
 
         setConsoleOpen(true);
-        setView("dashboard");
+        setView("jarvis");
         setNotice({
           title: "Agent Man needs your approval",
           message,
@@ -1357,7 +1367,7 @@ export default function Dashboard() {
       return;
     }
 
-    setView("dashboard");
+    setView("jarvis");
     setLastDirective(command);
     setPrompt("");
     voice.stop();
@@ -1382,17 +1392,33 @@ export default function Dashboard() {
       );
       setRun(result);
     } catch (error) {
-      setRun({
+      result = {
         status: "error",
         text: error instanceof Error ? error.message : String(error),
         steps: [],
-      });
+      };
+      setRun(result);
     } finally {
       await refreshWorkers(project.id);
       await refreshServerLogs(project.id);
       setLiveModelCalls([]);
       setBusy(false);
       setProcessingStartedAt(null);
+    }
+
+    if (result) {
+      const finalResult = result;
+      setJarvisHistory((current) =>
+        [
+          ...current,
+          {
+            id: String(Date.now()) + ":" + current.length,
+            command,
+            response: finalResult.text,
+            status: finalResult.status,
+          },
+        ].slice(-12),
+      );
     }
 
     if (
@@ -1756,8 +1782,8 @@ export default function Dashboard() {
       <aside className="commandRail">
         <button
           className="coreMark"
-          onClick={() => setView("dashboard")}
-          title="Agent Man"
+          onClick={() => setView("jarvis")}
+          title="JARVIS"
         >
           <span className="coreMarkRing">
             <Sparkles size={18} />
@@ -1770,16 +1796,22 @@ export default function Dashboard() {
 
         <nav className="railNav">
           <RailButton
+            active={view === "jarvis"}
+            label="JARVIS"
+            icon={<Sparkles />}
+            onClick={() => setView("jarvis")}
+          />
+          <RailButton
+            active={view === "dashboard"}
+            label="Overview"
+            icon={<Home />}
+            onClick={() => setView("dashboard")}
+          />
+          <RailButton
             active={view === "background"}
             label="Background"
             icon={<Activity />}
             onClick={() => setView("background")}
-          />
-          <RailButton
-            active={view === "dashboard"}
-            label="JARVIS"
-            icon={<Home />}
-            onClick={() => setView("dashboard")}
           />
           <RailButton
             active={view === "workbench"}
@@ -1995,8 +2027,34 @@ export default function Dashboard() {
             project={project}
             agents={agents}
           />
-        ) : (
-          <div className="commandDeck">
+        ) : view === "jarvis" ? (
+          <JarvisPage
+            online={online}
+            streamConnected={streamConnected}
+            configured={Boolean(mainConfig)}
+            hasProject={Boolean(project)}
+            workerCount={agents.length}
+            activeJobCount={activeBackgroundJobs.length}
+            recentJobs={backgroundJobs.slice(0, 5).map((job) => ({
+              id: job.id,
+              agent: job.agent_name,
+              status: job.status,
+              action: job.current_action || job.task,
+            }))}
+            activity={liveActivities.slice(-6).reverse().map((entry) => ({
+              id: entry.id,
+              actor: entry.agentName,
+              phase: entry.phase,
+              text: entry.message || entry.label,
+              status: entry.status,
+            }))}
+            history={jarvisHistory}
+            onOverview={() => setView("dashboard")}
+            onWorkbench={() => setView("workbench")}
+            onLogs={() => setView("logs")}
+            onSettings={() => setView("settings")}
+            onCreateProject={openProjectDialog}
+          >
             <JarvisCore
               state={jarvisOrbState}
               stateLabel={jarvisStateLabel}
@@ -2023,8 +2081,10 @@ export default function Dashboard() {
               onListen={() => void wake.listenNow()}
               onOpenConsole={() => setConsoleOpen(true)}
             />
-
-            <section className="telemetryStrip jarvisTelemetry">
+          </JarvisPage>
+        ) : (
+          <div className="commandDeck">
+            <section className="telemetryStrip">
               <Telemetry
                 icon={<Bot />}
                 label="Workers"

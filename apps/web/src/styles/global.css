@@ -3067,3 +3067,52 @@ input,textarea,select{font-size:13px}
 @media(prefers-reduced-motion:reduce){
   .jarvisPackageHalo,.jarvisPackageCanvas{transition:none}
 }
+
+
+/* Dedicated JARVIS assistant page */
+.jarvisPage{display:grid;gap:14px;align-content:start}
+.jarvisPageIntro{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}
+.jarvisPageIntro h2{font-size:clamp(20px,2.4vw,32px);letter-spacing:-.4px;font-weight:500;margin:5px 0 7px;color:#e2f7ff}
+.jarvisPageIntro p{color:#7898a5;font-size:11px;line-height:1.65;margin:0}
+.jarvisPageLive{display:grid;grid-template-columns:7px auto;gap:5px 8px;align-items:center;font:8px var(--mono);letter-spacing:1px;color:#8ab9c9;white-space:nowrap}
+.jarvisPageLive>span{width:7px;height:7px;border-radius:50%;background:#f46b75}
+.jarvisPageLive>span.connected{background:#4fffc3;box-shadow:0 0 12px #4fffc3}
+.jarvisPageLive small{grid-column:2;font:7px var(--mono);color:#608493;letter-spacing:.7px}
+.jarvisSetupPrompt{display:flex;justify-content:space-between;gap:15px;align-items:center;border:1px solid rgba(255,209,102,.27);background:rgba(73,51,11,.14);padding:11px 14px;color:#edc980;font-size:11px}
+.jarvisSetupPrompt button{flex-shrink:0;background:rgba(129,86,8,.25);border:1px solid rgba(255,209,102,.35);color:#f3cd7f;padding:8px 12px;font:9px var(--mono);cursor:pointer}
+.jarvisPageCore .jarvisCore{margin-bottom:0}
+.jarvisPageMetrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.jarvisPageMetrics>div,.jarvisPageMetrics>button{display:flex;align-items:center;gap:9px;min-height:52px;text-align:left;background:rgba(3,19,28,.8);border:1px solid rgba(99,230,255,.13);padding:11px;color:#7db1c1;font:9px var(--mono)}
+.jarvisPageMetrics svg{flex-shrink:0;color:#54cde6}
+.jarvisPageMetrics strong{margin-left:auto;color:#c4ecf4;font-weight:500;display:flex;align-items:center;gap:3px}
+.jarvisPageMetrics button{cursor:pointer}
+.jarvisPageMetrics button:hover{border-color:rgba(99,230,255,.5);color:#e3faff}
+.jarvisPageDetails{display:grid;grid-template-columns:1.1fr 1fr;gap:14px;min-width:0}
+.jarvisPagePanel{display:flex;flex-direction:column;min-width:0;background:rgba(2,14,22,.82);border:1px solid rgba(99,230,255,.13);min-height:240px}
+.jarvisPagePanelHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px;border-bottom:1px solid rgba(99,230,255,.1)}
+.jarvisPagePanelHeader>div{display:flex;align-items:center;gap:9px;color:#60d5ee}
+.jarvisPagePanelHeader h3{margin:0;font-size:12px;color:#b8e3ec;font-weight:500}
+.jarvisPagePanelHeader small{font:8px var(--mono);letter-spacing:.6px;color:#678c9a}
+.jarvisConversation,.jarvisMissionList{display:grid;align-content:start;gap:10px;overflow:auto;max-height:360px;padding:14px;flex:1}
+.jarvisNoData{margin:auto;max-width:300px;text-align:center;color:#608390;font-size:10px;line-height:1.6}
+.jarvisExchange{display:grid;gap:7px}
+.jarvisMessage{padding:10px 12px;border:1px solid rgba(99,230,255,.12);background:rgba(8,33,43,.62)}
+.jarvisMessage.user{background:rgba(13,56,49,.2);border-color:rgba(79,255,195,.16)}
+.jarvisMessage>div{display:flex;align-items:center;justify-content:space-between}
+.jarvisMessage small{font:8px var(--mono);letter-spacing:.8px;color:#5fcddf}
+.jarvisMessage.user small{color:#4fffc3}
+.jarvisMessage em{font:8px var(--mono);font-style:normal;color:#7896a3;text-transform:uppercase}
+.jarvisMessage p{margin:6px 0 0;font-size:11px;color:#b2d4e0;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.jarvisMissionRow{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:8px;align-items:start;border-bottom:1px solid rgba(99,230,255,.07);padding:7px 0;color:#548fa0}
+.jarvisMissionRow:last-child{border-bottom:0}
+.jarvisMissionRow .jarvisMissionDot{width:7px;height:7px;margin-top:5px;border-radius:50%;background:#5797a7}
+.jarvisMissionDot.status-running,.jarvisMissionDot.status-working{background:#4fffc3;box-shadow:0 0 9px rgba(79,255,195,.4)}
+.jarvisMissionDot.status-error{background:#ff6474}
+.jarvisMissionRow strong{font-size:10px;font-weight:500;color:#aed7e2}
+.jarvisMissionRow p{margin:4px 0 0;font-size:9px;color:#7699a7;line-height:1.45;overflow-wrap:anywhere}
+.jarvisMissionRow small{font:8px var(--mono);color:#638393;white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.jarvisPageShortcuts{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;border-top:1px solid rgba(99,230,255,.08)}
+.jarvisPageShortcuts button{display:flex;align-items:center;gap:6px;background:rgba(8,35,48,.56);border:1px solid rgba(99,230,255,.16);color:#86bfd0;padding:8px 10px;font:9px var(--mono);cursor:pointer}
+.jarvisPageShortcuts button:hover{border-color:rgba(99,230,255,.5);color:#ddfaff}
+@media(max-width:1000px){.jarvisPageDetails{grid-template-columns:1fr}}
+@media(max-width:760px){.jarvisPageIntro{align-items:flex-start;flex-direction:column}.jarvisPageMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.jarvisSetupPrompt{flex-wrap:wrap}}
