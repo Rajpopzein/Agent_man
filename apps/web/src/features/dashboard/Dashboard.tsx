@@ -43,6 +43,9 @@ import HudModal from "../../components/HudModal";
 import CommandConsole, {
   CommandConsoleLine,
 } from "./CommandConsole";
+import JarvisCore, {
+  JarvisOrbState,
+} from "./JarvisCore";
 import MultiAgentWorkspace from "../agents/MultiAgentWorkspace";
 import MeetingRoomsPage from "../agents/MeetingRoomsPage";
 import BackgroundPage from "../agents/BackgroundPage";
@@ -405,9 +408,9 @@ const VIEW_META: Record<
     description: "Monitor agent jobs, running processes, and output.",
   },
   dashboard: {
-    label: "Overview",
-    eyebrow: "WORKSPACE / OVERVIEW",
-    description: "Monitor agents, tasks, tools, and runtime activity from one place.",
+    label: "JARVIS",
+    eyebrow: "JARVIS / COMMAND CENTER",
+    description: "Talk to JARVIS directly and watch its live AI state, agents, tools, and missions.",
   },
   workbench: {
     label: "Workbench",
@@ -1662,6 +1665,60 @@ export default function Dashboard() {
         liveActivities.length,
     );
 
+  const jarvisOrbState: JarvisOrbState =
+    !online
+      ? "offline"
+      : run?.status === "error" || wake.state === "error"
+        ? "error"
+        : waitingApprovalJob
+          ? "warning"
+          : voice.speaking
+            ? "speaking"
+            : wake.state === "listening" || wake.state === "waking"
+              ? "listening"
+              : activeBackgroundJob || activeWorker
+                ? "working"
+                : busy
+                  ? "thinking"
+                  : run?.status === "completed"
+                    ? "success"
+                    : "idle";
+
+  const jarvisStateLabel =
+    jarvisOrbState === "offline"
+      ? "OFFLINE"
+      : jarvisOrbState === "idle"
+        ? "READY"
+        : jarvisOrbState === "listening"
+          ? "LISTENING"
+          : jarvisOrbState === "thinking"
+            ? "THINKING"
+            : jarvisOrbState === "working"
+              ? "WORKING"
+              : jarvisOrbState === "speaking"
+                ? "SPEAKING"
+                : jarvisOrbState === "success"
+                  ? "COMPLETE"
+                  : jarvisOrbState === "warning"
+                    ? "ATTENTION"
+                    : "ERROR";
+
+  const jarvisResponseText =
+    liveOutputText ||
+    run?.text ||
+    (activeBackgroundJob
+      ? activeBackgroundJob.current_action ||
+        activeBackgroundJob.task
+      : "");
+
+  const jarvisCurrentAction =
+    activeBackgroundJob?.current_action ||
+    activeWorkerMessage ||
+    (busy ? "JARVIS is processing your request." : "");
+
+  const jarvisCurrentTool =
+    activeBackgroundJob?.current_tool || "";
+
   const serverLogRows = [
     ...[...liveModelCalls]
       .reverse()
@@ -1720,7 +1777,7 @@ export default function Dashboard() {
           />
           <RailButton
             active={view === "dashboard"}
-            label="Overview"
+            label="JARVIS"
             icon={<Home />}
             onClick={() => setView("dashboard")}
           />
@@ -1806,7 +1863,7 @@ export default function Dashboard() {
               <span />
             </div>
             <div>
-              <small>AGENT MAN / LOCAL AGENT RUNTIME</small>
+              <small>JARVIS / AGENT MAN RUNTIME</small>
               <strong>{meta.label}</strong>
             </div>
           </div>
@@ -1940,7 +1997,34 @@ export default function Dashboard() {
           />
         ) : (
           <div className="commandDeck">
-            <section className="telemetryStrip">
+            <JarvisCore
+              state={jarvisOrbState}
+              stateLabel={jarvisStateLabel}
+              prompt={prompt}
+              busy={busy}
+              online={online}
+              processingSeconds={processingSeconds}
+              projectName={project?.name || ""}
+              workerName={
+                activeBackgroundJob?.agent_name ||
+                activeWorker?.name ||
+                ""
+              }
+              currentAction={jarvisCurrentAction}
+              currentTool={jarvisCurrentTool}
+              responseText={jarvisResponseText}
+              responseStatus={
+                streamActive
+                  ? liveOutputStatus
+                  : run?.status || "standby"
+              }
+              onPromptChange={setPrompt}
+              onSubmit={() => void runDirective(prompt)}
+              onListen={() => void wake.listenNow()}
+              onOpenConsole={() => setConsoleOpen(true)}
+            />
+
+            <section className="telemetryStrip jarvisTelemetry">
               <Telemetry
                 icon={<Bot />}
                 label="Workers"
