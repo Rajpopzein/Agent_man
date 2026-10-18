@@ -178,6 +178,10 @@ Rules:
   trying read_file, edit_file, or search_files against imagined files.
 - If the task is only to inspect an existing project and the workspace is
   empty, report that observable state instead of inventing project contents.
+- For Android or ADB work, use adb_status, adb_install, and adb_devices.
+  Never install ADB through winget, Chocolatey, apt, MSI installers, registry
+  changes, PATH changes, or administrator elevation. Agent Man's ADB tools
+  use a portable per-user install and adb_devices bootstraps it automatically.
 - Do not say you lack internet/web access if an internet tool is available.
   Use it. If a required capability is missing, emit capability_request.
 - Do not declare completion until you have checked the requested result.
@@ -256,6 +260,7 @@ def execute_agent(
         approvals.add(Permission.NETWORK_ACCESS.value)
     if allow_hardware:
         approvals.add(Permission.SERIAL_ACCESS.value)
+        approvals.add(Permission.ANDROID_ACCESS.value)
 
     allowed_names = allowed_tool_names(db, agent.id)
     approvals.update(

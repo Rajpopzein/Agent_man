@@ -9,6 +9,7 @@ class Permission(StrEnum):
     LOCAL_PORTS = "local.ports"
     NETWORK_ACCESS = "network.internet"
     SERIAL_ACCESS = "hardware.serial"
+    ANDROID_ACCESS = "hardware.android"
     OUTSIDE_WORKSPACE = "filesystem.outside_workspace"
 
 
@@ -26,6 +27,7 @@ DEFAULT_POLICY: dict[Permission, Decision] = {
     Permission.LOCAL_PORTS: Decision.ALLOW,
     Permission.NETWORK_ACCESS: Decision.ASK,
     Permission.SERIAL_ACCESS: Decision.ASK,
+    Permission.ANDROID_ACCESS: Decision.ASK,
     Permission.OUTSIDE_WORKSPACE: Decision.BLOCK,
 }
 

@@ -121,6 +121,27 @@ RULES: tuple[IntentRule, ...] = (
         ),
     ),
     IntentRule(
+        intent="android_adb",
+        terms=(
+            "adb",
+            "android debug bridge",
+            "android device",
+            "android tablet",
+            "usb debugging",
+            "platform tools",
+            "platform-tools",
+        ),
+        sequence=(
+            "adb_status",
+            "adb_devices",
+        ),
+        reason=(
+            "The objective requires local Android Debug Bridge access. "
+            "Use Agent Man's portable ADB capability instead of a system "
+            "package manager or administrator-level installation."
+        ),
+    ),
+    IntentRule(
         intent="serial_hardware",
         terms=(
             "esp32",
@@ -410,6 +431,20 @@ def _specialize_sequence(
             )
         return ("api_list_agents", "api_get_agent")
 
+    if intent == "android_adb":
+        if any(
+            term in lowered
+            for term in (
+                "install adb",
+                "install platform tools",
+                "install platform-tools",
+                "setup adb",
+                "set up adb",
+            )
+        ):
+            return ("adb_status", "adb_install", "adb_devices")
+        return ("adb_status", "adb_devices")
+
     if intent != "serial_hardware":
         return sequence
 
@@ -450,6 +485,7 @@ def _specialize_sequence(
 SAFE_PREFLIGHT_BY_INTENT: dict[str, str] = {
     "extension_management": "api_list_skills",
     "agent_management": "api_list_agents",
+    "android_adb": "adb_status",
     "serial_hardware": "list_serial_ports",
 }
 
