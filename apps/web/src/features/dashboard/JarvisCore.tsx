@@ -117,17 +117,18 @@ export default function JarvisCore({
           <span className="jarvisOrbHalo haloOne" />
           <span className="jarvisOrbHalo haloTwo" />
           <span className="jarvisOrbHalo haloThree" />
+          <span className="jarvisThoughtField" aria-hidden="true">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <span
+                className={"jarvisThoughtOrb thought-" + (index + 1)}
+                key={index}
+              >
+                <i />
+              </span>
+            ))}
+          </span>
           <span className="jarvisOrb">
             <span className="jarvisOrbSurface" />
-            <span className="jarvisOrbExpression">
-              <span className="jarvisExpressionEye leftEye" />
-              <span className="jarvisExpressionEye rightEye" />
-              <span className="jarvisExpressionPulse">
-                {Array.from({ length: 7 }).map((_, index) => (
-                  <i key={index} />
-                ))}
-              </span>
-            </span>
             <span className="jarvisOrbCore">
               {state === "listening" ? (
                 <Mic size={28} />
