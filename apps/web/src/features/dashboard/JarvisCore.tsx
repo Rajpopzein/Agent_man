@@ -1,10 +1,9 @@
 import { FormEvent } from "react";
+import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import {
-  Bot,
   Mic,
   Radio,
   Send,
-  Sparkles,
   TerminalSquare,
 } from "lucide-react";
 
@@ -61,6 +60,27 @@ function expressionCopy(state: JarvisOrbState) {
   }
 }
 
+function packageOrbState(
+  state: JarvisOrbState,
+  currentTool: string,
+  currentAction: string,
+): OrbState {
+  if (state === "listening") return "listening";
+  if (state === "thinking") return "solving";
+  if (state === "speaking") return "composing";
+  if (state === "working") {
+    const activity = (currentTool + " " + currentAction).toLowerCase();
+    if (/\b(connecting|delegating|handoff)\b/.test(activity)) {
+      return "connecting";
+    }
+    if (/\b(search|searching|fetch|lookup|find|read_file|list_files|http_get)\b/.test(activity)) {
+      return "searching";
+    }
+    return "working";
+  }
+  return "breathing";
+}
+
 export default function JarvisCore({
   state,
   stateLabel,
@@ -114,30 +134,17 @@ export default function JarvisCore({
           aria-label="Talk to JARVIS"
           title="Talk to JARVIS"
         >
-          <span className="jarvisOrbHalo haloOne" />
-          <span className="jarvisOrbHalo haloTwo" />
-          <span className="jarvisOrbHalo haloThree" />
-          <span className="jarvisThoughtField" aria-hidden="true">
-            {Array.from({ length: 8 }).map((_, index) => (
-              <span
-                className={"jarvisThoughtOrb thought-" + (index + 1)}
-                key={index}
-              >
-                <i />
-              </span>
-            ))}
-          </span>
-          <span className="jarvisOrb">
-            <span className="jarvisOrbSurface" />
-            <span className="jarvisOrbCore">
-              {state === "listening" ? (
-                <Mic size={28} />
-              ) : state === "working" ? (
-                <Bot size={28} />
-              ) : (
-                <Sparkles size={28} />
-              )}
-            </span>
+          <span className="jarvisPackageHalo" aria-hidden="true" />
+          <span className="jarvisPackageOrb">
+            <ThinkingOrb
+              state={packageOrbState(state, currentTool, currentAction)}
+              size={64}
+              theme="dark"
+              speed={state === "thinking" ? 1.25 : state === "working" ? 1.1 : 1}
+              paused={["offline", "success", "warning", "error"].includes(state)}
+              aria-label={"JARVIS " + stateLabel.toLowerCase()}
+              className="jarvisPackageCanvas"
+            />
           </span>
         </button>
 

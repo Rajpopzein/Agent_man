@@ -2965,28 +2965,20 @@ input,textarea,select{font-size:13px}
 @media(max-width:1180px){.workbenchGrid{grid-template-columns:220px minmax(0,1fr)}.workbenchAgentPanel{grid-column:1/-1;min-height:380px}.workbenchBottomGrid{grid-template-columns:1fr}}@media(max-width:760px){.workbenchToolbar{align-items:flex-start;flex-direction:column}.workbenchGrid{grid-template-columns:1fr}.workbenchExplorer{min-height:300px}.workbenchEditor{min-height:500px}.workbenchAgentPanel{grid-column:auto}.workbenchBottomGrid{grid-template-columns:1fr}}
 
 
-/* JARVIS direct dashboard */
+/* JARVIS direct dashboard — animated core provided by thinking-orbs */
 .jarvisCore{
-  position:relative;
-  overflow:hidden;
+  position:relative;overflow:hidden;margin-bottom:14px;padding:18px 22px 20px;
   border:1px solid rgba(99,230,255,.16);
-  background:
-    radial-gradient(circle at 50% 42%,rgba(35,207,255,.08),transparent 31%),
+  background:radial-gradient(circle at 50% 41%,rgba(35,207,255,.08),transparent 32%),
     linear-gradient(180deg,rgba(3,18,27,.94),rgba(1,8,13,.98));
-  padding:18px 22px 20px;
-  min-height:560px;
-  margin-bottom:14px;
-  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
 }
 .jarvisCore:before{
-  content:"";
-  position:absolute;inset:0;
-  pointer-events:none;
-  background:
-    linear-gradient(rgba(99,230,255,.035) 1px,transparent 1px),
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(rgba(99,230,255,.035) 1px,transparent 1px),
     linear-gradient(90deg,rgba(99,230,255,.025) 1px,transparent 1px);
   background-size:42px 42px;
-  mask-image:radial-gradient(circle at 50% 45%,black,transparent 76%)
+  mask-image:radial-gradient(circle at 50% 45%,black,transparent 76%);
 }
 .jarvisCoreHeader{display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:2}
 .jarvisCoreEyebrow{font:8px var(--mono);letter-spacing:1.6px;color:#5c8a99}
@@ -2996,93 +2988,53 @@ input,textarea,select{font-size:13px}
 .jarvisRuntimeReadout>span.online{background:var(--teal);box-shadow:0 0 11px var(--teal)}
 .jarvisRuntimeReadout b{font:8px var(--mono);letter-spacing:1px;color:#91bdc8}
 .jarvisRuntimeReadout small{grid-column:1/-1;font:7px var(--mono);color:#4f7480;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.jarvisStage{position:relative;z-index:2;display:grid;grid-template-columns:minmax(150px,1fr) 350px minmax(150px,1fr);align-items:center;gap:24px;min-height:330px}
+.jarvisStage{position:relative;z-index:2;display:grid;grid-template-columns:minmax(150px,1fr) 310px minmax(150px,1fr);align-items:center;gap:24px;min-height:320px}
 .jarvisSideStatus{display:grid;gap:4px;max-width:240px}
-.jarvisSideStatus.left{justify-self:end;text-align:right}.jarvisSideStatus.right{justify-self:start}
+.jarvisSideStatus.left{justify-self:end;text-align:right}
+.jarvisSideStatus.right{justify-self:start}
 .jarvisSideStatus small{font:7px var(--mono);letter-spacing:1px;color:#4f7886}
 .jarvisSideStatus strong{font:11px var(--mono);letter-spacing:.8px;color:#bfeaf2}
 .jarvisSideStatus span{font-size:9px;line-height:1.45;color:#648c98}
-
 .jarvisOrbButton{
-  position:relative;width:350px;height:330px;border:0;background:transparent;
-  display:grid;place-items:center;cursor:pointer;justify-self:center;isolation:isolate
+  position:relative;isolation:isolate;justify-self:center;display:grid;place-items:center;
+  width:310px;height:310px;padding:0;border:0;border-radius:50%;
+  background:transparent;cursor:pointer;
 }
-.jarvisOrbButton:disabled{cursor:not-allowed;filter:grayscale(.65);opacity:.62}
-.jarvisOrbHalo{position:absolute;border-radius:50%;border:1px solid rgba(99,230,255,.16);pointer-events:none}
-.haloOne{width:312px;height:312px;animation:jarvisOrbit 18s linear infinite}
-.haloTwo{width:272px;height:272px;border-style:dashed;animation:jarvisOrbitReverse 14s linear infinite}
-.haloThree{width:230px;height:230px;border-color:rgba(99,230,255,.1);animation:jarvisBreath 3.6s ease-in-out infinite}
-
-.jarvisThoughtField{position:absolute;inset:0;z-index:3;pointer-events:none}
-.jarvisThoughtOrb{
-  --size:16px;
-  --x:50%;
-  --y:50%;
-  --delay:0s;
-  position:absolute;
-  left:var(--x);
-  top:var(--y);
-  width:var(--size);
-  height:var(--size);
-  border-radius:50%;
-  transform:translate(-50%,-50%);
-  background:
-    radial-gradient(circle at 34% 28%,rgba(229,253,255,.95) 0 8%,rgba(99,230,255,.72) 18%,rgba(19,93,116,.88) 56%,rgba(1,15,21,.98) 78%);
-  border:1px solid rgba(164,242,255,.35);
-  box-shadow:
-    inset -3px -4px 8px rgba(0,0,0,.5),
-    0 0 12px rgba(35,207,255,.24);
-  opacity:.35;
-  transition:
-    left .6s cubic-bezier(.2,.8,.2,1),
-    top .6s cubic-bezier(.2,.8,.2,1),
-    width .35s ease,
-    height .35s ease,
-    opacity .35s ease,
-    box-shadow .35s ease
+.jarvisOrbButton:disabled{cursor:not-allowed;opacity:.5}
+.jarvisPackageHalo{
+  position:absolute;width:250px;height:250px;border-radius:50%;pointer-events:none;
+  border:1px solid rgba(99,230,255,.14);
+  box-shadow:inset 0 0 48px rgba(35,207,255,.035),0 0 65px rgba(35,207,255,.055);
+  transition:border-color .3s ease,box-shadow .3s ease;
 }
-.jarvisThoughtOrb i{
-  position:absolute;inset:3px;border-radius:50%;
-  border:1px solid rgba(220,251,255,.12);
-  animation:jarvisThoughtPulse 2.4s ease-in-out infinite;
-  animation-delay:var(--delay)
+.jarvisPackageOrb{
+  position:relative;display:grid;place-items:center;width:236px;height:236px;
+  border-radius:50%;pointer-events:none;
 }
-.thought-1{--x:50%;--y:12%;--size:13px;--delay:.05s}
-.thought-2{--x:73%;--y:21%;--size:18px;--delay:.18s}
-.thought-3{--x:87%;--y:43%;--size:11px;--delay:.3s}
-.thought-4{--x:75%;--y:71%;--size:15px;--delay:.42s}
-.thought-5{--x:50%;--y:86%;--size:20px;--delay:.54s}
-.thought-6{--x:26%;--y:72%;--size:12px;--delay:.66s}
-.thought-7{--x:13%;--y:45%;--size:17px;--delay:.78s}
-.thought-8{--x:28%;--y:21%;--size:10px;--delay:.9s}
-
-.jarvisOrb{
-  position:relative;width:178px;height:178px;border-radius:50%;display:grid;place-items:center;z-index:4;
-  background:
-    radial-gradient(circle at 34% 28%,rgba(222,252,255,.96) 0 3%,rgba(94,222,255,.66) 8%,transparent 24%),
-    radial-gradient(circle at 48% 46%,rgba(22,155,196,.58),rgba(4,38,53,.97) 56%,rgba(0,8,13,.99) 74%);
-  box-shadow:
-    inset -24px -30px 52px rgba(0,0,0,.74),
-    inset 14px 10px 38px rgba(125,235,255,.17),
-    0 0 35px rgba(35,207,255,.2),
-    0 0 90px rgba(35,207,255,.08);
-  transition:.35s ease
+.jarvisPackageCanvas{
+  display:block;width:64px;height:64px;transform:scale(3);transform-origin:center;
 }
-.jarvisOrb:after{content:"";position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(190,248,255,.17);box-shadow:inset 0 0 28px rgba(99,230,255,.08)}
-.jarvisOrbSurface{position:absolute;inset:0;border-radius:50%;overflow:hidden}
-.jarvisOrbSurface:before,.jarvisOrbSurface:after{
-  content:"";position:absolute;width:82%;height:30%;left:9%;border-radius:50%;
-  border-top:1px solid rgba(157,241,255,.23);transform:rotate(-18deg)
+.jarvisOrbButton:hover:not(:disabled) .jarvisPackageHalo{
+  border-color:rgba(99,230,255,.35);
+  box-shadow:0 0 58px rgba(35,207,255,.14);
 }
-.jarvisOrbSurface:before{top:22%}.jarvisOrbSurface:after{bottom:18%;transform:rotate(28deg)}
-.jarvisOrbCore{
-  position:absolute;width:68px;height:68px;border-radius:50%;display:grid;place-items:center;
-  color:#bff8ff;background:radial-gradient(circle,rgba(99,230,255,.3),rgba(4,36,49,.9) 70%);
-  border:1px solid rgba(150,242,255,.28);box-shadow:0 0 26px rgba(35,207,255,.24);z-index:4
+.jarvisCore.state-listening .jarvisPackageHalo{
+  border-color:rgba(99,230,255,.5);
+  box-shadow:0 0 72px rgba(35,207,255,.2);
 }
-
-.jarvisExpressionLabel{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;gap:9px;margin-top:-14px;margin-bottom:16px}
-.jarvisExpressionLabel strong{font:10px var(--mono);letter-spacing:1.4px;text-transform:uppercase;color:#9ed8e5}.jarvisExpressionLabel small{font:7px var(--mono);color:#527b87}
+.jarvisCore.state-thinking .jarvisPackageHalo,
+.jarvisCore.state-working .jarvisPackageHalo{
+  border-color:rgba(99,230,255,.34);
+  box-shadow:0 0 88px rgba(35,207,255,.17);
+}
+.jarvisCore.state-speaking .jarvisPackageHalo{border-color:rgba(99,230,255,.5)}
+.jarvisCore.state-success .jarvisPackageHalo{border-color:rgba(79,255,195,.5);box-shadow:0 0 75px rgba(79,255,195,.13)}
+.jarvisCore.state-warning .jarvisPackageHalo{border-color:rgba(255,209,102,.55);box-shadow:0 0 75px rgba(255,209,102,.13)}
+.jarvisCore.state-error .jarvisPackageHalo{border-color:rgba(255,100,116,.55);box-shadow:0 0 75px rgba(255,100,116,.13)}
+.jarvisCore.state-offline .jarvisPackageHalo{opacity:.2;box-shadow:none}
+.jarvisExpressionLabel{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;gap:9px;margin-top:-8px;margin-bottom:16px}
+.jarvisExpressionLabel strong{font:10px var(--mono);letter-spacing:1.4px;text-transform:uppercase;color:#9ed8e5}
+.jarvisExpressionLabel small{font:7px var(--mono);color:#527b87}
 .jarvisDirectComposer{position:relative;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) 96px 108px;gap:8px;max-width:930px;margin:0 auto}
 .jarvisComposerInput{display:grid;grid-template-columns:34px 1fr;border:1px solid rgba(99,230,255,.2);background:rgba(0,8,13,.84)}
 .jarvisComposerInput>span{display:grid;place-items:center;border-right:1px solid rgba(99,230,255,.12);font:12px var(--mono);color:var(--cyan);text-shadow:0 0 10px var(--cyan)}
@@ -3097,75 +3049,21 @@ input,textarea,select{font-size:13px}
 .jarvisResponseHeader button{border:0;background:transparent;color:#608b98;font:7px var(--mono);text-transform:uppercase;display:flex;align-items:center;gap:5px}
 .jarvisResponsePanel p{margin:7px 0 0;white-space:pre-wrap;color:#9cbfc9;font-size:10px;line-height:1.55;max-height:90px;overflow:auto}
 .jarvisTelemetry{margin-top:0}
-
-/* idle: thoughts float quietly around the core */
-.jarvisCore.state-idle .jarvisThoughtOrb{opacity:.28;animation:jarvisThoughtDrift 6s ease-in-out infinite;animation-delay:var(--delay)}
-
-/* listening: thoughts lean inward, waiting for the user's instruction */
-.jarvisCore.state-listening .jarvisOrb{transform:scale(1.035);box-shadow:inset -24px -30px 52px rgba(0,0,0,.7),0 0 50px rgba(35,207,255,.42),0 0 120px rgba(35,207,255,.18)}
-.jarvisCore.state-listening .jarvisThoughtOrb{opacity:.72;animation:jarvisThoughtListen 1.5s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-listening .haloOne,.jarvisCore.state-listening .haloTwo{border-color:rgba(99,230,255,.45)}
-
-/* thinking: satellite orbs become the visible reasoning motion */
-.jarvisCore.state-thinking .jarvisThoughtField{animation:jarvisFieldOrbit 4.8s linear infinite}
-.jarvisCore.state-thinking .jarvisThoughtOrb{opacity:1;box-shadow:0 0 18px rgba(35,207,255,.52),0 0 32px rgba(35,207,255,.14);animation:jarvisThoughtThink 1.1s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-thinking .haloOne{animation-duration:5s}.jarvisCore.state-thinking .haloTwo{animation-duration:3.6s}
-.jarvisCore.state-thinking .jarvisOrb{animation:jarvisOrbWork 2.2s ease-in-out infinite}
-
-/* working: thoughts split into fast independent paths, like delegated sub-tasks */
-.jarvisCore.state-working .jarvisThoughtField{animation:jarvisFieldOrbit 3.2s linear infinite}
-.jarvisCore.state-working .jarvisThoughtOrb{opacity:.95;animation:jarvisThoughtWork .95s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-working .thought-2,.jarvisCore.state-working .thought-6{--size:23px}
-.jarvisCore.state-working .thought-4,.jarvisCore.state-working .thought-8{--size:8px}
-.jarvisCore.state-working .haloOne{animation-duration:3.2s}.jarvisCore.state-working .haloTwo{animation-duration:2.4s}
-.jarvisCore.state-working .jarvisOrb{animation:jarvisOrbWork 1.8s ease-in-out infinite}
-
-/* speaking: thoughts pulse outward from the core with the voice */
-.jarvisCore.state-speaking .jarvisThoughtOrb{opacity:.88;animation:jarvisThoughtSpeak .8s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-speaking .jarvisOrb{box-shadow:inset -24px -30px 52px rgba(0,0,0,.7),0 0 52px rgba(99,230,255,.42),0 0 110px rgba(99,230,255,.14)}
-
-/* completed: thoughts settle into a balanced green constellation */
-.jarvisCore.state-success .jarvisOrb{
-  background:radial-gradient(circle at 34% 28%,rgba(230,255,246,.95) 0 3%,rgba(79,255,195,.62) 9%,transparent 25%),radial-gradient(circle at 48% 46%,rgba(21,146,108,.56),rgba(4,52,42,.96) 56%,rgba(0,10,8,.98) 74%);
-  box-shadow:inset -24px -30px 52px rgba(0,0,0,.7),0 0 46px rgba(79,255,195,.34)
-}
-.jarvisCore.state-success .jarvisThoughtOrb{opacity:.85;background:radial-gradient(circle at 34% 28%,rgba(235,255,247,.96),rgba(79,255,195,.72) 22%,rgba(9,75,55,.92) 68%);border-color:rgba(136,255,216,.36);box-shadow:0 0 15px rgba(79,255,195,.34);animation:jarvisThoughtSuccess 2.6s ease-in-out infinite;animation-delay:var(--delay)}
-
-/* warning/error: thoughts become unstable around the core */
-.jarvisCore.state-warning .jarvisOrb{background:radial-gradient(circle at 34% 28%,rgba(255,249,211,.95) 0 3%,rgba(255,209,102,.65) 9%,transparent 25%),radial-gradient(circle at 48% 46%,rgba(147,102,23,.58),rgba(55,37,6,.96) 58%,rgba(11,7,0,.98) 76%);box-shadow:0 0 48px rgba(255,209,102,.28)}
-.jarvisCore.state-warning .jarvisThoughtOrb{opacity:.9;background:radial-gradient(circle at 34% 28%,rgba(255,247,210,.95),rgba(255,209,102,.72) 24%,rgba(102,68,10,.95) 70%);border-color:rgba(255,220,132,.36);box-shadow:0 0 15px rgba(255,209,102,.3);animation:jarvisThoughtWarning 1.4s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-error .jarvisOrb{background:radial-gradient(circle at 34% 28%,rgba(255,227,231,.92) 0 3%,rgba(255,100,116,.58) 9%,transparent 25%),radial-gradient(circle at 48% 46%,rgba(145,31,48,.55),rgba(51,8,16,.96) 58%,rgba(10,0,3,.98) 76%);box-shadow:0 0 48px rgba(255,100,116,.28)}
-.jarvisCore.state-error .jarvisThoughtOrb{opacity:.9;background:radial-gradient(circle at 34% 28%,rgba(255,232,235,.95),rgba(255,100,116,.72) 24%,rgba(88,10,24,.96) 70%);border-color:rgba(255,132,145,.36);box-shadow:0 0 15px rgba(255,100,116,.3);animation:jarvisThoughtError .6s ease-in-out infinite;animation-delay:var(--delay)}
-.jarvisCore.state-offline .jarvisOrb{filter:grayscale(.8);opacity:.55;box-shadow:none}
-.jarvisCore.state-offline .jarvisOrbHalo{animation-play-state:paused;opacity:.25}
-.jarvisCore.state-offline .jarvisThoughtOrb{opacity:.08;animation:none}
-
-@keyframes jarvisOrbit{to{transform:rotate(360deg)}}
-@keyframes jarvisOrbitReverse{to{transform:rotate(-360deg)}}
-@keyframes jarvisBreath{0%,100%{transform:scale(.97);opacity:.45}50%{transform:scale(1.04);opacity:.9}}
-@keyframes jarvisOrbWork{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
-@keyframes jarvisFieldOrbit{to{transform:rotate(360deg)}}
-@keyframes jarvisThoughtPulse{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1.12)}}
-@keyframes jarvisThoughtDrift{0%,100%{translate:0 0}50%{translate:0 -8px}}
-@keyframes jarvisThoughtListen{0%,100%{transform:translate(-50%,-50%) scale(.82)}50%{transform:translate(-50%,-50%) scale(1.18)}}
-@keyframes jarvisThoughtThink{0%,100%{transform:translate(-50%,-50%) scale(.72)}45%{transform:translate(-50%,-50%) scale(1.32)}70%{transform:translate(-50%,-50%) scale(.92)}}
-@keyframes jarvisThoughtWork{0%,100%{transform:translate(-50%,-50%) scale(.7)}35%{transform:translate(-50%,-50%) scale(1.45)}70%{transform:translate(-50%,-50%) scale(.9)}}
-@keyframes jarvisThoughtSpeak{0%,100%{transform:translate(-50%,-50%) scale(.55);opacity:.4}50%{transform:translate(-50%,-50%) scale(1.4);opacity:1}}
-@keyframes jarvisThoughtSuccess{0%,100%{transform:translate(-50%,-50%) scale(.9)}50%{transform:translate(-50%,-50%) scale(1.12)}}
-@keyframes jarvisThoughtWarning{0%,100%{transform:translate(-50%,-50%) scale(.8)}50%{transform:translate(-50%,-50%) scale(1.25)}}
-@keyframes jarvisThoughtError{0%,100%{transform:translate(-50%,-50%) translateX(-2px)}50%{transform:translate(-50%,-50%) translateX(2px)}}
-
 @media(max-width:1050px){
-  .jarvisStage{grid-template-columns:1fr;gap:0;min-height:390px}
+  .jarvisStage{grid-template-columns:1fr;gap:0}
   .jarvisSideStatus{display:none}
   .jarvisDirectComposer{grid-template-columns:minmax(0,1fr) 86px 98px}
 }
 @media(max-width:720px){
-  .jarvisCore{padding:14px 12px;min-height:520px}
-  .jarvisStage{min-height:320px}
-  .jarvisOrbButton{width:285px;height:285px}
-  .haloOne{width:268px;height:268px}.haloTwo{width:232px;height:232px}.haloThree{width:204px;height:204px}
-  .jarvisOrb{width:156px;height:156px}
+  .jarvisCore{padding:14px 12px}
+  .jarvisStage{min-height:270px}
+  .jarvisOrbButton{width:260px;height:260px}
+  .jarvisPackageOrb{width:212px;height:212px}
+  .jarvisPackageHalo{width:226px;height:226px}
+  .jarvisPackageCanvas{transform:scale(2.7)}
   .jarvisDirectComposer{grid-template-columns:1fr 78px}
   .jarvisComposerInput{grid-column:1/-1}
+}
+@media(prefers-reduced-motion:reduce){
+  .jarvisPackageHalo,.jarvisPackageCanvas{transition:none}
 }
