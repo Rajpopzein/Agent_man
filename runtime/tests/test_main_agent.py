@@ -37,17 +37,41 @@ def test_native_serial_template_executes_and_returns_context(monkeypatch):
     assert "tool_call" not in body["text"]
 
 
-def test_native_serial_open_still_requires_permission(monkeypatch):
+def test_native_serial_open_uses_assigned_hardware_tool_without_extra_approval(
+    monkeypatch,
+):
     project, _ = _setup()
-    monkeypatch.setattr("app.agents.executive.run_messages", lambda *a, **k:
-        '<|tool_call>call:serial_open{"device":"COM7"}<tool_call|>')
+    answers = iter([
+        '<|tool_call>call:serial_open{"device":"COM7"}<tool_call|>',
+        json.dumps({
+            "type": "reply",
+            "message": "The ESP32 serial session is open.",
+        }),
+    ])
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda *a, **k: next(answers),
+    )
+    monkeypatch.setattr(
+        "app.tools.registry.serial_devices.open",
+        lambda **kwargs: {
+            "session_id": "serial-test",
+            "device": kwargs["device"],
+        },
+    )
     response = client.post(
         "/api/main-agent/projects/" + project["id"] + "/chat",
         json={"message": "check my esp32 connection", "allow_hardware": False},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "waiting_approval"
-    assert response.json()["steps"][-1]["permission"] == "hardware.serial"
+    body = response.json()
+    assert body["status"] == "completed"
+    step = next(
+        item
+        for item in body["steps"]
+        if item.get("tool") == "serial_open"
+    )
+    assert step["status"] == "ok"
 
 
 @pytest.mark.parametrize("recovers", [True, False])
@@ -285,16 +309,40 @@ def test_main_agent_can_use_runtime_tools_directly(monkeypatch):
     assert "http_get" in calls["allowed"]
 
 
-def test_main_agent_direct_tool_respects_approval(monkeypatch):
+def test_main_agent_assigned_terminal_tool_runs_without_extra_approval(
+    monkeypatch,
+):
     project, _workers = _setup()
-
-    monkeypatch.setattr(
-        "app.agents.executive.run_messages",
-        lambda agent, messages, endpoint=None: json.dumps({
+    answers = iter([
+        json.dumps({
             "type": "tool",
             "tool": "run_command",
             "args": {"command": "echo hello"},
         }),
+        json.dumps({
+            "type": "reply",
+            "message": "The command completed.",
+        }),
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: next(answers),
+    )
+    observed = {}
+
+    def fake_run(self, command, approvals=None):
+        observed["approvals"] = set(approvals or set())
+        return {
+            "command": command,
+            "returncode": 0,
+            "stdout": "hello",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(
+        "app.tools.registry.ProjectProcessRunner.run",
+        fake_run,
     )
 
     response = client.post(
@@ -308,8 +356,9 @@ def test_main_agent_direct_tool_respects_approval(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "waiting_approval"
-    assert body["steps"][0]["permission"] == "terminal.execute"
+    assert body["status"] == "completed"
+    assert body["steps"][0]["status"] == "ok"
+    assert "terminal.execute" in observed["approvals"]
 
 
 
@@ -513,6 +562,13 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
         }),
     )
 
+    monkeypatch.setattr(
+        "app.tools.registry.serial_devices.open",
+        lambda **kwargs: {
+            "session_id": "serial-open-test",
+            "device": kwargs["device"],
+        },
+    )
     response = client.post(
         "/api/main-agent/projects/" + project["id"] + "/chat",
         json={
@@ -525,7 +581,6 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "waiting_approval"
     assert body["steps"][0]["type"] == "tool_preflight"
     assert body["steps"][0]["tool"] == "list_serial_ports"
     serial_open_step = next(
@@ -533,7 +588,7 @@ def test_main_agent_serial_tool_requires_hardware_approval(monkeypatch):
         for step in body["steps"]
         if step.get("tool") == "serial_open"
     )
-    assert serial_open_step["permission"] == "hardware.serial"
+    assert serial_open_step["status"] == "ok"
 
 
 
@@ -1788,3 +1843,686 @@ def test_executive_prompt_uses_live_worker_snapshot_as_status_source():
     assert "doing now" in executive
     assert "instead of only repeating the original delegated task" in executive
 
+def test_executive_agent_api_tool_receives_project_context_in_chat(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+
+    def respond(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            assert "api_update_agent" in messages[0]["content"]
+            return json.dumps({
+                "type": "tool",
+                "tool": "api_update_agent",
+                "args": {
+                    "agent_id": developer["id"],
+                    "changes": {
+                        "context": (
+                            "Focus on React implementation and validate "
+                            "changes before reporting completion."
+                        )
+                    },
+                },
+            })
+        assert "TOOL RESULT" in messages[-1]["content"]
+        assert "React implementation" in messages[-1]["content"]
+        return json.dumps({
+            "type": "reply",
+            "message": "Developer context has been updated.",
+        })
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        respond,
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Change Developer agent context for React work.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["steps"][-1]["tool"] == "api_update_agent"
+    assert body["steps"][-1]["status"] == "ok"
+
+    agents = client.get(
+        "/api/projects/" + project["id"] + "/agents"
+    )
+    assert agents.status_code == 200
+    saved = next(
+        item
+        for item in agents.json()
+        if item["id"] == developer["id"]
+    )
+    assert "React implementation" in saved["context"]
+
+def test_executive_background_reply_guarantees_worker_status(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+
+    def fake_run_messages(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "delegate_agent",
+                "agent_id": developer["id"],
+                "task": "Implement the requested feature.",
+            })
+        return json.dumps({
+            "type": "reply",
+            "message": "I remain available for more instructions.",
+        })
+
+    def fake_start_agent(**kwargs):
+        return {
+            "id": "job-status",
+            "project_id": project["id"],
+            "agent_id": developer["id"],
+            "agent_name": developer["name"],
+            "agent_role": developer["role"],
+            "task": kwargs["task"],
+            "status": "running",
+            "created_at": "now",
+            "started_at": "now",
+            "completed_at": None,
+            "result_text": "",
+            "step_count": 0,
+            "error": "",
+            "current_phase": "starting",
+            "current_action": "Started the assigned task.",
+            "current_tool": "",
+            "current_detail": kwargs["task"],
+            "updated_at": "now",
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        fake_run_messages,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.background_jobs.start_agent",
+        fake_start_agent,
+    )
+    monkeypatch.setattr(
+        "app.agents.executive.background_jobs.list_project",
+        lambda project_id: [
+            {
+                "id": "job-status",
+                "project_id": project["id"],
+                "agent_id": developer["id"],
+                "agent_name": developer["name"],
+                "agent_role": developer["role"],
+                "task": "Implement the requested feature.",
+                "status": "running",
+                "created_at": "now",
+                "started_at": "now",
+                "completed_at": None,
+                "result_text": "",
+                "step_count": 0,
+                "error": "",
+                "current_phase": "starting",
+                "current_action": "Started the assigned task.",
+                "current_tool": "",
+                "current_detail": "",
+                "updated_at": "now",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={"message": "Ask Developer to implement the feature."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "background"
+    assert developer["name"] in body["text"]
+    assert "has been contacted and is working" in body["text"]
+
+def test_background_worker_approval_is_escalated_to_executive(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+    from app.events.bus import events
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+
+    def fake_execute_agent(*, progress=None, **kwargs):
+        if progress is not None:
+            progress({
+                "phase": "waiting_approval",
+                "action": "run_command needs approval.",
+                "tool": "run_command",
+                "detail": "terminal.execute",
+                "status": "waiting_approval",
+            })
+        return {
+            "status": "waiting_approval",
+            "text": (
+                "Developer is waiting for approval to use run_command. "
+                "Required permission: terminal.execute."
+            ),
+            "steps": [
+                {
+                    "turn": 1,
+                    "tool": "run_command",
+                    "status": "approval_required",
+                    "permission": "terminal.execute",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    cursor = events.current_sequence()
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Run the validation command.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "waiting_approval"
+    assert finished["current_tool"] == "run_command"
+    assert finished["current_detail"] == "terminal.execute"
+
+    _, emitted = events.wait_since(
+        cursor,
+        timeout=0,
+        project_id=project["id"],
+    )
+    approval = next(
+        event
+        for event in emitted
+        if event["type"]
+        == "background_job.approval_required"
+    )
+    assert approval["agent_name"] == developer["name"]
+    assert approval["tool"] == "run_command"
+    assert approval["permission"] == "terminal.execute"
+    assert "waiting for approval" in approval["message"]
+
+    executive = next(
+        event
+        for event in emitted
+        if event["type"] == "executive.activity"
+        and event.get("phase") == "approval"
+    )
+    assert executive["status"] == "waiting_approval"
+    assert developer["name"] in executive["message"]
+
+def test_worker_assigned_terminal_tool_runs_without_extra_approval(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = {"count": 0}
+    observed = {}
+
+    def respond(agent, messages, endpoint=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return json.dumps({
+                "type": "tool",
+                "tool": "run_command",
+                "args": {"command": "echo worker"},
+                "progress": "Running the assigned validation command.",
+                "next_step": "Verify the command result.",
+            })
+        return json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Worker command verified.",
+            "progress": "Verifying the worker command.",
+            "next_step": "Report completion.",
+        })
+
+    def fake_run(self, command, approvals=None):
+        observed["approvals"] = set(approvals or set())
+        return {
+            "command": command,
+            "returncode": 0,
+            "stdout": "worker",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        respond,
+    )
+    monkeypatch.setattr(
+        "app.tools.registry.ProjectProcessRunner.run",
+        fake_run,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={
+            "prompt": "Run the validation command.",
+            "allow_terminal": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert "terminal.execute" in observed["approvals"]
+
+
+def test_executive_destructive_tool_still_requires_explicit_approval(monkeypatch):
+    project, _workers = _setup()
+
+    monkeypatch.setattr(
+        "app.agents.executive.run_messages",
+        lambda agent, messages, endpoint=None: json.dumps({
+            "type": "tool",
+            "tool": "delete_path",
+            "args": {"path": "do-not-delete.txt"},
+        }),
+    )
+
+    response = client.post(
+        "/api/main-agent/projects/" + project["id"] + "/chat",
+        json={
+            "message": "Delete the file.",
+            "allow_delete": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "waiting_approval"
+    assert body["steps"][-1]["permission"] == "project.files.delete"
+
+def test_waiting_background_job_resumes_same_job_after_approval(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append({
+            "allow_delete": kwargs.get("allow_delete", False),
+            "prompt": kwargs["prompt"],
+        })
+        if len(calls) == 1:
+            return {
+                "status": "waiting_approval",
+                "text": "Delete approval required.",
+                "steps": [
+                    {
+                        "turn": 1,
+                        "tool": "delete_path",
+                        "status": "approval_required",
+                        "permission": "project.files.delete",
+                    }
+                ],
+            }
+        return {
+            "status": "completed",
+            "text": "Deletion completed and task verified.",
+            "steps": [
+                {
+                    "turn": 1,
+                    "tool": "delete_path",
+                    "status": "ok",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Remove the obsolete file.",
+    )
+    waiting = background_jobs.wait(job["id"], timeout=5)
+    assert waiting["id"] == job["id"]
+    assert waiting["status"] == "waiting_approval"
+    assert waiting["current_detail"] == "project.files.delete"
+
+    response = client.post(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs/"
+        + job["id"]
+        + "/approve"
+    )
+    assert response.status_code == 200
+    resumed = response.json()
+    assert resumed["id"] == job["id"]
+    assert resumed["status"] in {"queued", "running"}
+
+    finished = background_jobs.wait(job["id"], timeout=5)
+    assert finished["id"] == job["id"]
+    assert finished["status"] == "completed"
+    assert "Deletion completed" in finished["result_text"]
+    assert len(calls) == 2
+    assert calls[0]["allow_delete"] is False
+    assert calls[1]["allow_delete"] is True
+    assert calls[0]["prompt"] == calls[1]["prompt"]
+
+
+def test_background_approval_endpoint_rejects_non_waiting_job(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        lambda **kwargs: {
+            "status": "completed",
+            "text": "Done.",
+            "steps": [],
+        },
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Complete a normal task.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+    assert finished["status"] == "completed"
+
+    response = client.post(
+        "/api/main-agent/projects/"
+        + project["id"]
+        + "/background-jobs/"
+        + job["id"]
+        + "/approve"
+    )
+    assert response.status_code == 409
+    assert "waiting for approval" in response.json()["detail"]
+
+
+
+
+def test_background_worker_continues_after_turn_limit(monkeypatch):
+    from app.agents.background_jobs import background_jobs
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "status": "turn_limit",
+                "text": "Reached cycle limit.",
+                "steps": [{"turn": 30, "status": "ok"}],
+            }
+        return {
+            "status": "completed",
+            "text": "Feature completed and verified.",
+            "steps": [{"turn": 1, "status": "ok"}],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Build the requested feature.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "completed"
+    assert finished["step_count"] == 2
+    assert len(calls) == 2
+    assert calls[0]["prompt"] == "Build the requested feature."
+    assert calls[0]["continuation_on_turn_limit"] is True
+    assert "CONTINUATION CYCLE" in calls[1]["prompt"]
+    assert "do not restart completed work" in calls[1]["prompt"]
+    assert "Recent observable actions" in calls[1]["prompt"]
+
+
+def test_background_worker_stops_after_bounded_continuation_cycles(monkeypatch):
+    from app.agents.background_jobs import (
+        MAX_EXECUTION_CYCLES,
+        background_jobs,
+    )
+
+    project, workers = _setup()
+    developer = workers["Developer"]
+    calls = []
+
+    def fake_execute_agent(**kwargs):
+        calls.append(kwargs)
+        return {
+            "status": "turn_limit",
+            "text": "Still incomplete.",
+            "steps": [{"turn": 30, "status": "ok"}],
+        }
+
+    monkeypatch.setattr(
+        "app.agents.background_jobs.execute_agent",
+        fake_execute_agent,
+    )
+
+    job = background_jobs.start_agent(
+        project_id=project["id"],
+        agent_id=developer["id"],
+        agent_name=developer["name"],
+        agent_role=developer["role"],
+        task="Complete a very large task.",
+    )
+    finished = background_jobs.wait(job["id"], timeout=5)
+
+    assert finished["status"] == "turn_limit"
+    assert len(calls) == MAX_EXECUTION_CYCLES
+    assert all(
+        call["continuation_on_turn_limit"] is True
+        for call in calls
+    )
+    assert finished["step_count"] == MAX_EXECUTION_CYCLES
+
+
+
+def test_worker_breaks_repeated_identical_tool_loop(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    tool_calls = []
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: json.dumps({
+            "type": "tool",
+            "tool": "read_file",
+            "args": {"path": "README.md"},
+            "progress": "Checking the same file.",
+            "next_step": "Check it again.",
+        }),
+    )
+
+    def fake_execute(**kwargs):
+        tool_calls.append((kwargs["name"], kwargs["arguments"]))
+        return {"content": "unchanged"}
+
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        fake_execute,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Inspect README and finish the task."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "loop_detected"
+    assert len(tool_calls) == 3
+    assert any(
+        step.get("type") == "loop_guard"
+        and step.get("status") == "replanning"
+        for step in body["steps"]
+    )
+    assert body["steps"][-1]["status"] == "loop_detected"
+
+
+def test_worker_does_not_flag_same_tool_when_result_changes(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    replies = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_process_output",
+            "args": {"process_id": "process-1"},
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Process output changed and the task is complete.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Process output changed and the task is complete.",
+        }),
+    ])
+    outputs = iter([
+        {"output": "step 1"},
+        {"output": "step 2"},
+        {"output": "step 3"},
+    ])
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: next(replies),
+    )
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        lambda **kwargs: next(outputs),
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Follow the process until it finishes."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+
+
+def test_empty_workspace_redirects_worker_to_bootstrap(monkeypatch):
+    project, workers = _setup()
+    developer = workers["Developer"]
+    replies = iter([
+        json.dumps({
+            "type": "tool",
+            "tool": "list_files",
+            "args": {"path": "."},
+            "progress": "Inspecting the project workspace.",
+            "next_step": "Identify the files to change.",
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "read_file",
+            "args": {"path": "README.md"},
+            "progress": "Reading the README.",
+            "next_step": "Understand the project.",
+        }),
+        json.dumps({
+            "type": "tool",
+            "tool": "write_file",
+            "args": {
+                "path": "main.py",
+                "content": "print('bootstrapped')\n",
+            },
+            "progress": "Bootstrapping the empty project.",
+            "next_step": "Verify the created file.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Created the initial project file.",
+        }),
+        json.dumps({
+            "type": "final",
+            "verified": True,
+            "message": "Created and verified the initial project file.",
+        }),
+    ])
+    executed = []
+
+    def fake_tools_execute(**kwargs):
+        executed.append((kwargs["name"], kwargs["arguments"]))
+        if kwargs["name"] == "list_files":
+            return []
+        if kwargs["name"] == "write_file":
+            return {
+                "path": kwargs["arguments"]["path"],
+                "bytes_written": 24,
+            }
+        raise AssertionError(
+            "Empty-workspace guard should block " + kwargs["name"]
+        )
+
+    monkeypatch.setattr(
+        "app.agents.executor.run_messages",
+        lambda *args, **kwargs: next(replies),
+    )
+    monkeypatch.setattr(
+        "app.agents.executor.tools.execute",
+        fake_tools_execute,
+    )
+
+    response = client.post(
+        "/api/agents/" + developer["id"] + "/execute",
+        json={"prompt": "Build a small Python application from scratch."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert [name for name, _args in executed] == [
+        "list_files",
+        "write_file",
+    ]
+    assert any(
+        step.get("type") == "workspace_guard"
+        and step.get("status") == "empty_workspace"
+        for step in body["steps"]
+    )
+
+
+def test_worker_prompt_does_not_assume_readme_exists():
+    from app.agents.executor import SYSTEM_PROMPT
+
+    assert '"tool":"list_files"' in SYSTEM_PROMPT
+    assert "Never assume README.md" in SYSTEM_PROMPT
+    assert "workspace is empty" in SYSTEM_PROMPT

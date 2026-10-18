@@ -5,6 +5,8 @@ import os
 from ctypes import wintypes
 from pathlib import Path
 
+from cryptography.fernet import Fernet, InvalidToken
+
 from app.core.config import settings
 
 
@@ -56,19 +58,66 @@ def _windows_crypto():
 
 
 class SecretStore:
-    def __init__(self):
-        self.root = settings.data_dir / "secrets"
+    def __init__(self, root: Path | None = None):
+        self.root = root or settings.data_dir / "secrets"
 
     def _path(self, key: str) -> Path:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.root / f"{digest}.secret"
 
-    def set(self, key: str, value: str) -> None:
-        if os.name != "nt":
+    def _fernet(self) -> Fernet:
+        configured = os.getenv("AGENT_MAN_SECRET_KEY", "").strip()
+        if not configured:
             raise RuntimeError(
-                "API-key storage currently requires Windows DPAPI"
+                "AGENT_MAN_SECRET_KEY is required for API-key storage "
+                "on non-Windows runtimes"
             )
+        try:
+            return Fernet(configured.encode("ascii"))
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                "AGENT_MAN_SECRET_KEY must be a valid Fernet key"
+            ) from exc
 
+    def set(self, key: str, value: str) -> None:
+        if os.name == "nt":
+            encrypted = self._encrypt_windows(value)
+        else:
+            encrypted = self._fernet().encrypt(value.encode("utf-8"))
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self._path(key)
+        path.write_text(
+            base64.b64encode(encrypted).decode("ascii"),
+            encoding="ascii",
+        )
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+    def get(self, key: str) -> str | None:
+        path = self._path(key)
+        if not path.exists():
+            return None
+
+        encrypted = base64.b64decode(
+            path.read_text(encoding="ascii")
+        )
+
+        if os.name == "nt":
+            return self._decrypt_windows(encrypted)
+
+        try:
+            plaintext = self._fernet().decrypt(encrypted)
+        except InvalidToken as exc:
+            raise RuntimeError(
+                "Stored API key cannot be decrypted with "
+                "AGENT_MAN_SECRET_KEY"
+            ) from exc
+        return plaintext.decode("utf-8")
+
+    def _encrypt_windows(self, value: str) -> bytes:
         plaintext = value.encode("utf-8")
         input_blob, input_buffer = _blob(plaintext)
         output_blob = _DataBlob()
@@ -86,7 +135,7 @@ class SecretStore:
             raise ctypes.WinError(ctypes.get_last_error())
 
         try:
-            encrypted = ctypes.string_at(
+            return ctypes.string_at(
                 output_blob.pbData,
                 output_blob.cbData,
             )
@@ -94,22 +143,7 @@ class SecretStore:
             kernel32.LocalFree(output_blob.pbData)
             _ = input_buffer
 
-        self.root.mkdir(parents=True, exist_ok=True)
-        self._path(key).write_text(
-            base64.b64encode(encrypted).decode("ascii"),
-            encoding="ascii",
-        )
-
-    def get(self, key: str) -> str | None:
-        path = self._path(key)
-        if not path.exists():
-            return None
-        if os.name != "nt":
-            raise RuntimeError("This secret can only be read on Windows")
-
-        encrypted = base64.b64decode(
-            path.read_text(encoding="ascii")
-        )
+    def _decrypt_windows(self, encrypted: bytes) -> str:
         input_blob, input_buffer = _blob(encrypted)
         output_blob = _DataBlob()
         crypt32, kernel32 = _windows_crypto()

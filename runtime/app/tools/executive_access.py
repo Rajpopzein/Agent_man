@@ -14,6 +14,7 @@ from app.tools.service import allowed_main_agent_tool_names
 
 _APPROVAL_GATE_BY_TOOL: dict[str, tuple[str, Permission]] = {
     "delete_path": ("delete", Permission.PROJECT_DELETE),
+    "api_delete_agent": ("delete", Permission.PROJECT_DELETE),
     "run_command": ("exec", Permission.TERMINAL_EXECUTE),
     "git_commit": ("exec", Permission.TERMINAL_EXECUTE),
     "run_tests": ("exec", Permission.TERMINAL_EXECUTE),
@@ -22,10 +23,30 @@ _APPROVAL_GATE_BY_TOOL: dict[str, tuple[str, Permission]] = {
     "start_process": ("exec", Permission.TERMINAL_EXECUTE),
     "stop_process": ("exec", Permission.TERMINAL_EXECUTE),
     "http_get": ("net", Permission.NETWORK_ACCESS),
+    "adb_devices": ("hw", Permission.ANDROID_ACCESS),
     "serial_open": ("hw", Permission.SERIAL_ACCESS),
     "serial_read": ("hw", Permission.SERIAL_ACCESS),
     "serial_write": ("hw", Permission.SERIAL_ACCESS),
 }
+
+
+def automatic_approvals_for_tools(
+    tool_names: set[str] | tuple[str, ...],
+) -> set[str]:
+    """Assigned tools authorize non-destructive gated capabilities.
+
+    Destructive permissions remain explicit per mission.
+    """
+    approvals: set[str] = set()
+    for name in tool_names:
+        item = _APPROVAL_GATE_BY_TOOL.get(name)
+        if item is None:
+            continue
+        gate, permission = item
+        if gate == "delete":
+            continue
+        approvals.add(permission.value)
+    return approvals
 
 
 def _approval_metadata(name: str) -> tuple[str | None, str | None]:

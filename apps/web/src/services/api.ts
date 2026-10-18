@@ -1,4 +1,6 @@
-const BASE = "http://localhost:8765";
+const BASE = (
+  import.meta.env.VITE_API_BASE || "http://localhost:8765"
+).replace(/\/$/, "");
 
 export type Agent = {
   id: string;
@@ -22,6 +24,42 @@ export type Project = {
   id: string;
   name: string;
   workspace_path: string;
+};
+
+export type ProjectFileEntry = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size: number | null;
+};
+
+export type ProjectFileContent = {
+  path: string;
+  content: string;
+};
+
+export type Skill = {
+  id: string;
+  project_id: string;
+  name: string;
+  slug: string;
+  description: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Connector = {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  base_url: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  has_secret: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AgentRun = {
@@ -212,6 +250,46 @@ export type MainAgentReply = {
   steps: Array<Record<string, unknown>>;
 };
 
+export type ReinforcementEvent = {
+  id: string;
+  project_id: string;
+  agent_id: string | null;
+  agent_name: string;
+  tool_name: string | null;
+  source: string;
+  outcome: string;
+  reward: number;
+  task: string;
+  note: string;
+  reference_id: string | null;
+  created_at: string;
+};
+
+export type ReinforcementSummary = {
+  events: number;
+  overall: {
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  };
+  agents: Array<{
+    agent_id: string;
+    agent_name: string;
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  }>;
+  tools: Array<{
+    tool_name: string;
+    count: number;
+    average_reward: number;
+    positive: number;
+    negative: number;
+  }>;
+};
+
 export type ManagedProcess = {
   id: string;
   command: string;
@@ -222,9 +300,30 @@ export type ManagedProcess = {
   exit_code: number | null;
 };
 
+export type AgentTaskHistory = {
+  id: string;
+  project_id: string;
+  room_id: string | null;
+  agent_id: string;
+  agent_name: string;
+  agent_role: string;
+  task: string;
+  status: string;
+  current_action: string;
+  current_tool: string;
+  result_text: string;
+  error: string;
+  step_count: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
 export type BackgroundJob = {
   id: string;
   project_id: string;
+  room_id: string | null;
   agent_id: string;
   agent_name: string;
   agent_role: string;
@@ -240,7 +339,67 @@ export type BackgroundJob = {
   current_action: string;
   current_tool: string;
   current_detail: string;
+  current_next_step: string;
   updated_at: string;
+  stop_requested: boolean;
+};
+
+export type MeetingRoomMember = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  state: string;
+  position: number;
+  active: boolean;
+};
+
+export type MeetingRoomCollaborationParticipant = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  status: string;
+  last_round: number;
+};
+
+export type MeetingRoomCollaboration = {
+  id: string;
+  status: string;
+  prompt: string;
+  current_round: number;
+  created_at: string;
+  completed_at: string | null;
+  participants: MeetingRoomCollaborationParticipant[];
+};
+
+export type MeetingRoomMessage = {
+  id: string;
+  sender_type: string;
+  sender_id: string | null;
+  sender_name: string;
+  kind: string;
+  content: string;
+  job_id: string | null;
+  created_at: string;
+};
+
+export type MeetingRoom = {
+  id: string;
+  project_id: string;
+  title: string;
+  objective: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  executive: {
+    id: string;
+    name: string;
+    role: string;
+    status: string;
+  };
+  members: MeetingRoomMember[];
+  messages: MeetingRoomMessage[];
+  jobs: BackgroundJob[];
+  collaborations: MeetingRoomCollaboration[];
 };
 
 
@@ -331,6 +490,15 @@ function legacyApprovalMetadata(
 }
 
 
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(BASE + path, init);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || response.statusText);
+  }
+  return response.blob();
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, {
     ...init,
@@ -354,6 +522,95 @@ export const api = {
     "/api/events/stream?project_id=" +
     encodeURIComponent(projectId),
   projects: () => request<Project[]>("/api/projects"),
+  projectFiles: (projectId: string, path = ".") =>
+    request<ProjectFileEntry[]>(
+      "/api/projects/" +
+        projectId +
+        "/files?path=" +
+        encodeURIComponent(path),
+    ),
+  projectFile: (projectId: string, path: string) =>
+    request<ProjectFileContent>(
+      "/api/projects/" +
+        projectId +
+        "/files/content?path=" +
+        encodeURIComponent(path),
+    ),
+  saveProjectFile: (
+    projectId: string,
+    path: string,
+    content: string,
+  ) =>
+    request<{ path: string; bytes_written: number }>(
+      "/api/projects/" + projectId + "/files/content",
+      {
+        method: "PUT",
+        body: JSON.stringify({ path, content }),
+      },
+    ),
+  createProjectDirectory: (projectId: string, path: string) =>
+    request<{ path: string; created: boolean }>(
+      "/api/projects/" + projectId + "/files/directory",
+      {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      },
+    ),
+  moveProjectPath: (
+    projectId: string,
+    source: string,
+    destination: string,
+  ) =>
+    request<{ source: string; path: string; moved: boolean }>(
+      "/api/projects/" + projectId + "/files/move",
+      {
+        method: "POST",
+        body: JSON.stringify({ source, destination }),
+      },
+    ),
+  deleteProjectPath: (projectId: string, path: string) =>
+    request<{ path: string; deleted: boolean }>(
+      "/api/projects/" +
+        projectId +
+        "/files?path=" +
+        encodeURIComponent(path),
+      { method: "DELETE" },
+    ),
+  uploadProjectFile: async (
+    projectId: string,
+    path: string,
+    content: ArrayBuffer,
+  ) => {
+    const response = await fetch(
+      BASE +
+        "/api/projects/" +
+        projectId +
+        "/files/upload?path=" +
+        encodeURIComponent(path),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: content,
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || response.statusText);
+    }
+    return response.json() as Promise<{
+      path: string;
+      bytes_written: number;
+    }>;
+  },
+  downloadProjectFile: (projectId: string, path: string) =>
+    requestBlob(
+      "/api/projects/" +
+        projectId +
+        "/files/download?path=" +
+        encodeURIComponent(path),
+    ),
+  exportProject: (projectId: string) =>
+    requestBlob("/api/projects/" + projectId + "/export"),
   createProject: (payload: { name: string; workspace_path: string }) =>
     request<Project>("/api/projects", {
       method: "POST",
@@ -361,6 +618,90 @@ export const api = {
     }),
   agents: (projectId: string) =>
     request<Agent[]>("/api/projects/" + projectId + "/agents"),
+  skills: (projectId: string) =>
+    request<Skill[]>("/api/extensions/projects/" + projectId + "/skills"),
+  createSkill: (
+    projectId: string,
+    payload: {
+      name: string;
+      slug: string;
+      description?: string;
+      content: string;
+    },
+  ) =>
+    request<Skill>(
+      "/api/extensions/projects/" + projectId + "/skills",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  updateSkill: (
+    skillId: string,
+    payload: Partial<{
+      name: string;
+      slug: string;
+      description: string;
+      content: string;
+    }>,
+  ) =>
+    request<Skill>("/api/extensions/skills/" + skillId, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteSkill: (skillId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/extensions/skills/" + skillId,
+      { method: "DELETE" },
+    ),
+  agentSkills: (agentId: string) =>
+    request<Skill[]>("/api/extensions/agents/" + agentId + "/skills"),
+  assignSkill: (agentId: string, skillId: string) =>
+    request<{ assigned: boolean }>(
+      "/api/extensions/agents/" + agentId + "/skills/" + skillId,
+      { method: "PUT" },
+    ),
+  unassignSkill: (agentId: string, skillId: string) =>
+    request<{ assigned: boolean }>(
+      "/api/extensions/agents/" + agentId + "/skills/" + skillId,
+      { method: "DELETE" },
+    ),
+  connectors: (projectId: string) =>
+    request<Connector[]>(
+      "/api/extensions/projects/" + projectId + "/connectors",
+    ),
+  createConnector: (
+    projectId: string,
+    payload: {
+      name: string;
+      kind: string;
+      base_url?: string;
+      config?: Record<string, unknown>;
+      api_key?: string;
+    },
+  ) =>
+    request<Connector>(
+      "/api/extensions/projects/" + projectId + "/connectors",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  updateConnector: (
+    connectorId: string,
+    payload: Partial<{
+      name: string;
+      kind: string;
+      base_url: string;
+      config: Record<string, unknown>;
+      enabled: boolean;
+      api_key: string;
+      clear_secret: boolean;
+    }>,
+  ) =>
+    request<Connector>("/api/extensions/connectors/" + connectorId, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteConnector: (connectorId: string) =>
+    request<{ deleted: boolean; id: string }>(
+      "/api/extensions/connectors/" + connectorId,
+      { method: "DELETE" },
+    ),
   createAgent: (payload: unknown) =>
     request<Agent>("/api/agents", {
       method: "POST",
@@ -433,6 +774,136 @@ export const api = {
       "/api/main-agent/projects/" +
         projectId +
         "/background-jobs",
+    ),
+  taskHistory: (projectId: string) =>
+    request<AgentTaskHistory[]>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/task-history",
+    ),
+  approveBackgroundJob: (
+    projectId: string,
+    jobId: string,
+  ) =>
+    request<BackgroundJob>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/background-jobs/" +
+        jobId +
+        "/approve",
+      { method: "POST" },
+    ),
+  stopBackgroundJob: (
+    projectId: string,
+    jobId: string,
+  ) =>
+    request<BackgroundJob>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/background-jobs/" +
+        jobId +
+        "/stop",
+      { method: "POST" },
+    ),
+  meetingRooms: (projectId: string) =>
+    request<MeetingRoom[]>(
+      "/api/meeting-rooms/projects/" + projectId,
+    ),
+  meetingRoom: (roomId: string) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId,
+    ),
+  createMeetingRoom: (payload: {
+    project_id: string;
+    title: string;
+    objective: string;
+    agent_ids: string[];
+  }) =>
+    request<MeetingRoom>("/api/meeting-rooms", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  instructMeetingRoom: (
+    roomId: string,
+    payload: {
+      instruction: string;
+      allow_delete?: boolean;
+    },
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId + "/instructions",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+  kickMeetingRoomMember: (
+    roomId: string,
+    agentId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/members/" +
+        agentId +
+        "/kick",
+      { method: "POST" },
+    ),
+  stopMeetingRoomCollaboration: (
+    roomId: string,
+    taskId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/collaborations/" +
+        taskId +
+        "/stop",
+      { method: "POST" },
+    ),
+  approveMeetingRoomDelete: (
+    roomId: string,
+    taskId: string,
+  ) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" +
+        roomId +
+        "/collaborations/" +
+        taskId +
+        "/approve-delete",
+      { method: "POST" },
+    ),
+  closeMeetingRoom: (roomId: string) =>
+    request<MeetingRoom>(
+      "/api/meeting-rooms/" + roomId + "/close",
+      { method: "POST" },
+    ),
+  reinforcementSummary: (projectId: string) =>
+    request<ReinforcementSummary>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/reinforcement/summary",
+    ),
+  reinforcementFeedback: (
+    projectId: string,
+    payload: {
+      value: -1 | 1;
+      agent_id?: string | null;
+      agent_name?: string;
+      tool_name?: string | null;
+      task?: string;
+      note?: string;
+      reference_id?: string | null;
+    },
+  ) =>
+    request<ReinforcementEvent>(
+      "/api/main-agent/projects/" +
+        projectId +
+        "/reinforcement/feedback",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
     ),
   managedProcesses: (projectId: string) =>
     request<ManagedProcess[]>("/api/runtime/processes?project_id=" + encodeURIComponent(projectId)),

@@ -79,6 +79,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
     if (!project || !canLaunch) return;
     setBusy(true);
     setStatus("Creating peer task...");
+    requestAgentSpeech("Starting the peer task.");
     try {
       const created = await api.createMultiAgentTask({
         project_id: project.id,
@@ -120,6 +121,7 @@ export default function MultiAgentWorkspace({ project, agents }: Props) {
   async function resume(extendRounds = 0) {
     if (!activeTask) return;
     setBusy(true);
+    requestAgentSpeech("Resuming the peer task.");
     setStatus(
       extendRounds > 0
         ? "Extending collaboration..."

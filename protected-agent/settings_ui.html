@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Agent Man Settings</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; background: #121212; color: #e0e0e0; }
+        .container { max-width: 600px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h2 { color: #4CAF50; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 8px; margin-top: 5px; background: #2d2d2d; border: 1px solid #444; color: #fff; border-radius: 4px; }
+        button { margin-top: 20px; background: #4CAF50; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #45a049; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Agent Man Configurations</h2>
+        <label for="targetSelect">Configure Target</label>
+        <select id="targetSelect" onchange="switchTarget()">
+            <option value="core">Core Settings</option>
+            <option value="architect">Architect Agent</option>
+            <option value="developer">Developer Agent</option>
+        </select>
+
+        <form id="settingsForm">
+            <label for="model">Model</label>
+            <input type="text" id="model" name="model">
+            
+            <label for="temperature">Temperature</label>
+            <input type="number" step="0.1" id="temperature" name="temperature">
+            
+            <label for="system_prompt">System Prompt</label>
+            <textarea id="system_prompt" name="system_prompt" rows="4"></textarea>
+            
+            <button type="submit">Save Settings</button>
+        </form>
+    </div>
+
+    <script>
+        const settingsData = {
+            "core": {
+                "model": "test-model",
+                "temperature": 0.7,
+                "system_prompt": "You are a helpful assistant."
+            },
+            "architect": {
+                "model": "test-model",
+                "temperature": 0.5,
+                "system_prompt": "You are the Architect agent. Focus on design and planning."
+            },
+            "developer": {
+                "model": "test-model",
+                "temperature": 0.2,
+                "system_prompt": "You are the Developer agent. Focus on writing and editing code."
+            }
+        };
+
+        function switchTarget() {
+            const target = document.getElementById('targetSelect').value;
+            const data = settingsData[target];
+            document.getElementById('model').value = data.model;
+            document.getElementById('temperature').value = data.temperature;
+            document.getElementById('system_prompt').value = data.system_prompt;
+        }
+
+        document.getElementById('settingsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const target = document.getElementById('targetSelect').value;
+            settingsData[target] = {
+                "model": document.getElementById('model').value,
+                "temperature": parseFloat(document.getElementById('temperature').value),
+                "system_prompt": document.getElementById('system_prompt').value
+            };
+            alert('Settings saved for ' + target + '!');
+        });
+
+        // Initialize
+        switchTarget();
+    </script>
+</body>
+</html>

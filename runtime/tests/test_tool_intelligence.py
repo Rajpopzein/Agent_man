@@ -53,3 +53,45 @@ def test_serial_open_recovery_recommends_discovery():
     )
 
     assert recovery == ("list_serial_ports",)
+
+
+
+def test_android_objective_uses_native_adb_tools():
+    allowed = {
+        "adb_status",
+        "adb_install",
+        "adb_devices",
+        "run_command",
+    }
+
+    plan = plan_tools(
+        "Connect to my Android tablet using ADB.",
+        allowed,
+    )
+
+    assert plan.requires_tool is True
+    assert plan.intent == "android_adb"
+    assert plan.sequence == (
+        "adb_status",
+        "adb_devices",
+    )
+    assert "run_command" not in plan.recommended_tools
+
+
+def test_install_adb_uses_portable_install_tool():
+    allowed = {
+        "adb_status",
+        "adb_install",
+        "adb_devices",
+    }
+
+    plan = plan_tools(
+        "Install ADB and connect my Android device.",
+        allowed,
+    )
+
+    assert plan.sequence == (
+        "adb_status",
+        "adb_install",
+        "adb_devices",
+    )

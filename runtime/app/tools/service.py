@@ -8,6 +8,7 @@ from app.persistence.models import (
     ProjectRecord,
     ToolRecord,
 )
+from app.tools.policy import EXECUTIVE_ONLY_TOOL_NAMES
 from app.tools.registry import TOOL_DEFINITIONS
 
 
@@ -51,6 +52,11 @@ def ensure_agent_defaults(db: Session, agent_id: str) -> None:
     enabled_tools = db.scalars(
         select(ToolRecord).where(ToolRecord.enabled.is_(True))
     ).all()
+    enabled_tools = [
+        tool
+        for tool in enabled_tools
+        if tool.name not in EXECUTIVE_ONLY_TOOL_NAMES
+    ]
     changed = False
     for tool in enabled_tools:
         if tool.name in existing:

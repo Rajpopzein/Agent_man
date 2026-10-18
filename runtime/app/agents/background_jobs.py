@@ -1,14 +1,18 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+import json
 from datetime import datetime, timezone
 from threading import RLock
 from uuid import uuid4
 
 from app.agents.executor import execute_agent
+from app.agents.meeting_rooms import append_room_message
 from app.agents.orchestration import execute_workflow_run
+from app.agents.reinforcement import record_reward
 from app.events.bus import events
 from app.persistence.database import SessionLocal
 from app.persistence.models import (
     AgentRecord,
+    AgentTaskHistoryRecord,
     ProjectRecord,
     WorkflowRecord,
     WorkflowRunRecord,
@@ -16,11 +20,119 @@ from app.persistence.models import (
 from app.providers.connections import bind_agent_connection
 
 
-ACTIVE_STATUSES = {"queued", "running"}
+ACTIVE_STATUSES = {"queued", "running", "stopping", "waiting_approval", "waiting_capability"}
+MAX_EXECUTION_CYCLES = 4
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _continuation_observations(
+    steps: list[dict[str, object]],
+) -> str:
+    rows: list[dict[str, object]] = []
+    for step in steps[-16:]:
+        row: dict[str, object] = {}
+        for key in ("turn", "type", "tool", "status"):
+            value = step.get(key)
+            if value not in (None, ""):
+                row[key] = value
+        arguments = step.get("arguments")
+        if isinstance(arguments, dict):
+            path = arguments.get("path")
+            if path:
+                row["path"] = str(path)[:500]
+        if row:
+            rows.append(row)
+    return json.dumps(
+        rows,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )[-6000:]
+
+
+def _timestamp(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _persist_agent_task(job: dict[str, object]) -> None:
+    agent_id = str(job.get("agent_id") or "")
+    if not agent_id or agent_id.startswith("workflow:"):
+        return
+
+    try:
+        with SessionLocal() as db:
+            row = db.get(
+                AgentTaskHistoryRecord,
+                str(job["id"]),
+            )
+            if row is None:
+                row = AgentTaskHistoryRecord(
+                    id=str(job["id"]),
+                    project_id=str(job["project_id"]),
+                    agent_id=agent_id,
+                    agent_name=str(job.get("agent_name") or "Worker"),
+                    agent_role=str(job.get("agent_role") or ""),
+                    room_id=(
+                        str(job.get("room_id"))
+                        if job.get("room_id")
+                        else None
+                    ),
+                    task=str(job.get("task") or ""),
+                    status=str(job.get("status") or "queued"),
+                    created_at=(
+                        _timestamp(job.get("created_at"))
+                        or datetime.now(timezone.utc)
+                    ),
+                )
+                db.add(row)
+
+            row.agent_name = str(
+                job.get("agent_name") or row.agent_name
+            )
+            row.agent_role = str(
+                job.get("agent_role") or row.agent_role
+            )
+            row.room_id = (
+                str(job.get("room_id"))
+                if job.get("room_id")
+                else None
+            )
+            row.task = str(job.get("task") or row.task)
+            row.status = str(job.get("status") or row.status)
+            row.current_action = str(
+                job.get("current_action") or ""
+            )[:4000]
+            row.current_tool = str(
+                job.get("current_tool") or ""
+            )[:160]
+            row.result_text = str(
+                job.get("result_text") or ""
+            )[:12000]
+            row.error = str(job.get("error") or "")[:4000]
+            row.step_count = int(job.get("step_count") or 0)
+            row.started_at = _timestamp(job.get("started_at"))
+            row.completed_at = _timestamp(
+                job.get("completed_at")
+            )
+            row.updated_at = (
+                _timestamp(job.get("updated_at"))
+                or datetime.now(timezone.utc)
+            )
+            db.commit()
+    except Exception:
+        # Work execution must never fail because audit persistence failed.
+        pass
 
 
 class BackgroundJobSupervisor:
@@ -45,6 +157,7 @@ class BackgroundJobSupervisor:
         allow_delete: bool = False,
         allow_network: bool = False,
         allow_hardware: bool = False,
+        room_id: str | None = None,
     ) -> dict[str, object]:
         with self._lock:
             for job in self._jobs.values():
@@ -61,6 +174,7 @@ class BackgroundJobSupervisor:
             job = {
                 "id": job_id,
                 "project_id": project_id,
+                "room_id": room_id,
                 "agent_id": agent_id,
                 "agent_name": agent_name,
                 "agent_role": agent_role,
@@ -76,9 +190,12 @@ class BackgroundJobSupervisor:
                 "current_action": "Waiting to start.",
                 "current_tool": "",
                 "current_detail": "",
+                "current_next_step": "",
                 "updated_at": _now(),
+                "stop_requested": False,
             }
             self._jobs[job_id] = job
+            _persist_agent_task(job)
             self._futures[job_id] = self._executor.submit(
                 self._run_agent,
                 job_id,
@@ -98,6 +215,7 @@ class BackgroundJobSupervisor:
             agent_id=agent_id,
             agent_name=agent_name,
             agent_role=agent_role,
+            room_id=room_id,
             status="queued",
             task=job["task"],
             message=f"{agent_name} queued in background.",
@@ -123,6 +241,7 @@ class BackgroundJobSupervisor:
         job = {
             "id": job_id,
             "project_id": project_id,
+            "room_id": None,
             "agent_id": agent_id,
             "agent_name": workflow_name,
             "agent_role": "Workflow",
@@ -138,7 +257,9 @@ class BackgroundJobSupervisor:
             "current_action": "Waiting to start.",
             "current_tool": "",
             "current_detail": "",
+            "current_next_step": "",
             "updated_at": _now(),
+            "stop_requested": False,
         }
         with self._lock:
             self._jobs[job_id] = job
@@ -273,6 +394,23 @@ class BackgroundJobSupervisor:
                 current_action="Worker failed.",
                 current_detail=str(exc)[:2000],
             )
+            try:
+                with SessionLocal() as reward_db:
+                    record_reward(
+                        reward_db,
+                        project_id=project_id,
+                        agent_id=agent_id,
+                        agent_name=str(updated["agent_name"]),
+                        tool_name=str(updated.get("current_tool") or "") or None,
+                        source="background_job",
+                        outcome="error",
+                        task=task,
+                        note=str(exc)[:2000],
+                        reference_id=job_id,
+                    )
+            except Exception:
+                pass
+
             events.emit(
                 "background_job.error",
                 project_id=project_id,
@@ -294,16 +432,26 @@ class BackgroundJobSupervisor:
             job = self._jobs[job_id]
             changes.setdefault("updated_at", _now())
             job.update(changes)
-            return dict(job)
+            snapshot = dict(job)
+        _persist_agent_task(snapshot)
+        return snapshot
 
     def _progress_callback(self, job_id: str):
         def update_progress(payload: dict[str, object]) -> None:
+            previous = self.get(job_id) or {}
+            previous_next = str(
+                previous.get("current_next_step") or ""
+            ).strip()
+            next_step = str(
+                payload.get("next_step") or ""
+            ).strip()[:500]
             updated = self._update(
                 job_id,
                 current_phase=str(payload.get("phase") or "working"),
                 current_action=str(payload.get("action") or "")[:500],
                 current_tool=str(payload.get("tool") or "")[:160],
                 current_detail=str(payload.get("detail") or "")[:2000],
+                current_next_step=next_step,
             )
             events.emit(
                 "background_job.progress",
@@ -312,14 +460,33 @@ class BackgroundJobSupervisor:
                 agent_id=updated["agent_id"],
                 agent_name=updated["agent_name"],
                 agent_role=updated["agent_role"],
+                room_id=updated.get("room_id"),
                 status=updated["status"],
                 current_phase=updated["current_phase"],
                 current_action=updated["current_action"],
                 current_tool=updated["current_tool"],
                 current_detail=updated["current_detail"],
+                current_next_step=updated["current_next_step"],
                 updated_at=updated["updated_at"],
                 message=updated["current_action"],
             )
+            if next_step and next_step != previous_next:
+                events.emit(
+                    "executive.activity",
+                    project_id=updated["project_id"],
+                    agent_id="main-agent:" + str(updated["project_id"]),
+                    agent_name="Agent Man",
+                    phase="next_step",
+                    status="working",
+                    label=updated["agent_name"],
+                    message=(
+                        str(updated["agent_name"])
+                        + " next: "
+                        + next_step
+                    ),
+                    worker_agent_id=updated["agent_id"],
+                    next_step=next_step,
+                )
 
         return update_progress
 
@@ -334,6 +501,10 @@ class BackgroundJobSupervisor:
         allow_network: bool,
         allow_hardware: bool,
     ) -> None:
+        if self.stop_requested(job_id):
+            self._mark_stopped(job_id)
+            return
+
         job = self._update(
             job_id,
             status="running",
@@ -346,6 +517,7 @@ class BackgroundJobSupervisor:
             agent_id=agent_id,
             agent_name=job["agent_name"],
             agent_role=job["agent_role"],
+            room_id=job.get("room_id"),
             status="running",
             task=job["task"],
             message=f"{job['agent_name']} is working in background.",
@@ -361,57 +533,285 @@ class BackgroundJobSupervisor:
                     raise ValueError("Worker agent not found")
 
                 bind_agent_connection(agent, db)
-                result = execute_agent(
-                    agent=agent,
-                    project=project,
-                    prompt=task,
-                    db=db,
-                    allow_terminal=allow_terminal,
-                    allow_delete=allow_delete,
-                    allow_network=allow_network,
-                    allow_hardware=allow_hardware,
-                    progress=self._progress_callback(job_id),
-                )
+                cycle_prompt = task
+                result = {
+                    "status": "turn_limit",
+                    "text": "",
+                    "steps": [],
+                }
+                accumulated_steps: list[dict[str, object]] = []
+
+                for cycle_number in range(1, MAX_EXECUTION_CYCLES + 1):
+                    result = execute_agent(
+                        agent=agent,
+                        project=project,
+                        prompt=cycle_prompt,
+                        db=db,
+                        allow_terminal=allow_terminal,
+                        allow_delete=allow_delete,
+                        allow_network=allow_network,
+                        allow_hardware=allow_hardware,
+                        progress=self._progress_callback(job_id),
+                        should_stop=lambda: self.stop_requested(job_id),
+                        continuation_on_turn_limit=True,
+                    )
+                    accumulated_steps.extend(
+                        list(result.get("steps", []))
+                    )
+
+                    if str(result.get("status", "")) != "turn_limit":
+                        break
+                    if cycle_number >= MAX_EXECUTION_CYCLES:
+                        break
+                    if self.stop_requested(job_id):
+                        break
+
+                    continuation_number = cycle_number + 1
+                    updated = self._update(
+                        job_id,
+                        status="running",
+                        completed_at=None,
+                        result_text="",
+                        step_count=len(accumulated_steps),
+                        current_phase="continuing",
+                        current_action=(
+                            "Worker reached the per-cycle turn limit. "
+                            "Continuing the same task automatically."
+                        ),
+                        current_detail=(
+                            "Execution cycle "
+                            + str(continuation_number)
+                            + " of "
+                            + str(MAX_EXECUTION_CYCLES)
+                        ),
+                        current_next_step=(
+                            "Inspect the existing workspace state and continue "
+                            "from the work already completed."
+                        ),
+                    )
+                    events.emit(
+                        "background_job.continued",
+                        project_id=project_id,
+                        job_id=job_id,
+                        agent_id=agent_id,
+                        agent_name=updated["agent_name"],
+                        agent_role=updated["agent_role"],
+                        room_id=updated.get("room_id"),
+                        status="running",
+                        cycle=continuation_number,
+                        current_phase="continuing",
+                        current_action=updated["current_action"],
+                        current_detail=updated["current_detail"],
+                        current_next_step=updated["current_next_step"],
+                        message=(
+                            str(updated["agent_name"])
+                            + " is continuing the task in a new execution cycle."
+                        ),
+                    )
+                    observations = _continuation_observations(
+                        accumulated_steps
+                    )
+                    cycle_prompt = (
+                        task
+                        + "\n\nCONTINUATION CYCLE: The previous execution cycle "
+                        "reached its bounded turn budget before verified completion. "
+                        "Continue the same objective from the current project "
+                        "workspace state. Inspect existing files and outputs first, "
+                        "do not restart completed work, and finish plus verify the "
+                        "remaining work."
+                        + (
+                            "\nRecent observable actions from earlier cycles: "
+                            + observations
+                            if observations
+                            else ""
+                        )
+                    )
+
+                result = dict(result)
+                result["steps"] = accumulated_steps
 
             status = str(result.get("status", "completed"))
+            if status == "stopped":
+                self._mark_stopped(job_id)
+                return
+
             terminal_status = (
                 status
                 if status in {
                     "waiting_approval",
                     "waiting_capability",
                     "turn_limit",
+                    "loop_detected",
                     "error",
+                    "stopped",
                 }
                 else "completed"
             )
+            result_steps = result.get("steps", [])
+            approval_step = next(
+                (
+                    step
+                    for step in reversed(result_steps)
+                    if str(step.get("status", ""))
+                    == "approval_required"
+                ),
+                {},
+            )
+            approval_tool = str(
+                approval_step.get("tool") or ""
+            )
+            approval_permission = str(
+                approval_step.get("permission") or ""
+            )
+
             updated = self._update(
                 job_id,
                 status=terminal_status,
                 completed_at=_now(),
                 result_text=str(result.get("text", ""))[:12000],
-                step_count=len(result.get("steps", [])),
+                step_count=len(result_steps),
                 current_phase=terminal_status,
                 current_action=(
                     "Finished the assigned task."
                     if terminal_status == "completed"
-                    else "Worker stopped with status " + terminal_status + "."
+                    else (
+                        "Waiting for approval to use "
+                        + approval_tool
+                        + "."
+                        if terminal_status == "waiting_approval"
+                        and approval_tool
+                        else (
+                            "Worker reached the bounded execution budget "
+                            "before verified completion."
+                            if terminal_status == "turn_limit"
+                            else (
+                                "Worker stopped after repeated no-progress actions."
+                                if terminal_status == "loop_detected"
+                                else "Worker stopped with status "
+                            + terminal_status
+                            + "."
+                            )
+                        )
+                    )
                 ),
-                current_detail=str(result.get("text", ""))[:2000],
-            )
-            events.emit(
-                "background_job.completed",
-                project_id=project_id,
-                job_id=job_id,
-                agent_id=agent_id,
-                agent_name=updated["agent_name"],
-                agent_role=updated["agent_role"],
-                status=terminal_status,
-                result_text=updated["result_text"],
-                step_count=updated["step_count"],
-                message=(
-                    f"{updated['agent_name']} finished: {terminal_status}."
+                current_tool=(
+                    approval_tool
+                    if terminal_status == "waiting_approval"
+                    else str(
+                        self.get(job_id).get("current_tool", "")
+                        if self.get(job_id)
+                        else ""
+                    )
+                ),
+                current_detail=(
+                    approval_permission
+                    if terminal_status == "waiting_approval"
+                    and approval_permission
+                    else str(result.get("text", ""))[:2000]
                 ),
             )
+
+            reward_tool = str(
+                updated.get("current_tool") or ""
+            ) or None
+            with SessionLocal() as reward_db:
+                record_reward(
+                    reward_db,
+                    project_id=project_id,
+                    agent_id=agent_id,
+                    agent_name=str(updated["agent_name"]),
+                    tool_name=reward_tool,
+                    source="background_job",
+                    outcome=terminal_status,
+                    task=task,
+                    note=str(result.get("text", ""))[:2000],
+                    reference_id=job_id,
+                )
+
+            if terminal_status == "waiting_approval":
+                approval_message = (
+                    f"{updated['agent_name']} is waiting for approval"
+                    + (
+                        " to use " + approval_tool
+                        if approval_tool
+                        else ""
+                    )
+                    + (
+                        ". Required permission: "
+                        + approval_permission
+                        if approval_permission
+                        else ""
+                    )
+                    + ". Approve it to continue the same background task."
+                )
+                events.emit(
+                    "background_job.approval_required",
+                    project_id=project_id,
+                    job_id=job_id,
+                    agent_id=agent_id,
+                    agent_name=updated["agent_name"],
+                    agent_role=updated["agent_role"],
+                    room_id=updated.get("room_id"),
+                    status="waiting_approval",
+                    tool=approval_tool,
+                    permission=approval_permission,
+                    current_phase="waiting_approval",
+                    current_action=updated["current_action"],
+                    current_tool=approval_tool,
+                    current_detail=approval_permission,
+                    updated_at=updated["updated_at"],
+                    message=approval_message,
+                )
+                events.emit(
+                    "executive.activity",
+                    project_id=project_id,
+                    agent_id="main-agent:" + project_id,
+                    agent_name="Agent Man",
+                    phase="approval",
+                    status="waiting_approval",
+                    label=updated["agent_name"],
+                    message=approval_message,
+                )
+            else:
+                room_id = str(updated.get("room_id") or "").strip()
+                if room_id:
+                    try:
+                        with SessionLocal() as room_db:
+                            append_room_message(
+                                room_db,
+                                room_id=room_id,
+                                sender_type="agent",
+                                sender_id=agent_id,
+                                sender_name=str(updated["agent_name"]),
+                                kind="task_result",
+                                content=(
+                                    str(updated.get("result_text") or "")
+                                    or (
+                                        str(updated["agent_name"])
+                                        + " finished with status "
+                                        + terminal_status
+                                        + "."
+                                    )
+                                ),
+                                job_id=job_id,
+                            )
+                    except Exception:
+                        pass
+                events.emit(
+                    "background_job.completed",
+                    project_id=project_id,
+                    job_id=job_id,
+                    agent_id=agent_id,
+                    agent_name=updated["agent_name"],
+                    agent_role=updated["agent_role"],
+                    room_id=updated.get("room_id"),
+                    status=terminal_status,
+                    result_text=updated["result_text"],
+                    step_count=updated["step_count"],
+                    message=(
+                        f"{updated['agent_name']} finished: {terminal_status}."
+                    ),
+                )
         except Exception as exc:
             updated = self._update(
                 job_id,
@@ -438,10 +838,256 @@ class BackgroundJobSupervisor:
                 agent_id=agent_id,
                 agent_name=updated["agent_name"],
                 agent_role=updated["agent_role"],
+                room_id=updated.get("room_id"),
                 status="error",
                 error=updated["error"],
                 message=f"{updated['agent_name']} background job failed.",
             )
+
+    def stop_requested(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return bool(job and job.get("stop_requested"))
+
+    def _mark_stopped(
+        self,
+        job_id: str,
+    ) -> dict[str, object]:
+        updated = self._update(
+            job_id,
+            status="stopped",
+            completed_at=_now(),
+            current_phase="stopped",
+            current_action="Stopped by the user.",
+            current_next_step="",
+            stop_requested=True,
+        )
+        agent_id = str(updated.get("agent_id") or "")
+        try:
+            with SessionLocal() as db:
+                agent = db.get(AgentRecord, agent_id)
+                if agent is not None:
+                    agent.state = "idle"
+                    db.commit()
+        except Exception:
+            pass
+
+        room_id = str(updated.get("room_id") or "").strip()
+        if room_id:
+            try:
+                with SessionLocal() as room_db:
+                    append_room_message(
+                        room_db,
+                        room_id=room_id,
+                        sender_type="executive",
+                        sender_id="main-agent:" + str(updated["project_id"]),
+                        sender_name="Agent Man",
+                        kind="task_stopped",
+                        content=(
+                            str(updated["agent_name"])
+                            + " was stopped manually."
+                        ),
+                        job_id=job_id,
+                    )
+            except Exception:
+                pass
+
+        events.emit(
+            "background_job.stopped",
+            project_id=updated["project_id"],
+            room_id=updated.get("room_id"),
+            job_id=job_id,
+            agent_id=updated["agent_id"],
+            agent_name=updated["agent_name"],
+            agent_role=updated["agent_role"],
+            status="stopped",
+            current_phase="stopped",
+            current_action=updated["current_action"],
+            updated_at=updated["updated_at"],
+            message=str(updated["agent_name"]) + " stopped.",
+        )
+        events.emit(
+            "executive.activity",
+            project_id=updated["project_id"],
+            agent_id="main-agent:" + str(updated["project_id"]),
+            agent_name="Agent Man",
+            phase="stop",
+            status="stopped",
+            label=updated["agent_name"],
+            room_id=updated.get("room_id"),
+            message=str(updated["agent_name"]) + " was stopped by the user.",
+        )
+        return updated
+
+    def stop(
+        self,
+        job_id: str,
+    ) -> dict[str, object]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise LookupError("Background job not found")
+
+            status = str(job.get("status") or "")
+            if status in {
+                "completed",
+                "error",
+                "turn_limit",
+                "stopped",
+            }:
+                return dict(job)
+
+            job["stop_requested"] = True
+            future = self._futures.get(job_id)
+
+            if status in {"waiting_approval", "waiting_capability"}:
+                immediate = True
+            elif status == "queued" and future is not None and future.cancel():
+                immediate = True
+            else:
+                immediate = False
+                job.update(
+                    {
+                        "status": "stopping",
+                        "current_phase": "stopping",
+                        "current_action": (
+                            "Stop requested. Waiting for the current "
+                            "model or tool step to reach a safe boundary."
+                        ),
+                        "updated_at": _now(),
+                    }
+                )
+                snapshot = dict(job)
+
+        if immediate:
+            return self._mark_stopped(job_id)
+
+        _persist_agent_task(snapshot)
+        events.emit(
+            "background_job.stop_requested",
+            project_id=snapshot["project_id"],
+            room_id=snapshot.get("room_id"),
+            job_id=job_id,
+            agent_id=snapshot["agent_id"],
+            agent_name=snapshot["agent_name"],
+            agent_role=snapshot["agent_role"],
+            status="stopping",
+            current_phase="stopping",
+            current_action=snapshot["current_action"],
+            updated_at=snapshot["updated_at"],
+            message=(
+                str(snapshot["agent_name"])
+                + " will stop at the next safe execution boundary."
+            ),
+        )
+        return snapshot
+
+    def approve_and_resume(
+        self,
+        job_id: str,
+    ) -> dict[str, object]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise LookupError("Background job not found")
+            if str(job.get("status", "")) != "waiting_approval":
+                raise ValueError(
+                    "Only a job waiting for approval can be resumed"
+                )
+            agent_id = str(job.get("agent_id") or "")
+            if agent_id.startswith("workflow:"):
+                raise ValueError(
+                    "Workflow approval resume is not supported yet"
+                )
+
+            permission = str(
+                job.get("current_detail") or ""
+            ).strip()
+            allow_terminal = permission == "terminal.execute"
+            allow_delete = permission == "project.files.delete"
+            allow_network = permission == "network.internet"
+            allow_hardware = permission == "hardware.serial"
+            if not any(
+                (
+                    allow_terminal,
+                    allow_delete,
+                    allow_network,
+                    allow_hardware,
+                )
+            ):
+                raise ValueError(
+                    "Waiting job does not expose a resumable permission"
+                )
+
+            project_id = str(job["project_id"])
+            task = str(job["task"])
+            agent_name = str(job["agent_name"])
+            agent_role = str(job["agent_role"])
+            job.update(
+                {
+                    "status": "queued",
+                    "completed_at": None,
+                    "result_text": "",
+                    "error": "",
+                    "current_phase": "queued",
+                    "current_action": (
+                        "Approval received. Resuming the assigned task."
+                    ),
+                    "current_detail": permission,
+                    "current_next_step": "",
+                    "updated_at": _now(),
+                    "stop_requested": False,
+                }
+            )
+            self._futures[job_id] = self._executor.submit(
+                self._run_agent,
+                job_id,
+                project_id,
+                agent_id,
+                task,
+                allow_terminal,
+                allow_delete,
+                allow_network,
+                allow_hardware,
+            )
+            snapshot = dict(job)
+
+        _persist_agent_task(snapshot)
+        events.emit(
+            "background_job.resumed",
+            project_id=project_id,
+            job_id=job_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            room_id=snapshot.get("room_id"),
+            status="queued",
+            permission=permission,
+            current_phase="queued",
+            current_action=snapshot["current_action"],
+            current_tool=snapshot["current_tool"],
+            current_detail=permission,
+            current_next_step="",
+            updated_at=snapshot["updated_at"],
+            message=(
+                agent_name
+                + " received approval and is resuming the task."
+            ),
+        )
+        events.emit(
+            "executive.activity",
+            project_id=project_id,
+            agent_id="main-agent:" + project_id,
+            agent_name="Agent Man",
+            phase="approval",
+            status="approved",
+            label=agent_name,
+            message=(
+                agent_name
+                + " received approval and is resuming work."
+            ),
+        )
+        return snapshot
 
     def get(
         self,
@@ -492,11 +1138,17 @@ class BackgroundJobSupervisor:
             current_tool = str(
                 job.get("current_tool") or ""
             )[:160]
+            next_step = " ".join(
+                str(job.get("current_next_step") or "").split()
+            )[:500]
             lines.append(
                 "- "
                 + str(job["id"])
                 + ": "
                 + str(job["agent_name"])
+                + ((
+                    " room=" + str(job.get("room_id"))
+                ) if job.get("room_id") else "")
                 + " ("
                 + str(job["agent_role"])
                 + ") ["
@@ -508,6 +1160,7 @@ class BackgroundJobSupervisor:
                 + (f"; action={current_action}" if current_action else "")
                 + (f"; tool={current_tool}" if current_tool else "")
                 + (f"; detail={detail}" if detail else "")
+                + (f"; next={next_step}" if next_step else "")
                 + "; updated="
                 + str(job.get("updated_at") or job["created_at"])
             )

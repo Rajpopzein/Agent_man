@@ -30,10 +30,13 @@ export type VoiceSettings = {
 const STORAGE_KEY = "agent-man.voice.settings.v2";
 const SPEAK_EVENT = "agent-man:speak";
 
-export function requestAgentSpeech(text: string) {
+export function requestAgentSpeech(
+  text: string,
+  queue = true,
+) {
   window.dispatchEvent(
     new CustomEvent(SPEAK_EVENT, {
-      detail: { text },
+      detail: { text, queue },
     }),
   );
 }
@@ -163,6 +166,12 @@ export function useAgentVoice() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef =
     useRef<AudioBufferSourceNode | null>(null);
+  const speechQueueRef =
+    useRef<Promise<void>>(Promise.resolve());
+  const speechGenerationRef = useRef(0);
+  const browserSpeechCancelRef =
+    useRef<(() => void) | null>(null);
+  const browserPlaybackGenerationRef = useRef(0);
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -303,13 +312,25 @@ export function useAgentVoice() {
     }
   }, []);
 
-  const stop = useCallback(() => {
+  const stopPlayback = useCallback(() => {
+    browserPlaybackGenerationRef.current += 1;
+    browserSpeechCancelRef.current?.();
+    browserSpeechCancelRef.current = null;
     window.speechSynthesis.cancel();
     audioAbortRef.current?.abort();
     audioAbortRef.current = null;
     cleanupAudio();
     setSpeaking(false);
   }, [cleanupAudio]);
+
+  const stop = useCallback(() => {
+    // Invalidate every queued narration item from the previous interaction.
+    // Resetting only the active audio is not enough because already chained
+    // Promise callbacks would otherwise speak stale messages later.
+    speechGenerationRef.current += 1;
+    speechQueueRef.current = Promise.resolve();
+    stopPlayback();
+  }, [stopPlayback]);
 
   useEffect(
     () => () => {
@@ -325,15 +346,20 @@ export function useAgentVoice() {
   const speakBrowserAsync = useCallback(
     async (cleaned: string) => {
       const synth = window.speechSynthesis;
+      const playbackGeneration =
+        ++browserPlaybackGenerationRef.current;
 
       const speakOnce = (
         voice: SpeechSynthesisVoice | null,
-      ) =>
-        new Promise<boolean>((resolve) => {
+      ) => {
+        return new Promise<boolean>((resolve) => {
           let started = false;
           let settled = false;
+          let startTimer: number | null = null;
+          let speakTimer: number | null = null;
           const utterance =
             new SpeechSynthesisUtterance(cleaned);
+
           utterance.rate = settings.rate;
           utterance.pitch = settings.pitch;
           utterance.volume = Math.max(
@@ -350,12 +376,35 @@ export function useAgentVoice() {
           const finish = (ok: boolean) => {
             if (settled) return;
             settled = true;
-            window.clearTimeout(startTimer);
+            if (startTimer !== null) {
+              window.clearTimeout(startTimer);
+            }
+            if (speakTimer !== null) {
+              window.clearTimeout(speakTimer);
+            }
+            if (
+              browserSpeechCancelRef.current === cancelThisSpeech
+            ) {
+              browserSpeechCancelRef.current = null;
+            }
             setSpeaking(false);
             resolve(ok);
           };
 
+          const cancelThisSpeech = () => {
+            finish(false);
+          };
+          browserSpeechCancelRef.current = cancelThisSpeech;
+
           utterance.onstart = () => {
+            if (
+              playbackGeneration !==
+              browserPlaybackGenerationRef.current
+            ) {
+              synth.cancel();
+              finish(false);
+              return;
+            }
             started = true;
             setSpeaking(true);
             setAudioStatus(
@@ -376,7 +425,7 @@ export function useAgentVoice() {
             finish(false);
           };
 
-          const startTimer = window.setTimeout(() => {
+          startTimer = window.setTimeout(() => {
             if (!started) {
               synth.cancel();
               setAudioStatus(
@@ -386,14 +435,29 @@ export function useAgentVoice() {
             }
           }, 1800);
 
-          window.setTimeout(() => {
+          speakTimer = window.setTimeout(() => {
+            if (
+              settled ||
+              playbackGeneration !==
+              browserPlaybackGenerationRef.current
+            ) {
+              finish(false);
+              return;
+            }
             synth.cancel();
             synth.resume();
             synth.speak(utterance);
           }, 40);
         });
+      };
 
       const first = await speakOnce(selectedVoice);
+      if (
+        playbackGeneration !==
+        browserPlaybackGenerationRef.current
+      ) {
+        return;
+      }
       if (!first && selectedVoice) {
         await speakOnce(null);
       }
@@ -495,7 +559,7 @@ export function useAgentVoice() {
 
   const speakElevenAsync = useCallback(
     async (cleaned: string) => {
-      stop();
+      stopPlayback();
       if (
         !elevenConfig.has_secret ||
         !elevenConfig.voice_id
@@ -561,7 +625,7 @@ export function useAgentVoice() {
       settings.volume,
       playElevenResponse,
       speakBrowserAsync,
-      stop,
+      stopPlayback,
     ],
   );
 
@@ -582,7 +646,7 @@ export function useAgentVoice() {
         return;
       }
 
-      stop();
+      stopPlayback();
       await speakBrowserAsync(cleaned);
     },
     [
@@ -591,24 +655,52 @@ export function useAgentVoice() {
       settings.engine,
       speakBrowserAsync,
       speakElevenAsync,
-      stop,
+      stopPlayback,
     ],
+  );
+
+  const queueSpeakAsync = useCallback(
+    (text: string, force = false) => {
+      const generation = speechGenerationRef.current;
+      const queued = speechQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (generation !== speechGenerationRef.current) {
+            return;
+          }
+          await speakAsync(text, force);
+        });
+      speechQueueRef.current = queued.catch(
+        () => undefined,
+      );
+      return queued;
+    },
+    [speakAsync],
   );
 
   const speak = useCallback(
     (text: string, force = false) => {
+      // Non-queued speech is an interruption: discard older narration first.
+      stop();
       void speakAsync(text, force);
     },
-    [speakAsync],
+    [speakAsync, stop],
   );
 
   useEffect(() => {
     function onSpeak(event: Event) {
       const detail = (
-        event as CustomEvent<{ text?: string }>
+        event as CustomEvent<{
+          text?: string;
+          queue?: boolean;
+        }>
       ).detail;
       if (detail?.text) {
-        speak(detail.text);
+        if (detail.queue === false) {
+          speak(detail.text);
+        } else {
+          void queueSpeakAsync(detail.text);
+        }
       }
     }
 
@@ -621,7 +713,7 @@ export function useAgentVoice() {
         SPEAK_EVENT,
         onSpeak,
       );
-  }, [speak]);
+  }, [queueSpeakAsync, speak]);
 
   const refreshElevenVoices = useCallback(
     async () => {
@@ -770,6 +862,7 @@ export function useAgentVoice() {
     update,
     speak,
     speakAsync,
+    queueSpeakAsync,
     stop,
     testVoice,
     resetSignature,

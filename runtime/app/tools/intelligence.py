@@ -56,6 +56,92 @@ class IntentRule:
 
 RULES: tuple[IntentRule, ...] = (
     IntentRule(
+        intent="extension_management",
+        terms=(
+            "skill.md",
+            "skill md",
+            "create skill",
+            "design skill",
+            "assign skill",
+            "reusable skill",
+            "connector",
+            "groww",
+            "integration",
+            "external service",
+        ),
+        sequence=(
+            "api_list_skills",
+            "api_create_skill",
+            "api_assign_skill",
+            "api_list_connectors",
+            "api_create_connector",
+        ),
+        reason=(
+            "The objective requires managing reusable skills or external "
+            "connector definitions through the Extensions runtime."
+        ),
+    ),
+    IntentRule(
+        intent="agent_management",
+        terms=(
+            "worker agent",
+            "developer agent",
+            "tester agent",
+            "list agents",
+            "show agents",
+            "inspect agent",
+            "agent context",
+            "agent model",
+            "agent role",
+            "agent tools",
+            "create agent",
+            "new agent",
+            "update agent",
+            "modify agent",
+            "change developer",
+            "change tester",
+            "delete agent",
+            "remove agent",
+            "assign tool",
+            "revoke tool",
+            "ai connection",
+        ),
+        sequence=(
+            "api_list_agents",
+            "api_get_agent",
+            "api_list_ai_connections",
+            "api_update_agent",
+            "api_set_agent_tool",
+            "api_create_agent",
+            "api_delete_agent",
+        ),
+        reason=(
+            "The objective requires reading or changing Agent Man worker "
+            "configuration through the runtime Agent API."
+        ),
+    ),
+    IntentRule(
+        intent="android_adb",
+        terms=(
+            "adb",
+            "android debug bridge",
+            "android device",
+            "android tablet",
+            "usb debugging",
+            "platform tools",
+            "platform-tools",
+        ),
+        sequence=(
+            "adb_status",
+            "adb_devices",
+        ),
+        reason=(
+            "The objective requires local Android Debug Bridge access. "
+            "Use Agent Man's portable ADB capability instead of a system "
+            "package manager or administrator-level installation."
+        ),
+    ),
+    IntentRule(
         intent="serial_hardware",
         terms=(
             "esp32",
@@ -298,6 +384,67 @@ def _specialize_sequence(
     lowered: str,
     sequence: tuple[str, ...],
 ) -> tuple[str, ...]:
+    if intent == "extension_management":
+        if any(term in lowered for term in ("create skill", "design skill", "skill.md", "skill md")):
+            return ("api_list_skills", "api_create_skill", "api_assign_skill")
+        if "assign skill" in lowered:
+            return ("api_list_agents", "api_list_skills", "api_assign_skill")
+        if any(term in lowered for term in ("connector", "groww", "integration", "external service")):
+            return ("api_list_connectors", "api_create_connector")
+        return sequence
+
+    if intent == "agent_management":
+        if any(term in lowered for term in ("create agent", "new agent")):
+            return (
+                "api_list_ai_connections",
+                "api_create_agent",
+            )
+        if any(term in lowered for term in ("delete agent", "remove agent")):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_delete_agent",
+            )
+        if any(term in lowered for term in ("assign tool", "revoke tool", "agent tools")):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_set_agent_tool",
+            )
+        if any(
+            term in lowered
+            for term in (
+                "update agent",
+                "modify agent",
+                "change developer",
+                "change tester",
+                "agent context",
+                "agent model",
+                "agent role",
+            )
+        ):
+            return (
+                "api_list_agents",
+                "api_get_agent",
+                "api_list_ai_connections",
+                "api_update_agent",
+            )
+        return ("api_list_agents", "api_get_agent")
+
+    if intent == "android_adb":
+        if any(
+            term in lowered
+            for term in (
+                "install adb",
+                "install platform tools",
+                "install platform-tools",
+                "setup adb",
+                "set up adb",
+            )
+        ):
+            return ("adb_status", "adb_install", "adb_devices")
+        return ("adb_status", "adb_devices")
+
     if intent != "serial_hardware":
         return sequence
 
@@ -336,6 +483,9 @@ def _specialize_sequence(
 
 
 SAFE_PREFLIGHT_BY_INTENT: dict[str, str] = {
+    "extension_management": "api_list_skills",
+    "agent_management": "api_list_agents",
+    "android_adb": "adb_status",
     "serial_hardware": "list_serial_ports",
 }
 

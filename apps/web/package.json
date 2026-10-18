@@ -17,8 +17,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "lucide-react": "latest",
-    "three": "latest",
-    "@types/three": "latest"
+    "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {}
 }
