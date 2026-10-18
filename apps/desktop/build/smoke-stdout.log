@@ -1,0 +1,6 @@
+Agent Man: http://127.0.0.1:63956
+Keep this window open. Press Ctrl+C to stop Agent Man.
+INFO:     127.0.0.1:63959 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63959 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63959 - "GET /assets/index-CjRCXVFd.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63959 - "GET /api/projects HTTP/1.1" 200 OK

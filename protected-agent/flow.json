@@ -1,0 +1,10 @@
+{
+  "flow_name": "user_registration_flow",
+  "steps": [
+    {
+      "step": 1,
+      "name": "Login",
+      "component": "Login.jsx"
+    }
+  ]
+}

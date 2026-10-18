@@ -1,0 +1,20 @@
+{
+  "core": {
+    "model": "test-model",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "system_prompt": "You are a helpful assistant."
+  },
+  "agents": {
+    "architect": {
+      "model": "test-model",
+      "temperature": 0.5,
+      "system_prompt": "You are the Architect agent. Focus on design and planning."
+    },
+    "developer": {
+      "model": "test-model",
+      "temperature": 0.2,
+      "system_prompt": "You are the Developer agent. Focus on writing and editing code."
+    }
+  }
+}
