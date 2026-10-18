@@ -3,6 +3,7 @@ from typing import Any
 
 from app.core.permissions import Permission, PermissionDenied, require
 from app.devices.serial import serial_devices
+from app.devices.adb import adb_manager
 from app.persistence.database import SessionLocal
 from app.tools.extensions_api import (
     assign_skill as api_assign_skill,
@@ -72,6 +73,9 @@ TOOL_DEFINITIONS = [
     ToolDefinition("read_process_output", "Read recent output from a managed process.", "runtime", "read", "1.0.0", {"process_id": "managed process id"}),
     ToolDefinition("stop_process", "Stop a managed background process.", "runtime", "execute", "1.0.0", {"process_id": "managed process id"}),
     ToolDefinition("http_get", "Fetch textual content from a public internet URL. Local/private network destinations are blocked.", "network", "network", "1.0.0", {"url": "public http/https URL"}),
+    ToolDefinition("adb_status", "Check whether ADB is available. Agent Man-managed ADB lives in the user data directory and never requires administrator installation.", "hardware", "read", "1.0.0", {}),
+    ToolDefinition("adb_install", "Install official Google Android Platform Tools into Agent Man's user data directory without administrator privileges, PATH changes, package managers, or a system-wide installer.", "hardware", "write", "1.0.0", {}),
+    ToolDefinition("adb_devices", "List Android devices through ADB. If ADB is missing, Agent Man automatically installs official Platform Tools into its user data directory first.", "hardware", "hardware", "1.0.0", {}),
     ToolDefinition("list_serial_ports", "List serial/COM ports detected by the local operating system, including USB metadata when available.", "hardware", "read", "1.0.0", {}),
     ToolDefinition("serial_open", "Open an enumerated serial/COM port and create a managed hardware session.", "hardware", "hardware", "1.0.0", {"device": "enumerated device such as COM3", "baudrate": "optional baudrate, default 115200", "timeout_ms": "optional read timeout up to 2000 ms", "write_timeout_ms": "optional write timeout up to 2000 ms"}),
     ToolDefinition("serial_list_sessions", "List serial sessions opened by Agent Man.", "hardware", "read", "1.0.0", {}),
@@ -298,6 +302,13 @@ class ToolRegistry:
                 str(arguments["url"]),
                 approvals,
             )
+        if name == "adb_status":
+            return adb_manager.status()
+        if name == "adb_install":
+            return adb_manager.ensure_installed()
+        if name == "adb_devices":
+            require(Permission.ANDROID_ACCESS, approvals)
+            return adb_manager.devices()
         if name == "list_serial_ports":
             return serial_devices.list_ports()
         if name == "serial_open":

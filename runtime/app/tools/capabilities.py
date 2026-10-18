@@ -5,6 +5,9 @@ from app.tools.service import allowed_tool_names
 CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "internet": ("http_get",),
     "web": ("http_get",),
+    "adb": ("adb_status", "adb_install", "adb_devices"),
+    "android": ("adb_status", "adb_install", "adb_devices"),
+    "android_device": ("adb_status", "adb_install", "adb_devices"),
     "serial": (
         "list_serial_ports",
         "serial_open",
@@ -57,6 +60,29 @@ def detect_missing_capability(text: str) -> str | None:
         and any(term in lowered for term in missing_terms)
     ):
         return "internet"
+
+    adb_terms = (
+        "adb",
+        "android debug bridge",
+        "android device",
+        "usb debugging",
+        "platform tools",
+        "platform-tools",
+    )
+    adb_missing_terms = missing_terms + (
+        "couldn't install",
+        "could not install",
+        "can't install",
+        "cannot install",
+        "unable to install",
+        "administrator privileges",
+        "admin privileges",
+    )
+    if (
+        any(term in lowered for term in adb_terms)
+        and any(term in lowered for term in adb_missing_terms)
+    ):
+        return "adb"
 
     hardware_terms = (
         "serial port",

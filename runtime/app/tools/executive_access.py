@@ -23,6 +23,7 @@ _APPROVAL_GATE_BY_TOOL: dict[str, tuple[str, Permission]] = {
     "start_process": ("exec", Permission.TERMINAL_EXECUTE),
     "stop_process": ("exec", Permission.TERMINAL_EXECUTE),
     "http_get": ("net", Permission.NETWORK_ACCESS),
+    "adb_devices": ("hw", Permission.ANDROID_ACCESS),
     "serial_open": ("hw", Permission.SERIAL_ACCESS),
     "serial_read": ("hw", Permission.SERIAL_ACCESS),
     "serial_write": ("hw", Permission.SERIAL_ACCESS),

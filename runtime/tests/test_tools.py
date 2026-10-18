@@ -73,6 +73,9 @@ def test_planned_builtin_tools_are_registered():
         "read_process_output",
         "stop_process",
         "http_get",
+        "adb_status",
+        "adb_install",
+        "adb_devices",
         "list_serial_ports",
         "serial_open",
         "serial_list_sessions",
@@ -270,3 +273,16 @@ def test_workers_cannot_be_given_executive_agent_api_tools():
             allowed_names={"api_set_agent_tool"},
         )
 
+
+
+
+def test_adb_devices_requires_android_hardware_approval(tmp_path: Path):
+    with pytest.raises(ApprovalRequired) as exc:
+        tools.execute(
+            name="adb_devices",
+            arguments={},
+            workspace_path=str(tmp_path),
+            approvals=set(),
+            allowed_names={"adb_devices"},
+        )
+    assert exc.value.permission.value == "hardware.android"
