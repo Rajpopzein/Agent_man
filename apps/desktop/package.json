@@ -1,0 +1,12 @@
+{
+  "name": "agent-man-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
