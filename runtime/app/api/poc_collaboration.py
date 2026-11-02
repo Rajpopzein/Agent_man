@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -28,7 +29,7 @@ def _now() -> str:
 
 
 class MessageInput(BaseModel):
-    sender: str = Field(pattern="^(user|developer|tester)$")
+    sender: Literal["user"] = "user"
     recipient: str = Field(pattern="^(developer|tester)$")
     content: str = Field(min_length=1, max_length=4000)
 
